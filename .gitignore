@@ -17,6 +17,9 @@ env/
 # ملفات SQLite في وضع WAL (ينشأها الإصلاح في app/database.py)
 *.db-wal
 *.db-shm
+# أقفال الترحيل والقيادة متعدد العمّال (main.py / app/database.py)
+*.leader
+*.migrate.lock
 
 # ملفات مرفوعة والنسخ الاحتياطية
 uploads/

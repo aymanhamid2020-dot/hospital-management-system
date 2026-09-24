@@ -2,6 +2,8 @@ from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
+import time
+from contextlib import contextmanager
 
 from app.config import DATABASE_URL
 
@@ -163,6 +165,150 @@ def ensure_columns():
             db.commit()
         finally:
             db.close()
+
+
+# فهارس للأعمدة الأكثر فلترة/ترتيبًا — تُنشأ ما لم تكن موجودة (idempotent)
+INDEXES = {
+    "appointments": ["appointment_date", "patient_id", "doctor_id", "status"],
+    "invoices": ["patient_id", "status", "appointment_id"],
+    "medical_records": ["patient_id", "doctor_id"],
+    "attachments": ["patient_id", "record_id"],
+    "notifications": ["is_read", "appointment_id", "patient_id"],
+    "lab_orders": ["patient_id", "status"],
+    "dispenses": ["patient_id", "medication_id", "created_at"],
+    "stock_movements": ["medication_id", "created_at"],
+    "payroll": ["staff_id", "period"],
+    "audit_logs": ["created_at", "username"],
+    "patients": ["national_id"],
+}
+
+
+def ensure_indexes():
+    """إنشاء الفهارس الناقصة على الجداول الساخنة (CREATE INDEX IF NOT EXISTS).
+
+    يعمل على SQLite وPostgreSQL معًا، ويتجاوز أي جدول/عمود غير موجود
+    بدل أن يفشل الإقلاع — idempotent في كل بدء تشغيل.
+    """
+    insp = inspect(engine)
+    tables = set(insp.get_table_names())
+    with engine.begin() as conn:
+        for table, columns in INDEXES.items():
+            if table not in tables:
+                continue
+            have = {c["name"] for c in insp.get_columns(table)}
+            for col in columns:
+                if col not in have:
+                    continue
+                conn.execute(text(
+                    f"CREATE INDEX IF NOT EXISTS ix_{table}_{col} "
+                    f"ON {table} ({col})"))
+
+
+@contextmanager
+def migrations_lock():
+    """قفل يمنع تصادم الترحيل بين عمّال uvicorn المتعددين (--workers).
+
+    بدونه ينافس كل عامل على create_all/ensure_columns/ensure_indexes،
+    ويفشل أحدهم على PostgreSQL بـ«CREATE TYPE ... already exists» فيفشل
+    إقلاعه ويُسقط الأب كله (حدث فعليًا في مكدّس الإنتاج).
+    — PostgreSQL: advisory lock على الجلسة (يُ解放 تلقائيًا عند موت العملية).
+    — SQLite: ملف قفل ذرّي (O_EXCL) مع سرقة بعد انتظار120 ثانية.
+    """
+    if _IS_SQLITE:
+        lock_path = (engine.url.database or ":memory:") + ".migrate.lock"
+        deadline = time.time() + 120
+        while True:
+            try:
+                fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, str(os.getpid()).encode())
+                os.close(fd)
+                break
+            except FileExistsError:
+                if time.time() > deadline:
+                    # قفل مهجور (عملية ماتت أثناء الترحيل) — اسحبه وأعد المحاولة
+                    try:
+                        os.remove(lock_path)
+                    except OSError:
+                        pass
+                    try:
+                        fd = os.open(
+                            lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                        os.close(fd)
+                        break
+                    except FileExistsError:
+                        pass
+                time.sleep(0.2)
+        try:
+            yield
+        finally:
+            try:
+                os.remove(lock_path)
+            except OSError:
+                pass
+    else:
+        conn = engine.connect()
+        try:
+            conn.execute(text("SELECT pg_advisory_lock(8152001)"))
+            try:
+                yield
+            finally:
+                conn.execute(text("SELECT pg_advisory_unlock(8152001)"))
+        finally:
+            conn.close()
+
+
+def acquire_leader_lease():
+    """تأجير قيادة المهام الخلفية لعامل واحد — يرجع دالة الإرجاع أو None.
+
+    إن عادت دالة: هذا العامل هو «القائد» ويبدأ حلقات التذكير/النسخ؛
+    None = تابع (لا يشغّل الحلقات — تجنب التكرار مع عدة عمّال).
+    — PostgreSQL: pg_try_advisory_lock على جلسة مثبتة (آمن مع إعادة التشغيل).
+    — SQLite: ملف قفل ذرّي مع سرقة القفل الأقدم من6 ساعات (best-effort).
+    """
+    if _IS_SQLITE:
+        lock_path = (engine.url.database or ":memory:") + ".leader"
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode())
+            os.close(fd)
+        except FileExistsError:
+            try:
+                if time.time() - os.path.getmtime(lock_path) > 6 * 3600:
+                    os.remove(lock_path)
+                    fd = os.open(
+                        lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                    os.close(fd)
+                else:
+                    return None
+            except (OSError, FileExistsError):
+                return None
+
+        def _release():
+            try:
+                os.remove(lock_path)
+            except OSError:
+                pass
+
+        return _release
+
+    if "postgres" not in DATABASE_URL:
+        return None  # محرك آخر: لا قفل — الحلقات تعمل كBehaviour اليوم
+
+    conn = engine.connect()
+    got = conn.execute(text("SELECT pg_try_advisory_lock(8152002)")).scalar()
+    if not got:
+        conn.close()
+        return None
+
+    def _release():
+        try:
+            conn.execute(text("SELECT pg_advisory_unlock(8152002)"))
+        except Exception:  # noqa: BLE001 — الجلسة تُغلق على أي حال
+            pass
+        finally:
+            conn.close()
+
+    return _release
 
 
 def get_db():

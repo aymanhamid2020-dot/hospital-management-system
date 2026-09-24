@@ -32,19 +32,29 @@ def seed_admin():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # إنشاء الجداول + ترحيل الأعمدة الجديدة عند بدء التشغيل
-    from app.database import ensure_columns
-    Base.metadata.create_all(bind=engine)
-    ensure_columns()
-    seed_admin()
+    # ترحيل آمن متعدد العمّال: قفل يمنع تصادم create_all/ensure_* بين
+    # عمال uvicorn (--workers) — بدونه يفشل CREATE TYPE على PG وينتهي الأب
+    from app.database import (ensure_columns, ensure_indexes, migrations_lock,
+                              acquire_leader_lease)
+    with migrations_lock():
+        Base.metadata.create_all(bind=engine)
+        ensure_columns()
+        ensure_indexes()
+        seed_admin()
 
-    # مهمة التذكير والنسخ التلقائي في الخلفية
+    # مهمة التذكير والنسخ التلقائي — لعامل واحد فقط (قفل قيادة)
     import asyncio
     from app.tasks import backup_loop, reminder_loop
-    task = asyncio.create_task(reminder_loop())
-    backup_task = asyncio.create_task(backup_loop())
+    release_leader = acquire_leader_lease()
+    task = asyncio.create_task(reminder_loop()) if release_leader else None
+    backup_task = asyncio.create_task(backup_loop()) if release_leader else None
     yield
-    task.cancel()
-    backup_task.cancel()
+    if task:
+        task.cancel()
+    if backup_task:
+        backup_task.cancel()
+    if release_leader:
+        release_leader()
 
 # قراءة إعدادات CORS من المتغيرات البيئية
 cors_origins = os.getenv("CORS_ORIGINS", "").split(",") if os.getenv("CORS_ORIGINS") else ["*"]
