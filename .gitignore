@@ -41,3 +41,5 @@ outbox/
 dist/
 build/
 *.spec
+# سكربت PyInstaller مطلوب لبناء EXE بعد الـ clone — يبقى متتبَّعًا
+!HospitalMS.spec
