@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🎓 جولة تفاعلية — الصيدلية والمختبر | نظام إدارة المستشفيات</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", Tahoma, Arial, sans-serif; background: #f4f6fa; color: #1e293b; line-height: 1.85; }
+  header.hero { background: linear-gradient(135deg, #2c7be5, #5a4fcf); color: #fff; padding: 42px 20px; text-align: center; }
+  header.hero h1 { font-size: 30px; margin-bottom: 8px; }
+  header.hero p { opacity: .92; font-size: 16px; }
+  nav.toc { background: #fff; border-bottom: 1px solid #e2e8f0; padding: 12px 16px; text-align: center; position: sticky; top: 0; z-index: 50; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+  nav.toc a { display: inline-block; margin: 4px 7px; padding: 6px 14px; border-radius: 20px; background: #eef4ff; color: #2c7be5; text-decoration: none; font-size: 14px; font-weight: 600; }
+  nav.toc a:hover { background: #2c7be5; color: #fff; }
+  main { max-width: 1100px; margin: 30px auto 0; padding: 0 18px 50px; }
+  section.step { background: #fff; border-radius: 14px; box-shadow: 0 4px 16px rgba(0,0,0,.06); padding: 28px 30px; margin-bottom: 34px; }
+  h2 { font-size: 23px; margin-bottom: 12px; color: #0f172a; }
+  h2 .n { display: inline-block; background: #2c7be5; color: #fff; width: 40px; height: 40px; border-radius: 50%; text-align: center; line-height: 40px; font-size: 18px; margin-left: 10px; vertical-align: middle; }
+  h3 { font-size: 17px; margin: 18px 0 8px; color: #2c7be5; }
+  p, li { margin-bottom: 9px; font-size: 16px; }
+  ul, ol { padding-right: 24px; margin-bottom: 8px; }
+  img.shot { width: 100%; border: 1px solid #dbe3f0; border-radius: 10px; margin-top: 14px; box-shadow: 0 8px 22px rgba(0,0,0,.12); display: block; }
+  .cap { text-align: center; color: #64748b; font-size: 14px; margin-top: 8px; }
+  .badge { display: inline-block; padding: 2px 11px; border-radius: 13px; font-size: 13px; font-weight: 600; margin: 0 3px 6px 0; }
+  .b-ui   { background: #fef9c3; color: #a16207; }
+  .b-api  { background: #dcfce7; color: #15803d; }
+  .b-task { background: #e0f2fe; color: #0369a1; }
+  code { background: #f1f5f9; padding: 2px 7px; border-radius: 6px; font-size: 14px; direction: ltr; display: inline-block; unicode-bidi: embed; }
+  .note { background: #fff7ed; border-right: 4px solid #f97316; padding: 12px 16px; border-radius: 8px; margin-top: 14px; font-size: 15px; }
+  .tip  { background: #f0fdf4; border-right: 4px solid #22c55e; padding: 12px 16px; border-radius: 8px; margin-top: 14px; font-size: 15px; }
+  table.roles { width: 100%; border-collapse: collapse; margin: 10px 0 4px; }
+  table.roles th, table.roles td { border: 1px solid #e2e8f0; padding: 8px 12px; text-align: right; font-size: 15px; }
+  table.roles th { background: #f8fafc; font-weight: 700; }
+  footer { text-align: center; padding: 30px 16px 40px; color: #64748b; font-size: 14px; }
+  footer a { color: #2c7be5; text-decoration: none; font-weight: 600; margin: 0 8px; }
+  @media (max-width: 700px) { section.step { padding: 18px 16px; } header.hero h1 { font-size: 23px; } }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <h1>🎓 جولة تفاعلية في نظام إدارة المستشفيات</h1>
+  <p>ستّ شاشات حقيقية باللقطات الحيّة — من تسجيل الدخول إلى تنبيه الوصفات المعلّقة ⏳ وملصقات الباركود 🏷️ وورقة نتيجة المختبر 🖨️</p>
+</header>
+
+<nav class="toc">
+  <a href="#s1">1️⃣ الدخول</a>
+  <a href="#s2">2️⃣ لوحة التحكم</a>
+  <a href="#s3">3️⃣ وصفات معلّقة ⏳</a>
+  <a href="#s4">4️⃣ ملصقات الباركود 🏷️</a>
+  <a href="#s5">5️⃣ ورقة النتيجة 🖨️</a>
+  <a href="#s6">6️⃣ الإشعارات 🔔</a>
+</nav>
+
+<main>
+
+  <!-- ============ 1 ============ -->
+  <section class="step" id="s1">
+    <h2><span class="n">1</span> البداية: تسجيل الدخول 🔐</h2>
+    <p>افتح <code>/ui</code> في المتصفح (أو زر «🖥️ فتح لوحة التحكم» في الصفحة الرئيسية). الشاشة الأولى
+       بطاقة دخول بسيطة على تدرّج أزرق — الحسابات الافتراضية مكتوبة أسفلها مباشرة:</p>
+    <table class="roles">
+      <tr><th>الدور</th><th>اسم المستخدم</th><th>كلمة المرور</th><th>ما يراه</th></tr>
+      <tr><td>👨‍💼 مدير</td><td><code>admin</code></td><td><code>admin123</code></td><td>كل النظام — بما فيها المخزون وسجل التدقيق</td></tr>
+      <tr><td>🩺 طبيب</td><td><code>drsara</code></td><td><code>sara12345</code></td><td>مرضاه وسجلاتهم وطلبات مختبرهم ووصفاتهم</td></tr>
+      <tr><td>🧑‍💼 موظف استقبال</td><td><code>reception1</code></td><td><code>rec12345</code></td><td>المرضى والمواعيد والصرف — بلا إعدادات</td></tr>
+    </table>
+    <p>زر <b>🌐 EN</b> يبدّل الواجهة والوثائق PDF كلها بين العربية والإنجليزية. المصادقة JWT
+       — كل بعدها محميّ بالترويسة <code>Authorization: Bearer …</code> (بلا توكن ← <b>401</b> لكل المسارات).</p>
+    <img class="shot" src="screenshots/tour/01-login.png" alt="شاشة تسجيل الدخول">
+    <div class="cap">شاشة الدخول — الحسابات الثلاثة ظاهرة جاهزة</div>
+    <div class="tip">💡 جرّب أولًا: افتح الصفحة في نافذة خاصّة (Incognito) لترى شاشة الدخول بدل الدخول التلقائي.</div>
+  </section>
+
+  <!-- ============ 2 ============ -->
+  <section class="step" id="s2">
+    <h2><span class="n">2</span> لوحة التحكم 📊</h2>
+    <p>بعد الدخول مباشرة تظهر <b>لوحة التحكم</b>: بطاقات إحصائية حيّة (مرضى، أطباء، مواعيد اليوم
+       والملغاة، الأسرّة المشغولة…) + رسم «توزيع المواعيد حسب الحالة» + زر تحميل تقرير PDF.</p>
+    <ul>
+      <li>🔔 <b>الجرس</b> أعلى الشريط: عدد غير المقروءات (يحمرّ عند وجود جديد) ويتحدّث كل 30 ثانية — انقره للانتقال لصفحة الإشعارات.</li>
+      <li>🧭 <b>الشريط الجانبي</b>: 20 شاشة — المرضى، المواعيد، <b>المختبر</b> 🔬، <b>الصيدلية</b> 💊، <b>المخزون</b> 📦، المبيعات، الحسابات، سجل التدقيق…</li>
+      <li>العنوان يسار الشريط العلوي يغيّر حسب الشاشة الحالية.</li>
+    </ul>
+    <img class="shot" src="screenshots/tour/02-dashboard.png" alt="لوحة التحكم">
+    <div class="cap">لوحة التحكم — نظرة عامة على النظام كلّه</div>
+  </section>
+
+  <!-- ============ 3 ============ -->
+  <section class="step" id="s3">
+    <h2><span class="n">3</span> ⏳ تنبيه الوصفات المعلّقة (جديد)</h2>
+    <span class="badge b-task">مهمة خلفية</span><span class="badge b-api">API</span><span class="badge b-ui">واجهة</span>
+    <p>أي وصفة <code>PENDING</code> لم تُصرف منذ أكثر من <b>24 ساعة</b> (الحدّ <code>STALE_RX_HOURS</code> —
+       و<code>0</code> يُعطل الميزة) تتحوّل إلى تنبيه <b>يُنشأ مرة واحدة فقط</b> — لا تتكرر مع كل دورة
+       (المنع عبر <code>Notification.prescription_id</code>).</p>
+    <h3>أين تراها؟ ثلاث أماكن:</h3>
+    <ol>
+      <li><b>بطاقة الصيدلية</b> أعلى شاشة 💊: «⏳ وصفات معلّقة منذ أكثر من 24 ساعة (1)» — جدول صغير
+          عمر الوصفة بالساعات + أزرار <b>🖨️ طباعة</b> و<b>💊 صرف</b> و<b>إلغاء</b> وزر «عرض المعلّقات»
+          الذي ينقلك لفلترها في الجدول الرئيسي.</li>
+      <li><b>الجرس 🔔</b>: رقم الإشعار الأصفر (نوع <code>rx_stale</code>، أيقونة ⏳).</li>
+      <li><b>صفحة الإشعارات</b>: صف «وصفة معلّقة» يشرح: رقم الوصفة، المريض، عدد الساعات، و«بانتظار الصرف».</li>
+    </ol>
+    <img class="shot" src="screenshots/tour/03-pharmacy.png" alt="شاشة الصيدلية ببطاقة الوصفات المعلّقة">
+    <div class="cap">شاشة الصيدلية — البطاقة المعلّقة (⚠️ وصفة #9 بعمر 51 ساعة) أسفل الإحصاءات مباشرة</div>
+    <div class="note">🔎 في اللقطة: الوصفة #9 لمريض «صيدل R42589» عند «طبيب مالك» بعمر <b>51 ساعة</b> —
+       أزرارها الثلاثة تعمل فورًا: الطباعة تفتح وصفة PDF (عربي/إنجليزي)، والصرف يخصم المخزون ذرّيًا
+       (كل البنود أو لا شيء)، والإلغاء يغلقها نهائيًا.</div>
+  </section>
+
+  <!-- ============ 4 ============ -->
+  <section class="step" id="s4">
+    <h2><span class="n">4</span> 🏷️ ملصقات باركود PDF (جديد)</h2>
+    <span class="badge b-api">GET /inventory/labels</span><span class="badge b-ui">واجهة</span>
+    <p>نقطة واحدة تُخرج <b>ملصقات جاهزة للطباعة</b> لكل دواء: اسم + رمز + سعر + <b>بَركود Code39</b>
+       أسفله (مولّده مدمّج في الكود — بلا تبعيات ولا خطوط خارجية). الورقة A4 بشبكة <b>3×7 = 21 ملصقًا</b>.</p>
+    <h3>زرار في الواجهة:</h3>
+    <ul>
+      <li>📦 شريط المخزون: <b>«🏷️ ملصقات الكل»</b> + زر <b>«🏷️ ملصق»</b> بجانب كل صف.</li>
+      <li>💊 شريط الصيدلية: <b>«🏷️ ملصقات الكل»</b> أيضًا — ولكل دواء زر «🏷️ ملصق» داخل صفه.</li>
+      <li>التنزيل باسم <code>med_labels.pdf</code> (أو <code>label_{code}.pdf</code> لملصق واحد).</li>
+    </ul>
+    <h3>قواعد الحماية (جرّبها من Swagger):</h3>
+    <ul>
+      <li><b>admin فقط</b> ← غيره <b>403</b>، بلا توكن <b>401</b>.</li>
+      <li><code>?ids=</code> فارغة ⇒ كل الأدوية · غير رقمية <code>ids=abc</code> ⇒ <b>400</b>
+          «ids يجب أن تكون أرقامًا مفصولة بفواصل (مثال: 1,2,3)».</li>
+      <li>معرّف مجهول ⇒ <b>404</b> «لا يوجد دواء بالمعرف…» · لا توجد أدوية أصلًا ⇒ <b>404</b>
+          «لا توجد أدوية لطباعة ملصقاتها».</li>
+    </ul>
+    <img class="shot" src="screenshots/tour/04-inventory.png" alt="شاشة المخزون بأزرار الملصقات">
+    <div class="cap">شاشة المخزون — «🏷️ ملصقات الكل» في الشريط و«🏷️ ملصق» في كل صف (جنبًا إلى جنب مع توريد/جرد/خصم)</div>
+    <div class="tip">💡 الملصق يُطبع بالضبط مقاسه: افتح PDF ← طباعة ← «حجم حقيقي / Fit 100%» لتطابق القصّات.</div>
+  </section>
+
+  <!-- ============ 5 ============ -->
+  <section class="step" id="s5">
+    <h2><span class="n">5</span> 🖨️ ورقة نتيجة المختبر PDF (جديد)</h2>
+    <span class="badge b-api">GET /lab-orders/{id}/pdf</span><span class="badge b-ui">واجهة</span>
+    <p>على كل طلب مختبر/أشعة زرّ <b>«🖨️ ورقة النتيجة»</b> — ورقة PDF أنيقة تحمل بيانات المريض والطبيب
+       ونوع التحليل وسعره و<b>النتيجة النصية</b> وحالة الطلب وتوقيع الختم، بالعربية أو الإنجليزية
+       حسب لغة الواجهة (<code>?lang=ar|en</code>).</p>
+    <h3>ما الجديد في الشاشة:</h3>
+    <ul>
+      <li><b>فلتر «كل الحالات»</b> + <b>حقل بحث</b> أعلى الجدول — استخدمهما قبل الطباعة لعزل الطلبات الجاهزة.</li>
+      <li>الحالات: مسجّل ← قيد التنفيذ ← جاهزة ← مراجَعة (النتيجة إلزامية قبل «جاهزة»).</li>
+    </ul>
+    <h3>قواعد الوصول (مطابقة لعرض الطلب):</h3>
+    <ul>
+      <li>بلا توكن ⇒ <b>401</b> · طبيب يحاول ورقة طلب مريض آخر ⇒ <b>404</b> «لا يوجد طلب بالمعرف المحدد».</li>
+      <li><code>lang=fr</code> خطأ ⇒ <b>400</b> «lang يجب أن يكون ar أو en» — <b>الفحص أولًا</b> حتى لمعرفة مجهولة.</li>
+      <li>أسماء الملفات: <code>lab_result_{id}.pdf</code> / <code>lab_result_{id}_en.pdf</code>.</li>
+    </ul>
+    <img class="shot" src="screenshots/tour/05-lab.png" alt="شاشة المختبر">
+    <div class="cap">شاشة المختبر — زر «🖨️ ورقة النتيجة» على كل صف + الفلتر والبحث في الأعلى</div>
+  </section>
+
+  <!-- ============ 6 ============ -->
+  <section class="step" id="s6">
+    <h2><span class="n">6</span> 🔔 صفحة الإشعارات — الصورة الكاملة</h2>
+    <p>كل ما يُنبّهك النظام في مكان واحد: جدول بـ <b>النوع</b> (أيقونة) و<b>العنوان</b> و<b>الرسالة</b>
+       وتاريخ الحالة (جديد/مقروء) وأزرار «تعليم» و«حذف» + زر «✓ تعليم الكل كمقروء».</p>
+    <h3>أنواع الإشعارات الحالية:</h3>
+    <ul>
+      <li>⏰ <b>تذكير</b> مواعيد قادمة (مهمة كل <code>REMINDER_INTERVAL_MINUTES</code> — مرّة واحدة لكل موعد).</li>
+      <li>📅 <b>موعد جديد</b> / <b>تحديث موعد</b>.</li>
+      <li>🔬 <b>نتيجة تحاليل جاهزة</b> (يُنشأ لحظة تغيير الحالة إلى «جاهزة»).</li>
+      <li>💊 <b>مخزون منخفض</b> عند بلوغ حدّ التنبيه.</li>
+      <li>⏳ <b>وصفة معلّقة</b> (جديد — انظر الخطوة 3): صف #17 في اللقطة أدناه.</li>
+    </ul>
+    <img class="shot" src="screenshots/tour/06-notifications.png" alt="صفحة الإشعارات">
+    <div class="cap">صفحة الإشعارات — صف «⏳ وصفة معلّقة» (#17) يشرح وصفة #9 وساعات انتظارها</div>
+    <div class="note">🔔 لاحظ سطر #17: <b>«وصفة#9 للمريض صيدل R42589 لم تُصرف منذ 51 ساعة — بانتظار الصرف»</b> —
+       هذا هو تنبيه <code>rx_stale</code> الذي أنشأته المهمة الخلفية مرّة واحدة، وسينتهي تكراره من نفسه.</div>
+  </section>
+
+  <section class="step">
+    <h2>🎓 انتهى؟ الخطوة التالية</h2>
+    <ul>
+      <li>📘 <a href="user-guide.html">دليل المستخدم الكامل</a> — كل الشاشات والأدوار واستكشاف الأخطاء (وPDF: <a href="user-guide.pdf">user-guide.pdf</a>).</li>
+      <li>🧪 للفحص الآلي: <code>pytest</code> (148 اختبارًا) · <code>pharmacy_flow_check.py</code> (142 فحصًا) · <code>prescription_perms_check.py</code> (50 فحص صلاحيات).</li>
+      <li>🐙 المستودع: <a href="https://github.com/aymanhamid2020-dot/hospital-management-system">github.com/aymanhamid2020-dot/hospital-management-system</a>.</li>
+    </ul>
+  </section>
+
+</main>
+
+<footer>
+  نظام إدارة المستشفيات والعيادات — FastAPI · SQLite/Postgres · Docker · PWA<br>
+  <a href="user-guide.html">📘 دليل المستخدم</a>
+  <a href="https://github.com/aymanhamid2020-dot/hospital-management-system">🐙 GitHub</a>
+  <a href="../#ه-المميزات">🏠 README</a>
+</footer>
+
+</body>
+</html>

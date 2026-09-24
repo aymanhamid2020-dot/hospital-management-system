@@ -12,6 +12,8 @@
 |---|---|
 | ![دخول](docs/screenshots/login.png) | ![ترحيب](docs/screenshots/welcome.png) |
 
+🎓 **جولة تفاعلية باللقطات الحيّة** — [docs/pharmacy-tour.html](docs/pharmacy-tour.html): 6 شاشات حقيقية من الدخول إلى تنبيه الوصفات المعلّقة ⏳ وملصقات الباركود 🏷️ وورقة نتيجة المختبر 🖨️
+
 ## المميزات
 
 - 🖥️ **واجهة ويب كاملة (SPA)** على `/ui` — لوحة تحكم عربية مع تسجيل دخول وجداول ونماذج
@@ -240,6 +242,7 @@ curl -X POST http://127.0.0.1:8000/auth/login ^
 | http://127.0.0.1:8000/api/redoc | ReDoc (التوثيق) |
 | http://127.0.0.1:8000/health | فحص حالة النظام |
 | [docs/user-guide.pdf](docs/user-guide.pdf) | 📘 **دليل المستخدم النهائي** (PDF عربي شامل) |
+| [docs/pharmacy-tour.html](docs/pharmacy-tour.html) | 🎓 **جولة تفاعلية باللقطات الحيّة** (الصيدلية/الملصقات/المختبر) |
 
 ## بنية المشروع
 
