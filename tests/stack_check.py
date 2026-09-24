@@ -256,12 +256,18 @@ def main():
                params={"lang": "zz"})
     check("/accounts/statement/999999/print لغة خاطئة", rr.status_code == 400,
           str(rr.status_code))
-    rr = c.get("/accounts/statement/1/pdf", headers=h)
-    check("/accounts/statement/1/pdf ⇒ %PDF",
-          rr.status_code == 200 and rr.content[:4] == b"%PDF", str(rr.status_code))
-    rr = c.get("/accounts/statement/1/pdf", headers=h, params={"lang": "en"})
-    check("/accounts/statement/1/pdf lang=en ⇒ %PDF",
-          rr.status_code == 200 and rr.content[:4] == b"%PDF", str(rr.status_code))
+    # كشف حساب PDF: مريض حقيقي عند توفّره — أو 404 موجّه على القاعدة النظيفة
+    # ( على CI/نشر جديد لا يوجد id=1 فالتحقق يتكيف مع وضع القاعدة )
+    _plist = c.get("/patients/", headers=h).json()
+    _pid = _plist[0]["id"] if isinstance(_plist, list) and _plist else None
+    rr = c.get(f"/accounts/statement/{_pid or 1}/pdf", headers=h)
+    check("/accounts/statement/{id}/pdf ⇒ %PDF أو 404 نظيف",
+          (rr.status_code == 200 and rr.content[:4] == b"%PDF")
+          or (_pid is None and rr.status_code == 404), str(rr.status_code))
+    rr = c.get(f"/accounts/statement/{_pid or 1}/pdf", headers=h, params={"lang": "en"})
+    check("/accounts/statement/{id}/pdf lang=en ⇒ %PDF أو 404 نظيف",
+          (rr.status_code == 200 and rr.content[:4] == b"%PDF")
+          or (_pid is None and rr.status_code == 404), str(rr.status_code))
     rr = c.get("/accounts/statement/1/pdf", headers=h, params={"lang": "zz"})
     check("/accounts/statement/1/pdf لغة خاطئة ⇒ 400", rr.status_code == 400,
           str(rr.status_code))
