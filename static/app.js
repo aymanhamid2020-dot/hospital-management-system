@@ -338,6 +338,35 @@ const AR2EN = {
   'حجز الموعد': 'Book appointment',
   'طلب تحليل/أشعة جديد': 'New lab/radiology order',
   'صرف دواء لمريض': 'Dispense medication',
+  'سلة الصرف (متعددة البنود)': 'Dispense basket (multi-item)',
+  'صرف السلة كلها': 'Dispense whole basket',
+  'إضافة بند': 'Add item',
+  'بحث بالباركود': 'Search by barcode',
+  'امسح الباركود أو أدخل الرمز أولًا': 'Scan the barcode or enter the code first',
+  'لا يوجد دواء بهذا الرمز': 'No medication with this code',
+  'السلة فارغة — أضف بندًا أولًا': 'Basket is empty — add an item first',
+  'أضف بن وصفة واحدًا على الأقل': 'Add at least one prescription item',
+  'سبب الإرجاع إلزامي': 'Return reason is required',
+  'إرجاع': 'Return',
+  'إيصال': 'Receipt',
+  'إتلاف': 'Dispose',
+  'الوصفات الطبية': 'Medical prescriptions',
+  'وصفة جديدة': 'New prescription',
+  'حفظ الوصفة': 'Save prescription',
+  'صرف الوصفة': 'Dispense prescription',
+  'اقتراحات إعادة الطلب': 'Reorder suggestions',
+  'توريد المقترح': 'Restock suggested',
+  'إحصاءات PDF': 'Stats PDF',
+  'إحصاءات CSV': 'Stats CSV',
+  'إتلاف/إرجاع CSV': 'Disposals/returns CSV',
+  'إيراد الصرف': 'Dispense revenue',
+  'وحدات مصروفة': 'Units dispensed',
+  'عمليات صرف': 'Dispense operations',
+  'منخفض/نافد': 'Low/out',
+  'الجرعة': 'Dosage',
+  'التكرار': 'Frequency',
+  'المدة': 'Duration',
+  'تعليمات': 'Instructions',
   'إنشاء فاتورة': 'Create invoice',
   'إنشاء الفاتورة': 'Create invoice',
   'إنشاء نسخة احتياطية الآن': 'Create backup now',
@@ -669,6 +698,11 @@ async function clearAccounts() {
 
 /* ========== المخزون ========== */
 let INV = { q: '', status: '', days: 30 };
+
+/* ========== الصيدلية: حالة الفلاتر + بيانات مساعدة ========== */
+let PH = { q: '', status: '' };
+let PH_MEDS = [];   // كل الأدوية (للبحث بالباركود)
+let PH_OPTS = '';   // خيارات <select> القابلة للصرف (بدون المنتهية)
 
 async function loadInventory() {
   const d = V('f-inv-days');
@@ -1325,8 +1359,24 @@ const VIEWS = {
 
   /* --- الصيدلية --- */
   async pharmacy(main) {
-    const [meds, patients, dispenses] = await Promise.all([
-      api('/medications/'), api('/patients/'), api('/dispenses/')]);
+    const [meds, patients, dispenses, stats, rxs, reorder] = await Promise.all([
+      api('/medications/'), api('/patients/'), api('/dispenses/'),
+      api('/pharmacy/stats').catch(() => null),
+      api('/prescriptions/').catch(() => []),
+      api('/pharmacy/reorder').catch(() => [])]);
+    PH_MEDS = meds;
+    const nowMs = Date.now();
+    const isExpired = m => m.expiry_date && new Date(m.expiry_date).getTime() < nowMs;
+    const medStatus = m => isExpired(m) ? 'expired'
+      : m.quantity === 0 ? 'out'
+      : m.quantity <= m.min_quantity ? 'low' : 'ok';
+    const stLbl = { ok: 'سليم', low: 'منخفض', out: 'نافد', expired: 'منتهي الصلاحية' };
+    const stPill = { ok: 'confirmed', low: 'lowstock', out: 'unpaid', expired: 'cancelled' };
+    // خيارات الأدوية القابلة للصرف (باستثناء المنتهية)
+    PH_OPTS = meds.filter(m => !isExpired(m))
+      .map(m => `<option value="${m.id}">${esc(m.name)} — متوفر ${m.quantity} ${esc(m.unit)}</option>`).join('')
+      || '<option value="">— لا توجد أدوية متاحة —</option>';
+    const dispenseOpts = PH_OPTS;
     const medForm = isAdmin() ? `
       <details class="addbox"><summary>➕ إضافة دواء للمخزون</summary>
       <div class="form-grid">
@@ -1336,59 +1386,176 @@ const VIEWS = {
         <div class="field"><label>الوحدة</label><input id="f-unit" value="علبة"></div>
         <div class="field"><label>السعر (ر.س)</label><input id="f-mprice" type="number" step="0.01" min="0"></div>
         <div class="field"><label>حد التنبيه</label><input id="f-minq" type="number" min="0" value="10"></div>
+        <div class="field"><label>تاريخ الانتهاء</label><input id="f-exp" type="date"></div>
       </div>
       <button class="btn success" style="margin-top:12px" onclick="addMedication()">حفظ الدواء</button>
       </details>` : '';
+    /* بطاقات إحصاءات الفترة */
+    const statsRow = stats ? `
+      <div class="stats">
+        <div class="stat"><div class="num">${stats.revenue.toLocaleString()} ر.س</div><div class="lbl">إيراد الصرف</div></div>
+        <div class="stat green"><div class="num">${stats.paid.toLocaleString()} ر.س</div><div class="lbl">المحصّل</div></div>
+        <div class="stat red"><div class="num">${stats.outstanding.toLocaleString()} ر.س</div><div class="lbl">المتبقي</div></div>
+        <div class="stat"><div class="num">${stats.units}</div><div class="lbl">وحدات مصروفة</div></div>
+        <div class="stat"><div class="num">${stats.dispense_count}</div><div class="lbl">عمليات صرف</div></div>
+        <div class="stat amber"><div class="num">${stats.low + stats.out}</div><div class="lbl">منخفض/نافد</div></div>
+        <div class="stat red"><div class="num">${stats.expired}</div><div class="lbl">منتهي الصلاحية</div></div>
+      </div>` : '';
+    /* فلاتر الجدول: بحث + حالة */
+    const filterOpts = [['', 'كل الحالات'], ['ok', 'سليم'], ['low', 'منخفض'],
+                        ['out', 'نافد'], ['expired', 'منتهي الصلاحية']]
+      .map(([v, l]) => `<option value="${v}" ${PH.status === v ? 'selected' : ''}>${l}</option>`)
+      .join('');
+    /* حالة الوصفة */
+    const rxLbl = { PENDING: 'قيد الصرف', PARTIAL: 'صرف جزئي',
+                    DISPENSED: 'مصروف بالكامل', CANCELLED: 'ملغاة' };
+    const rxPillCls = { PENDING: 'pending', PARTIAL: 'partial',
+                        DISPENSED: 'confirmed', CANCELLED: 'cancelled' };
+    const payPill = s => s === 'PAID' ? 'confirmed' : s === 'PARTIAL' ? 'partial' : 'unpaid';
+    const payLbl = { PAID: 'مدفوع', PARTIAL: 'جزئيًا', UNPAID: 'غير مدفوع' };
     main.innerHTML = `
+      ${statsRow}
       <div class="card">
-        <div class="toolbar"><h3 style="margin:0">مخزون الأدوية (${meds.length})</h3>
+        <div class="toolbar"><h3 style="margin:0">مخزون الأدوية (<span id="ph-count">${meds.length}</span>)</h3>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
           ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/pdf','pharmacy_report.pdf')">📄 تقرير المخزون PDF</button>` : ''}
+          ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/stats/pdf','pharmacy_stats.pdf')">📊 إحصاءات PDF</button>` : ''}
+          ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/stats/csv','pharmacy_stats.csv')">📊 إحصاءات CSV</button>` : ''}
           ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/csv?section=inventory','pharmacy_inventory.csv')">⬇️ مخزون CSV</button>` : ''}
           ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/csv?section=dispenses','pharmacy_dispenses.csv')">⬇️ صرف CSV</button>` : ''}
+          ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/csv?section=disposals','pharmacy_disposals.csv')">🗑️ إتلاف/إرجاع CSV</button>` : ''}
           </div>
         </div>
-        <details class="addbox"><summary>💊 صرف دواء لمريض</summary>
+        <div class="toolbar">
+          <input id="f-ph-q" placeholder="ابحث بالاسم أو الرمز" value="${esc(PH.q)}"
+                 oninput="filterPharmacy()" style="min-width:180px">
+          <select id="f-ph-status" onchange="filterPharmacy()">${filterOpts}</select>
+          <input id="f-ph-code" placeholder="🔎 امسح الباركود ثم Enter"
+                 onkeydown="if(event.key==='Enter'){event.preventDefault();quickFind();}" style="min-width:180px">
+          <button class="btn" onclick="quickFind()">بحث بالباركود</button>
+        </div>
+        <details class="addbox" open><summary>🛒 سلة الصرف (متعددة البنود)</summary>
         <div class="form-grid">
-          <div class="field"><label>الدواء *</label><select id="f-dmed">
-            ${meds.map(m => `<option value="${m.id}">${esc(m.name)} — متوفر ${m.quantity} ${esc(m.unit)}</option>`).join('')}</select></div>
           <div class="field"><label>المريض *</label><select id="f-dpat">
             ${patients.map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join('')}</select></div>
-          <div class="field"><label>الكمية *</label><input id="f-dqty" type="number" min="1" value="1"></div>
+          <div class="field"><label>باركود الدواء</label>
+            <input id="f-basket-code" placeholder="امسح الباركود ثم Enter"
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();quickFind();}"></div>
+          <div class="field"><label>ملاحظات</label><input id="f-basket-notes" placeholder="سياق الصرف"></div>
         </div>
-        <button class="btn success" style="margin-top:12px" onclick="dispenseMed()">صرف الآن</button>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>الدواء *</th><th>الكمية *</th><th>الجرعة</th><th>التكرار</th><th>المدة</th><th>تعليمات</th><th></th></tr></thead>
+          <tbody id="basket-rows">${basketRowHTML(dispenseOpts)}</tbody>
+        </table></div>
+        <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+          <button class="btn ghost" onclick="addBasketRow()">➕ إضافة بند</button>
+          <button class="btn success" onclick="dispenseBatch()">💸 صرف السلة كلها</button>
+        </div>
         </details>
         ${medForm}
-        <div style="overflow-x:auto"><table>
-          <thead><tr><th>#</th><th>الرمز</th><th>الاسم</th><th>الكمية</th><th>السعر</th><th>حد التنبيه</th><th>الانتهاء</th><th></th></tr></thead>
-          <tbody>${meds.map(m => `<tr style="${m.quantity <= m.min_quantity ? 'background:#fff8e1' : ''}">
+        <div style="overflow-x:auto"><table id="ph-meds">
+          <thead><tr><th>#</th><th>الرمز</th><th>الاسم</th><th>الكمية</th><th>الحالة</th><th>السعر</th><th>حد التنبيه</th><th>الانتهاء</th><th></th></tr></thead>
+          <tbody>${meds.map(m => {
+            const st = medStatus(m);
+            return `<tr data-status="${st}" data-text="${esc((m.name + ' ' + m.code).toLowerCase())}"
+                    style="${st === 'low' || st === 'out' ? 'background:#fff8e1' : st === 'expired' ? 'background:#fff0f0' : ''}">
             <td>${m.id}</td><td>${esc(m.code)}</td><td><strong>${esc(m.name)}</strong></td>
-            <td>${m.quantity <= m.min_quantity
+            <td>${st === 'low' || st === 'out'
               ? `<span class="pill lowstock">${m.quantity} ${esc(m.unit)} ⚠️</span>`
               : `<span class="pill confirmed">${m.quantity} ${esc(m.unit)}</span>`}</td>
+            <td><span class="pill ${stPill[st]}">${stLbl[st]}</span></td>
             <td>${m.price.toLocaleString()} ر.س</td>
             <td>${m.min_quantity}</td>
             <td>${m.expiry_date ? fmtDate(m.expiry_date) : '—'}</td>
             <td class="actions">
               ${isAdmin() ? `<button class="btn sm ghost" onclick="restock(${m.id})">📦 توريد</button>` : ''}
+              ${isAdmin() ? `<button class="btn sm danger" onclick="disposeMed(${m.id})">🗑️ إتلاف</button>` : ''}
               ${isAdmin() ? `<button class="btn sm danger" onclick="del('medications',${m.id},'pharmacy')">حذف</button>` : ''}
             </td>
-          </tr>`).join('') || '<tr><td colspan="8" class="empty">لا أدوية — أضف أول دواء</td></tr>'}</tbody>
+          </tr>`; }).join('') || '<tr><td colspan="9" class="empty">لا أدوية — أضف أول دواء</td></tr>'}</tbody>
         </table></div>
       </div>
       <div class="card">
+        <div class="toolbar"><h3 style="margin:0">📋 الوصفات الطبية (${rxs.length})</h3></div>
+        ${isAdmin() || isDoctor() ? `
+        <details class="addbox"><summary>📝 وصفة جديدة</summary>
+        <div class="form-grid">
+          <div class="field"><label>المريض *</label><select id="f-rx-pat">
+            ${patients.map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join('')}</select></div>
+          <div class="field"><label>ملاحظات الوصفة</label><input id="f-rx-notes" placeholder="مثال: بعد الفحص"></div>
+        </div>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>الدواء *</th><th>الكمية *</th><th>الجرعة</th><th>التكرار</th><th>المدة</th><th>تعليمات</th><th></th></tr></thead>
+          <tbody id="rx-rows">${basketRowHTML(dispenseOpts)}</tbody>
+        </table></div>
+        <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+          <button class="btn ghost" onclick="addRxItemRow()">➕ إضافة بند</button>
+          <button class="btn success" onclick="createRx()">💾 حفظ الوصفة</button>
+        </div>
+        </details>` : ''}
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>#</th><th>التاريخ</th><th>المريض</th><th>الطبيب</th><th>البنود</th><th>الحالة</th><th></th></tr></thead>
+          <tbody>${rxs.map(r => `<tr>
+            <td>${r.id}</td><td>${fmtDate(r.created_at)}</td>
+            <td>${esc(r.patient ? r.patient.full_name : '#' + r.patient_id)}</td>
+            <td>${r.doctor ? esc(r.doctor.full_name) : '—'}</td>
+            <td>${(r.items || []).map(i => `${esc(i.medication ? i.medication.name : '#' + i.medication_id)}
+              ×${i.quantity} ${i.dispensed_quantity ? `<small>(صُرف ${i.dispensed_quantity})</small>` : ''}`).join('<br>')}</td>
+            <td><span class="pill ${rxPillCls[r.status] || 'pending'}">${rxLbl[r.status] || r.status}</span></td>
+            <td class="actions">
+              ${r.status !== 'CANCELLED' && r.status !== 'DISPENSED'
+                ? `<button class="btn sm success" onclick="dispenseRx(${r.id})">💊 صرف الوصفة</button>` : ''}
+              ${r.status === 'PENDING' ? `<button class="btn sm ghost" onclick="cancelRx(${r.id})">إلغاء</button>` : ''}
+              ${isAdmin() ? `<button class="btn sm danger" onclick="del('prescriptions',${r.id},'pharmacy')">حذف</button>` : ''}
+            </td>
+          </tr>`).join('') || '<tr><td colspan="7" class="empty">لا وصفات بعد</td></tr>'}</tbody>
+        </table></div>
+      </div>
+      ${reorder.length ? `
+      <div class="card">
+        <h3>🛒 اقتراحات إعادة الطلب (${reorder.length})</h3>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>الرمز</th><th>الدواء</th><th>الرصيد</th><th>الحد</th><th>مستهلَك (30ي)</th>
+            <th>متوسط/يوم</th><th>تغطية (يوم)</th><th>المقترح شراءه</th><th>التكلفة</th><th></th></tr></thead>
+          <tbody>${reorder.map(r => `<tr>
+            <td>${esc(r.code)}</td><td><strong>${esc(r.name)}</strong></td>
+            <td>${r.quantity} ${esc(r.unit)}</td><td>${r.min_quantity}</td>
+            <td>${r.consumed}</td><td>${r.avg_per_day}</td>
+            <td>${r.days_cover === null ? '—' : r.days_cover}</td>
+            <td><span class="pill lowstock">${r.suggested_qty} ${esc(r.unit)}</span></td>
+            <td>${r.suggested_cost.toLocaleString()} ر.س</td>
+            <td class="actions">${isAdmin()
+              ? `<button class="btn sm ghost" onclick="restockSuggested(${r.medication_id},${r.suggested_qty})">📦 توريد المقترح</button>`
+              : ''}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>
+      </div>` : ''}
+      <div class="card">
         <h3>سجل الصرف (${dispenses.length})</h3>
         <div style="overflow-x:auto"><table>
-          <thead><tr><th>#</th><th>التاريخ</th><th>المريض</th><th>الدواء</th><th>الكمية</th><th>السعر</th><th>صرفه</th></tr></thead>
-          <tbody>${dispenses.map(d => `<tr>
+          <thead><tr><th>#</th><th>التاريخ</th><th>المريض</th><th>الدواء</th><th>الكمية</th>
+            <th>الجرعة</th><th>الإجمالي</th><th>الدفع</th><th>صرفه</th><th>الحالة</th><th></th></tr></thead>
+          <tbody>${dispenses.map(d => `<tr style="${d.returned_at ? 'background:#fff0f0' : ''}">
             <td>${d.id}</td><td>${fmtDate(d.created_at)}</td>
             <td>${esc(d.patient.full_name)}</td>
-            <td>${esc(d.medication ? d.medication.name : '#' + d.medication_id)}</td>
-            <td>${d.quantity}</td><td>${d.unit_price.toLocaleString()} ر.س</td>
+            <td>${esc(d.medication ? d.medication.name : '#' + d.medication_id)}
+              ${d.prescription_id ? `<br><small>وصفة #${d.prescription_id}</small>` : ''}</td>
+            <td>${d.quantity}</td>
+            <td><small>${esc([d.dosage, d.frequency, d.duration].filter(Boolean).join(' · ') || '—')}</small></td>
+            <td>${Number(d.total_price || 0).toLocaleString()} ر.س</td>
+            <td><span class="pill ${payPill(d.status)}">${payLbl[d.status] || d.status}</span></td>
             <td>${esc(d.dispensed_by || '-')}</td>
-          </tr>`).join('') || '<tr><td colspan="7" class="empty">لا عمليات صرف بعد</td></tr>'}</tbody>
+            <td>${d.returned_at
+              ? `<span class="pill cancelled" title="${esc(d.return_reason || '')}">مرتجع ↩</span>`
+              : '<span class="pill confirmed">مصروف</span>'}</td>
+            <td class="actions">
+              <button class="btn sm ghost" onclick="openReceipt(${d.id})">🧾 إيصال</button>
+              ${!d.returned_at ? `<button class="btn sm danger" onclick="returnDispense(${d.id})">↩ إرجاع</button>` : ''}
+            </td>
+          </tr>`).join('') || '<tr><td colspan="11" class="empty">لا عمليات صرف بعد</td></tr>'}</tbody>
         </table></div>
       </div>`;
+    filterPharmacy();
   },
 
   /* --- المخزون: ملخص + أصناف بحالة + دفتر الحركات --- */
@@ -2245,7 +2412,8 @@ function addMedication(view) {
     quantity: V('f-qty') ? Number(V('f-qty')) : 0,
     unit: V('f-unit') || 'علبة',
     price: V('f-mprice') ? Number(V('f-mprice')) : 0,
-    min_quantity: V('f-minq') ? Number(V('f-minq')) : 10
+    min_quantity: V('f-minq') ? Number(V('f-minq')) : 10,
+    expiry_date: V('f-exp') ? new Date(V('f-exp')).toISOString() : null
   }, view || 'pharmacy');
 }
 
@@ -2273,13 +2441,168 @@ async function adjustStock(id) {
   } catch (e) { toast(e.message, true); }
 }
 
-async function dispenseMed() {
-  const qty = Number(V('f-dqty'));
-  if (!qty || qty < 1) return toast('أدخل كمية صحيحة', true);
+/* ========== الصيدلية: سلة الصرف، الوصفات، الإرجاع، الإتلاف ========== */
+
+/* سطر واحد لسلة الصرف أو لبند وصفة (نفس البنية والحقول) */
+function basketRowHTML(opts) {
+  const o = opts !== undefined ? opts : PH_OPTS;
+  return `<tr>
+    <td><select class="bk-med" style="min-width:170px">${o}</select></td>
+    <td><input class="bk-qty" type="number" min="1" value="1" style="width:70px"></td>
+    <td><input class="bk-dose" placeholder="قرص بعد الأكل" style="width:130px"></td>
+    <td><input class="bk-freq" placeholder="3 مرات يوميًا" style="width:130px"></td>
+    <td><input class="bk-dur" placeholder="5 أيام" style="width:100px"></td>
+    <td><input class="bk-inst" placeholder="تعليمات إضافية" style="width:140px"></td>
+    <td><button class="btn sm danger" onclick="this.closest('tr').remove()">✕</button></td>
+  </tr>`;
+}
+
+function addBasketRow() {
+  const tb = document.getElementById('basket-rows');
+  if (tb) tb.insertAdjacentHTML('beforeend', basketRowHTML());
+}
+
+function addRxItemRow() {
+  const tb = document.getElementById('rx-rows');
+  if (tb) tb.insertAdjacentHTML('beforeend', basketRowHTML());
+}
+
+/* قراءة بنود جدول (سلة أو وصفة) — يرجع null عند بند ناقص */
+function readItems(tbodyId) {
+  const rows = [...document.querySelectorAll('#' + tbodyId + ' tr')];
+  const items = [];
+  for (const r of rows) {
+    const med = Number((r.querySelector('.bk-med') || {}).value);
+    const qty = Number((r.querySelector('.bk-qty') || {}).value);
+    if (!med) return null;
+    if (!qty || qty < 1) return null;
+    const val = cls => (r.querySelector(cls) || {}).value?.trim() || null;
+    items.push({ medication_id: med, quantity: qty,
+                 dosage: val('.bk-dose'), frequency: val('.bk-freq'),
+                 duration: val('.bk-dur'), instructions: val('.bk-inst') });
+  }
+  return items;
+}
+
+/* صرف السلة كلها — all-or-nothing على الخادم */
+async function dispenseBatch() {
+  const items = readItems('basket-rows');
+  if (!items) return toast('أكمل كل بنود السلة (دواء + كمية ≥ 1)', true);
+  if (!items.length) return toast('السلة فارغة — أضف بندًا أولًا', true);
   try {
-    await api('/dispenses/', { method: 'POST', body: JSON.stringify({
-      medication_id: Number(V('f-dmed')), patient_id: Number(V('f-dpat')), quantity: qty }) });
-    toast('تم الصرف ✅'); await navigate('pharmacy');
+    const res = await api('/dispenses/batch', { method: 'POST',
+      body: JSON.stringify({ patient_id: Number(V('f-dpat')), items,
+                             notes: V('f-basket-notes') || null }) });
+    toast(`تم صرف ${res.count} بند — الإجمالي ${res.total} ر.س ✅`);
+    await navigate('pharmacy');
+  } catch (e) { toast(e.message, true); }
+}
+
+/* بحث بالباركود/الرمز: يختار الدواء في آخر سطر بالسلة */
+function quickFind() {
+  const code = (V('f-ph-code') || V('f-basket-code') || '').trim().toLowerCase();
+  if (!code) return toast('امسح الباركود أو أدخل الرمز أولًا', true);
+  const m = PH_MEDS.find(x => String(x.code).toLowerCase() === code)
+         || PH_MEDS.find(x => String(x.code).toLowerCase().includes(code));
+  if (!m) return toast('لا يوجد دواء بهذا الرمز', true);
+  if (m.expiry_date && new Date(m.expiry_date) < new Date())
+    return toast(`«${m.name}» منتهي الصلاحية — لا يمكن صرفه`, true);
+  if (m.quantity <= 0) return toast(`«${m.name}» نافد من المخزون`, true);
+  const tb = document.getElementById('basket-rows');
+  if (!tb) return;
+  if (!tb.querySelector('tr')) tb.insertAdjacentHTML('beforeend', basketRowHTML());
+  const sel = tb.querySelector('tr:last-child .bk-med');
+  if (sel) { sel.value = String(m.id); sel.focus(); }
+  toast(`تم اختيار «${m.name}» — المتوفر ${m.quantity}`);
+}
+
+/* فلترة جدول الأدوية (بحث + حالة) بدون إعادة تحميل */
+function filterPharmacy() {
+  PH.q = (V('f-ph-q') || '').toLowerCase();
+  PH.status = V('f-ph-status') || '';
+  let shown = 0;
+  document.querySelectorAll('#ph-meds tbody tr[data-status]').forEach(tr => {
+    const okQ = !PH.q || (tr.dataset.text || '').includes(PH.q);
+    const okS = !PH.status || tr.dataset.status === PH.status;
+    tr.style.display = (okQ && okS) ? '' : 'none';
+    if (okQ && okS) shown++;
+  });
+  const c = document.getElementById('ph-count');
+  if (c) c.textContent = shown;
+}
+
+/* إرجاع صرف سابق — السبب إلزامي */
+async function returnDispense(id) {
+  const reason = prompt('سبب الإرجاع (إلزامي):');
+  if (reason === null) return;
+  if (!reason.trim()) return toast('سبب الإرجاع إلزامي', true);
+  try {
+    await api('/dispenses/' + id + '/return', { method: 'POST',
+      body: JSON.stringify({ reason: reason.trim() }) });
+    toast('تم الإرجاع وإعادة الكمية للمخزون ↩');
+    await navigate('pharmacy');
+  } catch (e) { toast(e.message, true); }
+}
+
+/* إتلاف كمية منتهية (للمدير) — حركة disposal */
+async function disposeMed(id) {
+  const qty = prompt('الكمية المُتلفة:', '1');
+  if (qty === null || !qty.trim()) return;
+  const n = Number(qty);
+  if (!Number.isInteger(n) || n <= 0) return toast('أدخل عددًا صحيحًا أكبر من صفر', true);
+  const note = (prompt('سبب الإتلاف (اختياري):') || '').trim() || null;
+  try {
+    await api('/inventory/' + id + '/dispose', { method: 'POST',
+      body: JSON.stringify({ quantity: n, note }) });
+    toast('تم الإتلاف وتسجيل حركته 🗑️');
+    await navigate('pharmacy');
+  } catch (e) { toast(e.message, true); }
+}
+
+/* إنشاء وصفة (طبيب/مدير) */
+async function createRx() {
+  const items = readItems('rx-rows');
+  if (!items) return toast('أكمل كل بنود الوصفة (دواء + كمية ≥ 1)', true);
+  if (!items.length) return toast('أضف بن وصفة واحدًا على الأقل', true);
+  try {
+    await api('/prescriptions/', { method: 'POST',
+      body: JSON.stringify({ patient_id: Number(V('f-rx-pat')),
+                             notes: V('f-rx-notes') || null, items }) });
+    toast('تم إنشاء الوصفة 📋');
+    await navigate('pharmacy');
+  } catch (e) { toast(e.message, true); }
+}
+
+/* صرف كل الأبنية المعلَّقة في وصفة — دفعة واحدة */
+async function dispenseRx(id) {
+  if (!confirm('صرف كل الأبنية المعلَّقة في هذه الوصفة دفعة واحدة؟')) return;
+  try {
+    const rows = await api('/prescriptions/' + id + '/dispense',
+                           { method: 'POST', body: JSON.stringify({}) });
+    toast(`تم صرف ${rows.length} بند من الوصفة 💊`);
+    await navigate('pharmacy');
+  } catch (e) { toast(e.message, true); }
+}
+
+/* إلغاء وصفة (تبقى محفوظة كملغاة) */
+async function cancelRx(id) {
+  if (!confirm('إلغاء هذه الوصفة؟')) return;
+  try {
+    await api('/prescriptions/' + id, { method: 'PUT',
+      body: JSON.stringify({ status: 'CANCELLED' }) });
+    toast('أُلغيت الوصفة');
+    await navigate('pharmacy');
+  } catch (e) { toast(e.message, true); }
+}
+
+/* توريد بالكمية المقترحة من شاشة إعادة الطلب */
+async function restockSuggested(id, qty) {
+  if (!confirm(`توريد ${qty} وحدة بالكمية المقترحة؟`)) return;
+  try {
+    await api('/inventory/' + id + '/restock',
+              { method: 'POST', body: JSON.stringify({ quantity: qty }) });
+    toast('تم التوريد بالكمية المقترحة 📦');
+    await navigate('pharmacy');
   } catch (e) { toast(e.message, true); }
 }
 

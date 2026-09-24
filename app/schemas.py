@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, EmailStr, ConfigDict
+from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
 from typing import Optional, List
 from datetime import datetime
 
@@ -493,6 +493,11 @@ class DispenseCreate(BaseModel):
     patient_id: int = Field(..., description="معرّف المريض")
     quantity: int = Field(1, gt=0, description="الكمية المصروفة")
     notes: Optional[str] = None
+    # توجيه الاستخدام (تظهر في الإيصال وتقارير الصرف)
+    dosage: Optional[str] = Field(None, description="الجرعة (مثال: قرص بعد الأكل)")
+    frequency: Optional[str] = Field(None, description="التكرار (مثال: 3 مرات يوميًا)")
+    duration: Optional[str] = Field(None, description="المدة (مثال: 5 أيام)")
+    instructions: Optional[str] = Field(None, description="تعليمات إضافية")
 
 
 class DispenseInDB(ORMModel):
@@ -507,6 +512,14 @@ class DispenseInDB(ORMModel):
     paid_amount: float
     paid_at: Optional[datetime] = None
     notes: Optional[str] = None
+    dosage: Optional[str] = None
+    frequency: Optional[str] = None
+    duration: Optional[str] = None
+    instructions: Optional[str] = None
+    prescription_id: Optional[int] = None
+    returned_at: Optional[datetime] = None
+    return_reason: Optional[str] = None
+    returned_by: Optional[str] = None
     dispensed_by: Optional[str] = None
     created_at: datetime
     medication: Optional[MedicationInDB] = None
@@ -516,6 +529,169 @@ class DispenseInDB(ORMModel):
 class SalePayment(BaseModel):
     paid_amount: float = Field(..., gt=0, description="المبلغ المدفوع")
     payment_method: str = Field(..., description="طريقة الدفع (cash/card/insurance)")
+
+
+# ===== صرف متعدد البنود + الإرجاع =====
+class DispenseItemIn(BaseModel):
+    """بند واحد داخل سلة الصرف الجماعي."""
+    medication_id: int = Field(..., description="معرّف الدواء")
+    quantity: int = Field(1, gt=0, description="الكمية")
+    dosage: Optional[str] = None
+    frequency: Optional[str] = None
+    duration: Optional[str] = None
+    instructions: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class BatchDispenseIn(BaseModel):
+    """سلة صرف دفعة واحدة — تُنفَّذ كلها أو لا شيء (all-or-nothing)."""
+    patient_id: int = Field(..., description="معرّف المريض")
+    items: List[DispenseItemIn] = Field(..., min_length=1,
+                                         description="بنود الصرف (بنود واحد على الأقل)")
+    notes: Optional[str] = None
+
+
+class BatchDispenseOut(BaseModel):
+    """نتيجة الصرف الجماعي."""
+    patient_id: int
+    count: int = Field(..., description="عدد البنود المصروفة")
+    total: float = Field(..., description="إجمالي المبلغ")
+    low_stock: List[str] = Field(default_factory=list,
+                                 description="أسماء الأدوية التي بلغت حد التنبيه")
+    dispenses: List[DispenseInDB]
+
+
+class DispenseReturnIn(BaseModel):
+    """إرجاع صرف سابق — السبب إلزامي (لا يقبل الفراغ/المسافات)."""
+    reason: str = Field(..., min_length=1, description="سبب الإرجاع")
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_not_blank(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("سبب الإرجاع إلزامي")
+        return v
+
+
+class DisposeIn(BaseModel):
+    """إتلاف كمية منتهية الصلاحية من المخزون (للمدير فقط)."""
+    quantity: int = Field(..., gt=0, description="الكمية المُتلفة (> 0)")
+    note: Optional[str] = Field(None, description="سبب الإتلاف")
+
+
+# ===== الوصفات الطبية =====
+class PrescriptionItemIn(BaseModel):
+    medication_id: int = Field(..., description="معرّف الدواء")
+    quantity: int = Field(1, gt=0, description="الكمية الموصوفة")
+    dosage: Optional[str] = None
+    frequency: Optional[str] = None
+    duration: Optional[str] = None
+    instructions: Optional[str] = None
+
+
+class PrescriptionItemInDB(ORMModel):
+    id: int
+    medication_id: int
+    quantity: int
+    dispensed_quantity: int
+    remaining: int
+    dosage: Optional[str] = None
+    frequency: Optional[str] = None
+    duration: Optional[str] = None
+    instructions: Optional[str] = None
+    medication: Optional[MedicationInDB] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PrescriptionCreate(BaseModel):
+    patient_id: int = Field(..., description="معرّف المريض")
+    doctor_id: Optional[int] = Field(None, description="الطبيب المُصدر للوصفة (اختياري)")
+    record_id: Optional[int] = Field(None, description="ربط بسجل طبي (اختياري)")
+    notes: Optional[str] = None
+    items: List[PrescriptionItemIn] = Field(..., min_length=1,
+                                             description="بنود الوصفة (بند واحد على الأقل)")
+
+
+class PrescriptionUpdate(BaseModel):
+    notes: Optional[str] = None
+    status: Optional[str] = Field(None, description="PENDING أو CANCELLED (يدويًا)")
+
+
+class PrescriptionInDB(ORMModel):
+    id: int
+    patient_id: int
+    doctor_id: Optional[int] = None
+    record_id: Optional[int] = None
+    notes: Optional[str] = None
+    status: str
+    created_by: Optional[str] = None
+    created_at: datetime
+    dispensed_at: Optional[datetime] = None
+    patient: PatientBrief
+    doctor: Optional[DoctorBrief] = None
+    items: List[PrescriptionItemInDB]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PrescriptionDispenseIn(BaseModel):
+    """صرف أبنية وصفة (كل الأبنية المعلَّقة أو قائمة محددة)."""
+    item_ids: Optional[List[int]] = Field(
+        None, description="بنود محددة (اختياري) — افتراضيًا كل الأبنية المعلَّقة")
+
+
+# ===== إحصاءات الصيدلية =====
+class PharmacyTopMed(BaseModel):
+    """أكثر الأدوية صرفًا في الفترة."""
+    medication_id: int
+    code: str
+    name: str
+    units: int
+    revenue: float
+
+
+class PharmacyDailyStat(BaseModel):
+    """تجميع يومي للاستهلاك والإيراد."""
+    date: str
+    units: int
+    revenue: float
+
+
+class PharmacyStats(BaseModel):
+    """إحصاءات الصيدلية لفترة — تستثني عمليات الإرجاع."""
+    period: str
+    from_date: str
+    to_date: str
+    dispense_count: int
+    units: int
+    revenue: float
+    paid: float
+    outstanding: float
+    inventory_value: float
+    low: int
+    out: int
+    expired: int
+    expiring: int
+    top_medications: List[PharmacyTopMed]
+    daily: List[PharmacyDailyStat]
+
+
+class ReorderItem(BaseModel):
+    """صنف منخفض يحتاج توريدًا + اقتراح كمية شراء."""
+    medication_id: int
+    code: str
+    name: str
+    quantity: int
+    min_quantity: int
+    unit: str
+    price: float
+    consumed: int = Field(..., description="المستهلَك في فترة الحساب")
+    avg_per_day: float
+    days_cover: Optional[float] = Field(None, description="أيام التغطية الحالية (None إن لم يُستهلَك)")
+    suggested_qty: int = Field(..., description="كمية الشراء المقترحة")
+    suggested_cost: float
 
 
 class SaleSummary(BaseModel):
@@ -570,7 +746,7 @@ class StockMovementInDB(ORMModel):
     id: int
     medication_id: int
     medication_name: str = Field(..., description="اسم الدواء")
-    type: str = Field(..., description="in|out|adjust")
+    type: str = Field(..., description="in|out|adjust|disposal|return")
     change: int = Field(..., description="موجب وارد، سالب صادر")
     quantity_after: int = Field(..., description="الرصيد بعد الحركة")
     note: Optional[str] = None

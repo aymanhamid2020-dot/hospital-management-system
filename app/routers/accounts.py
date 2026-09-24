@@ -14,6 +14,12 @@ from app.schemas import Debtor, DispenseInDB, RevenuePoint, SalePayment, SaleSum
 router = APIRouter(prefix="/accounts", tags=["Accounts & Sales"])
 
 
+def _active(q):
+    """استثناء عمليات الإرجاع من كل استعلامات الحسابات —
+    الصرف المُرجَع لا يدخل الإيراد/المبيعات/المدينين/كشوف الحساب."""
+    return q.filter(Dispense.returned_at.is_(None))
+
+
 def _apply_period(q, period: Optional[str], from_date: Optional[str], to_date: Optional[str]):
     """توحيد فلترة الفترة بين/و داخل الشهر — يعيد (الاستعلام، تسمية الفترة)."""
     if from_date or to_date:
@@ -44,7 +50,7 @@ async def list_sales(
     db: Session = Depends(get_db),
     _ = Depends(get_current_user),
 ):
-    q = db.query(Dispense).order_by(Dispense.created_at.desc())
+    q = _active(db.query(Dispense)).order_by(Dispense.created_at.desc())
     if patient_id is not None:
         q = q.filter(Dispense.patient_id == patient_id)
     if staff:
@@ -68,7 +74,7 @@ async def sales_summary(
     db: Session = Depends(get_db),
     _ = Depends(get_current_user),
 ):
-    q = db.query(Dispense)
+    q = _active(db.query(Dispense))
     q, label = _apply_period(q, period, from_date, to_date)
 
     agg = q.with_entities(
@@ -102,7 +108,7 @@ async def revenue_curve(
     """سلسلة إيراد مجمّعة يوميًا أو شهريًا (لرسم بياني)"""
     if group not in ("day", "month"):
         raise HTTPException(status_code=400, detail="group يجب أن يكون day أو month")
-    q = db.query(Dispense)
+    q = _active(db.query(Dispense))
     q, _label = _apply_period(q, period, from_date, to_date)
 
     if group == "day":
@@ -138,7 +144,7 @@ async def debtors(
     _ = Depends(get_current_user),
 ):
     """المرضى الذين باقي عليهم مبلغ (مرتّبون تنازليًا حسب المتبقي)"""
-    q = db.query(Dispense).filter(Dispense.status != "PAID")
+    q = _active(db.query(Dispense)).filter(Dispense.status != "PAID")
     q, _label = _apply_period(q, period, from_date, to_date)
 
     rows = (
@@ -188,6 +194,11 @@ async def record_payment(
     d = db.query(Dispense).filter(Dispense.id == id).first()
     if not d:
         raise HTTPException(status_code=404, detail="عملية البيع غير موجودة")
+    if d.returned_at is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="العملية مُرجَعة — لا يمكن تسجيل دفعة عليها",
+        )
     if payload.paid_amount <= 0:
         raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
     if payload.paid_amount > d.total_price:
@@ -240,7 +251,7 @@ async def patient_statement(
     if not p:
         raise HTTPException(status_code=404, detail="المريض غير موجود")
 
-    sales = (db.query(Dispense).filter(Dispense.patient_id == patient_id)
+    sales = (_active(db.query(Dispense)).filter(Dispense.patient_id == patient_id)
              .order_by(Dispense.created_at.desc()).all())
     invoices = (db.query(Invoice).filter(Invoice.patient_id == patient_id)
                 .order_by(Invoice.created_at.desc()).all())
@@ -287,7 +298,7 @@ async def patient_statement_print(
     if not p:
         raise HTTPException(status_code=404, detail="المريض غير موجود")
 
-    sales = (db.query(Dispense).filter(Dispense.patient_id == patient_id)
+    sales = (_active(db.query(Dispense)).filter(Dispense.patient_id == patient_id)
              .order_by(Dispense.created_at.desc()).all())
     invoices = (db.query(Invoice).filter(Invoice.patient_id == patient_id)
                 .order_by(Invoice.created_at.desc()).all())
@@ -323,7 +334,7 @@ async def patient_statement_pdf(
     if not p:
         raise HTTPException(status_code=404, detail="المريض غير موجود")
 
-    sales = (db.query(Dispense).filter(Dispense.patient_id == patient_id)
+    sales = (_active(db.query(Dispense)).filter(Dispense.patient_id == patient_id)
              .order_by(Dispense.created_at.desc()).all())
     invoices = (db.query(Invoice).filter(Invoice.patient_id == patient_id)
                 .order_by(Invoice.created_at.desc()).all())

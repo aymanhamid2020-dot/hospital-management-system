@@ -400,10 +400,12 @@ def lab_report_pdf(orders, label: str, lang: str = "ar") -> bytes:
 
 
 def pharmacy_report_pdf(medications, dispenses, label: str, dispense_count: int = 0,
-                        lang: str = "ar") -> bytes:
-    """تقرير الصيدلية: ملخص المخزون + تنبيهاته + آخر عمليات الصرف — ar|en."""
+                        lang: str = "ar", movements=None) -> bytes:
+    """تقرير الصيدلية: ملخص المخزون + تنبيهاته + آخر عمليات الصرف
+    + حركات الإتلاف/الإرجاع (movements اختياري) — ar|en."""
     if lang == "en":
-        return _pharmacy_report_en(medications, dispenses, label, dispense_count)
+        return _pharmacy_report_en(medications, dispenses, label, dispense_count,
+                                   movements=movements)
     from datetime import datetime as _dt
 
     total_value = sum((m.price or 0) * (m.quantity or 0) for m in medications)
@@ -434,12 +436,27 @@ def pharmacy_report_pdf(medications, dispenses, label: str, dispense_count: int 
             pat = d.patient.full_name if d.patient else "-"
             med = d.medication.name if d.medication else f"#{d.medication_id}"
             line = f"• {pat} — {med} × {d.quantity} — {(d.unit_price or 0):,.2f} ر.س"
+            if getattr(d, "returned_at", None) is not None:
+                line += " — مرتجع"
             pdf.set_font("ar", "", 10)
             pdf.set_text_color(*DARK)
             pdf.cell(0, 7, ar(line[:110]), align="R", new_x="LMARGIN", new_y="NEXT")
     else:
         pdf.set_font("ar", "", 11)
         pdf.multi_cell(0, 7, ar("لا توجد عمليات صرف."), align="R")
+
+    _movements = list(movements or [])
+    if _movements:
+        mv_labels = {"disposal": "إتلاف", "return": "إرجاع"}
+        pdf.section("حركات الإتلاف والإرجاع")
+        for mv in _movements[:20]:
+            med = mv.medication.name if mv.medication else f"#{mv.medication_id}"
+            kind = mv_labels.get(mv.type, mv.type)
+            line = (f"• {kind} — {med} — {abs(int(mv.change or 0))} — "
+                    f"{mv.note or ''} — {mv.made_by or ''}")
+            pdf.set_font("ar", "", 10)
+            pdf.set_text_color(*RED if mv.type == "disposal" else DARK)
+            pdf.cell(0, 7, ar(line[:110]), align="R", new_x="LMARGIN", new_y="NEXT")
     return bytes(pdf.output())
 
 
@@ -574,8 +591,10 @@ def _lab_report_en(orders, label: str) -> bytes:
     return bytes(pdf.output())
 
 
-def _pharmacy_report_en(medications, dispenses, label: str, dispense_count: int) -> bytes:
-    """English pharmacy report: inventory summary + low stock + recent dispenses."""
+def _pharmacy_report_en(medications, dispenses, label: str, dispense_count: int,
+                        movements=None) -> bytes:
+    """English pharmacy report: inventory summary + low stock + recent dispenses
+    + disposal/return movements."""
     from datetime import datetime as _dt
 
     total_value = sum((m.price or 0) * (m.quantity or 0) for m in medications)
@@ -606,12 +625,27 @@ def _pharmacy_report_en(medications, dispenses, label: str, dispense_count: int)
             pat = d.patient.full_name if d.patient else "-"
             med = d.medication.name if d.medication else f"#{d.medication_id}"
             line = f"• {pat} — {med} × {d.quantity} — {(d.unit_price or 0):,.2f} SAR"
+            if getattr(d, "returned_at", None) is not None:
+                line += " — returned"
             pdf.set_font("ar", "", 10)
             pdf.set_text_color(*DARK)
             pdf.cell(0, 7, line[:110], align="L", new_x="LMARGIN", new_y="NEXT")
     else:
         pdf.set_font("ar", "", 11)
         pdf.multi_cell(0, 7, "No dispense operations.", align="L")
+
+    _movements = list(movements or [])
+    if _movements:
+        mv_labels = {"disposal": "Disposal", "return": "Return"}
+        pdf.section("Disposal & return movements")
+        for mv in _movements[:20]:
+            med = mv.medication.name if mv.medication else f"#{mv.medication_id}"
+            kind = mv_labels.get(mv.type, mv.type)
+            line = (f"• {kind} — {med} — {abs(int(mv.change or 0))} — "
+                    f"{mv.note or ''} — {mv.made_by or ''}")
+            pdf.set_font("ar", "", 10)
+            pdf.set_text_color(*RED if mv.type == "disposal" else DARK)
+            pdf.cell(0, 7, line[:110], align="L", new_x="LMARGIN", new_y="NEXT")
     return bytes(pdf.output())
 
 
@@ -652,6 +686,87 @@ def _payroll_report_en(entries, period_label: str) -> bytes:
     else:
         pdf.set_font("ar", "", 11)
         pdf.multi_cell(0, 7, "No payroll entries.", align="L")
+    return bytes(pdf.output())
+
+
+def pharmacy_stats_pdf(stats, lang: str = "ar") -> bytes:
+    """إحصاءات الصيدلية PDF لفترة — مبيعات + مخزون + أكثر الأدوية + يومي (ar|en).
+
+    `stats` هو كائن PharmacyStats الناتج من /pharmacy/stats.
+    """
+    if lang == "en":
+        return _pharmacy_stats_en(stats)
+    from datetime import datetime as _dt
+
+    pdf = ArabicPDF("إحصاءات الصيدلية")
+    pdf.section(f"الفترة: {stats.period}")
+    pdf.kv_row("تاريخ الإصدار", _dt.now().strftime("%Y-%m-%d %H:%M"))
+
+    pdf.section("ملخص الفترة")
+    pdf.kv_row("عمليات الصرف", stats.dispense_count)
+    pdf.kv_row("الوحدات المصروفة", stats.units)
+    pdf.kv_row("الإيراد (ر.س)", f"{stats.revenue:,.2f}")
+    pdf.kv_row("المحصّل (ر.س)", f"{stats.paid:,.2f}")
+    pdf.kv_row("المتبقي (ر.س)", f"{stats.outstanding:,.2f}")
+
+    pdf.section("المخزون الحالي")
+    pdf.kv_row("قيمة المخزون (ر.س)", f"{stats.inventory_value:,.2f}")
+    pdf.kv_row("منخفض / نافد", f"{stats.low} / {stats.out}")
+    pdf.kv_row("منتهٍ / قارب الانتهاء", f"{stats.expired} / {stats.expiring}")
+
+    if stats.top_medications:
+        pdf.section("أكثر الأدوية صرفًا")
+        for t in stats.top_medications[:10]:
+            line = f"• {t.name} ({t.code}) — {t.units} وحدة — {t.revenue:,.2f} ر.س"
+            pdf.set_font("ar", "", 10)
+            pdf.set_text_color(*DARK)
+            pdf.cell(0, 7, ar(line[:110]), align="R", new_x="LMARGIN", new_y="NEXT")
+
+    if stats.daily:
+        pdf.section("التجميع اليومي (آخر 14 يومًا)")
+        for p in stats.daily[-14:]:
+            line = f"• {p.date} — {p.units} وحدة — {p.revenue:,.2f} ر.س"
+            pdf.set_font("ar", "", 10)
+            pdf.set_text_color(*DARK)
+            pdf.cell(0, 7, ar(line[:110]), align="R", new_x="LMARGIN", new_y="NEXT")
+    return bytes(pdf.output())
+
+
+def _pharmacy_stats_en(stats) -> bytes:
+    """English pharmacy stats report for a period."""
+    from datetime import datetime as _dt
+
+    pdf = ArabicPDF("Pharmacy Stats", lang="en")
+    pdf.section(f"Period: {stats.period}")
+    pdf.kv_row("Issued at", _dt.now().strftime("%Y-%m-%d %H:%M"))
+
+    pdf.section("Period summary")
+    pdf.kv_row("Dispense operations", stats.dispense_count)
+    pdf.kv_row("Units dispensed", stats.units)
+    pdf.kv_row("Revenue (SAR)", f"{stats.revenue:,.2f}")
+    pdf.kv_row("Collected (SAR)", f"{stats.paid:,.2f}")
+    pdf.kv_row("Outstanding (SAR)", f"{stats.outstanding:,.2f}")
+
+    pdf.section("Current inventory")
+    pdf.kv_row("Inventory value (SAR)", f"{stats.inventory_value:,.2f}")
+    pdf.kv_row("Low / out of stock", f"{stats.low} / {stats.out}")
+    pdf.kv_row("Expired / expiring", f"{stats.expired} / {stats.expiring}")
+
+    if stats.top_medications:
+        pdf.section("Top dispensed medications")
+        for t in stats.top_medications[:10]:
+            line = f"• {t.name} ({t.code}) — {t.units} units — {t.revenue:,.2f} SAR"
+            pdf.set_font("ar", "", 10)
+            pdf.set_text_color(*DARK)
+            pdf.cell(0, 7, line[:110], align="L", new_x="LMARGIN", new_y="NEXT")
+
+    if stats.daily:
+        pdf.section("Daily totals (last 14 days)")
+        for p in stats.daily[-14:]:
+            line = f"• {p.date} — {p.units} units — {p.revenue:,.2f} SAR"
+            pdf.set_font("ar", "", 10)
+            pdf.set_text_color(*DARK)
+            pdf.cell(0, 7, line[:110], align="L", new_x="LMARGIN", new_y="NEXT")
     return bytes(pdf.output())
 
 

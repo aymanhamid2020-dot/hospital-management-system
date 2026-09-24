@@ -82,13 +82,74 @@ async def download_pharmacy_report(
     meds = db.query(Medication).order_by(Medication.name.asc()).all()
     recent = db.query(Dispense).order_by(Dispense.created_at.desc()).limit(30).all()
     total = db.query(_func.count(Dispense.id)).scalar() or 0
+    from app.models import StockMovement
+    movements = (db.query(StockMovement)
+                 .filter(StockMovement.type.in_(("disposal", "return")))
+                 .order_by(StockMovement.created_at.desc()).limit(20).all())
     scope = "المخزون كله" if lang == "ar" else "Full inventory"
     return Response(
-        content=pharmacy_report_pdf(meds, recent, scope, total, lang=lang),
+        content=pharmacy_report_pdf(meds, recent, scope, total, lang=lang,
+                                    movements=movements),
         media_type="application/pdf",
         headers={"Content-Disposition":
                  f'attachment; filename="pharmacy_report{"_en" if lang == "en" else ""}.pdf"'},
     )
+
+
+@router.get("/pharmacy/stats/pdf", summary="تقرير إحصاءات الصيدلية PDF")
+async def download_pharmacy_stats_report(
+    from_date: Optional[str] = Query(None, description="من تاريخ YYYY-MM-DD"),
+    to_date: Optional[str] = Query(None, description="إلى تاريخ YYYY-MM-DD (شامل)"),
+    lang: str = Query("ar", description="لغة التقرير: ar أو en"),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """تقرير إحصاءات الصيدلية PDF لفترة (للمدير فقط) — ar|en"""
+    from fastapi.responses import Response
+    from app.pdf_utils import pharmacy_stats_pdf
+    from app.routers.pharmacy import build_pharmacy_stats
+
+    _check_lang(lang)
+    stats = build_pharmacy_stats(db, from_date, to_date)
+    return Response(
+        content=pharmacy_stats_pdf(stats, lang=lang),
+        media_type="application/pdf",
+        headers={"Content-Disposition":
+                 f'attachment; filename="pharmacy_stats'
+                 f'{"_en" if lang == "en" else ""}.pdf"'},
+    )
+
+
+@router.get("/pharmacy/stats/csv", summary="تصدير إحصاءات الصيدلية CSV")
+async def export_pharmacy_stats_csv(
+    from_date: Optional[str] = Query(None, description="من تاريخ YYYY-MM-DD"),
+    to_date: Optional[str] = Query(None, description="إلى تاريخ YYYY-MM-DD (شامل)"),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """تصدير إحصاءات الصيدلية CSV (للمدير فقط) — فترة + مخزون + أفضل الأدوية + يومي"""
+    from app.routers.pharmacy import build_pharmacy_stats
+
+    stats = build_pharmacy_stats(db, from_date, to_date)
+    rows = [
+        ["الفترة", "النطاق", stats.period, ""],
+        ["الفترة", "عدد عمليات الصرف", stats.dispense_count, ""],
+        ["الفترة", "الوحدات المصروفة", stats.units, ""],
+        ["الفترة", "الإيراد (ر.س)", f"{stats.revenue:.2f}", ""],
+        ["الفترة", "المحصّل (ر.س)", f"{stats.paid:.2f}", ""],
+        ["الفترة", "المتبقي (ر.س)", f"{stats.outstanding:.2f}", ""],
+        ["المخزون", "القيمة (ر.س)", f"{stats.inventory_value:.2f}", ""],
+        ["المخزون", "منخفض", stats.low, ""],
+        ["المخزون", "نافد", stats.out, ""],
+        ["المخزون", "منتهٍ", stats.expired, ""],
+        ["المخزون", "قارب الانتهاء", stats.expiring, ""],
+    ]
+    for t in stats.top_medications:
+        rows.append(["أدوية", f"{t.name} ({t.code})", t.units, f"{t.revenue:.2f}"])
+    for p in stats.daily:
+        rows.append(["يومي", p.date, p.units, f"{p.revenue:.2f}"])
+    return _csv_response(["القسم", "البند", "القيمة", "ملاحظة"],
+                         rows, "pharmacy_stats.csv")
 
 
 @router.get("/payroll/pdf", summary="كشف الرواتب PDF")
@@ -195,11 +256,11 @@ async def export_lab_csv(
 
 @router.get("/pharmacy/csv", summary="تصدير الصيدلية CSV")
 async def export_pharmacy_csv(
-    section: str = Query("inventory", description="inventory | dispenses"),
+    section: str = Query("inventory", description="inventory | dispenses | disposals"),
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    """CSV مخزون الصيدلية أو سجل الصرف (للمدير فقط)"""
+    """CSV مخزون الصيدلية أو سجل الصرف أو الإتلاف/الإرجاع (للمدير فقط)"""
     from app.models import Medication, Dispense
 
     if section == "inventory":
@@ -215,21 +276,45 @@ async def export_pharmacy_csv(
 
     if section == "dispenses":
         disps = db.query(Dispense).order_by(Dispense.created_at.desc()).all()
+        st_labels = {"UNPAID": "غير مدفوع", "PARTIAL": "مدفوع جزئيًا", "PAID": "مدفوع"}
         rows = [[d.id,
                  f"{d.created_at:%Y-%m-%d %H:%M}" if d.created_at else "",
                  d.patient.full_name if d.patient else "",
                  d.medication.name if d.medication else f"#{d.medication_id}",
                  d.quantity, d.unit_price or 0,
-                 round((d.quantity or 0) * (d.unit_price or 0), 2),
-                 d.dispensed_by or ""]
+                 round(float(d.total_price or 0), 2),
+                 d.dispensed_by or "",
+                 d.dosage or "", d.frequency or "", d.duration or "",
+                 st_labels.get(d.status, d.status),
+                 "مرتجع" if d.returned_at is not None else ""]
                 for d in disps]
         return _csv_response(
             ["#", "التاريخ", "المريض", "الدواء", "الكمية", "سعر الوحدة",
-             "الإجمالي (ر.س)", "صرفه"],
+             "الإجمالي (ر.س)", "صرفه", "الجرعة", "التكرار", "المدة",
+             "حالة الدفع", "المرتجع"],
             rows, "pharmacy_dispenses.csv")
 
+    if section == "disposals":
+        from app.models import StockMovement
+        mvs = (db.query(StockMovement)
+               .filter(StockMovement.type.in_(("disposal", "return")))
+               .order_by(StockMovement.created_at.desc()).all())
+        mv_labels = {"disposal": "إتلاف", "return": "إرجاع"}
+        rows = [[mv.id,
+                 f"{mv.created_at:%Y-%m-%d %H:%M}" if mv.created_at else "",
+                 mv_labels.get(mv.type, mv.type),
+                 mv.medication.name if mv.medication else f"#{mv.medication_id}",
+                 abs(int(mv.change or 0)),
+                 mv.quantity_after if mv.quantity_after is not None else "",
+                 mv.note or "", mv.made_by or ""]
+                for mv in mvs]
+        return _csv_response(
+            ["#", "التاريخ", "النوع", "الدواء", "الكمية", "الرصيد بعد",
+             "السبب", "بواسطة"],
+            rows, "pharmacy_disposals.csv")
+
     raise HTTPException(status_code=400,
-                        detail="section يجب أن يكون inventory أو dispenses")
+                        detail="section يجب أن يكون inventory أو dispenses أو disposals")
 
 
 @router.get("/payroll/csv", summary="تصدير كشف الرواتب CSV")
@@ -352,7 +437,7 @@ async def export_accounts_csv(
     if lang not in ("ar", "en"):
         raise HTTPException(status_code=400, detail="lang يجب أن يكون ar أو en")
     from datetime import datetime as _dt
-    q = db.query(Dispense)
+    q = db.query(Dispense).filter(Dispense.returned_at.is_(None))  # المرتجع مستثنى
     fr, to = _period_range(period)
     if fr:
         q = q.filter(Dispense.created_at >= fr, Dispense.created_at < to)
@@ -396,7 +481,7 @@ async def download_accounts_report(
     from app.pdf_utils import accounts_sales_pdf
 
     _check_lang(lang)
-    q = db.query(Dispense)
+    q = db.query(Dispense).filter(Dispense.returned_at.is_(None))  # المرتجع مستثنى
     fr, to = _period_range(period)
     if fr:
         q = q.filter(Dispense.created_at >= fr, Dispense.created_at < to)

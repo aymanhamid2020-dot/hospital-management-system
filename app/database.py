@@ -66,6 +66,15 @@ PENDING_COLUMNS = {
         "status": "VARCHAR NOT NULL DEFAULT 'UNPAID'",
         "paid_amount": "FLOAT NOT NULL DEFAULT 0",
         "paid_at": "TIMESTAMP",
+        # تطوير الصيدلية: توجيه الاستخدام + الإرجاع + ربط الوصفة
+        "dosage": "VARCHAR",
+        "frequency": "VARCHAR",
+        "duration": "VARCHAR",
+        "instructions": "VARCHAR",
+        "prescription_id": "INTEGER",
+        "returned_at": "TIMESTAMP",
+        "return_reason": "VARCHAR",
+        "returned_by": "VARCHAR",
     },
 }
 
@@ -175,8 +184,10 @@ INDEXES = {
     "attachments": ["patient_id", "record_id"],
     "notifications": ["is_read", "appointment_id", "patient_id"],
     "lab_orders": ["patient_id", "status"],
-    "dispenses": ["patient_id", "medication_id", "created_at"],
+    "dispenses": ["patient_id", "medication_id", "created_at", "prescription_id"],
     "stock_movements": ["medication_id", "created_at"],
+    "prescriptions": ["patient_id", "status", "doctor_id"],
+    "prescription_items": ["prescription_id", "medication_id"],
     "payroll": ["staff_id", "period"],
     "audit_logs": ["created_at", "username"],
     "patients": ["national_id"],

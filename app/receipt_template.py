@@ -109,6 +109,23 @@ def sale_receipt_html(d, lang: str = "ar") -> str:
     sub = ("نظام إدارة المستشفيات والعيادات"
            if not en else "Hospital & Clinics Management System")
     pm = (_PM_EN if en else _PM).get(d.payment_method, d.payment_method)
+    # حقول توجيه الاستخدام (إن وُجدت) + تنبيه الإرجاع
+    usage = []
+    for attr, ar, en_lb in (("dosage", "الجرعة", "Dosage"),
+                            ("frequency", "التكرار", "Frequency"),
+                            ("duration", "المدة", "Duration"),
+                            ("instructions", "تعليمات", "Instructions")):
+        val = getattr(d, attr, None)
+        if val:
+            usage.append(_kv(ar if not en else en_lb, val, lang))
+    returned_row = ""
+    if getattr(d, "returned_at", None) is not None:
+        reason = getattr(d, "return_reason", None) or "-"
+        returned_row = _kv(
+            "مرتجع" if not en else "Returned",
+            f'<span class="badge unpaid">{"نعم — " if not en else "Yes — "}{_e(reason)}</span>',
+            lang,
+        )
     rows = "".join([
         _kv("رقم الإيصال" if not en else "Receipt #", f"#{d.id}", lang),
         _kv("التاريخ" if not en else "Date",
@@ -118,9 +135,11 @@ def sale_receipt_html(d, lang: str = "ar") -> str:
         _kv("الكمية" if not en else "Quantity", d.quantity, lang),
         _kv("سعر الوحدة" if not en else "Unit price",
             f"{_money(d.unit_price)} SAR" if en else f"{_money(d.unit_price)} ر.س", lang),
+        *usage,
         _kv("طريقة الدفع" if not en else "Payment method", pm, lang),
         _kv("صرفه" if not en else "Dispensed by", d.dispensed_by or "-", lang),
         _kv("الحالة" if not en else "Status", _badge(d.status, lang), lang),
+        returned_row,
     ])
     body = f"""
 {_head(title, sub)}

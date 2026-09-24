@@ -336,6 +336,15 @@ class Dispense(Base):
     status = Column(String, nullable=False, default="UNPAID")  # UNPAID/PARTIAL/PAID
     paid_amount = Column(Float, nullable=False, default=0)
     paid_at = Column(DateTime, nullable=True)
+    # ===== تطوير الصيدلية: توجيه الاستخدام + الإرجاع + ربط الوصفة =====
+    dosage = Column(String, nullable=True)            # الجرعة (مثال: قرص بعد الأكل)
+    frequency = Column(String, nullable=True)         # التكرار (مثال: 3 مرات يوميًا)
+    duration = Column(String, nullable=True)          # المدة (مثال: 5 أيام)
+    instructions = Column(String, nullable=True)      # تعليمات إضافية
+    prescription_id = Column(Integer, ForeignKey("prescriptions.id", ondelete="SET NULL"), nullable=True)
+    returned_at = Column(DateTime, nullable=True)     # تاريخ الإرجاع (NULL = غير مرجَع)
+    return_reason = Column(String, nullable=True)
+    returned_by = Column(String, nullable=True)       # اسم من نفّذ الإرجاع
 
     medication = relationship("Medication")
     patient = relationship("Patient")
@@ -391,3 +400,47 @@ class AuditLog(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     user = relationship("User")
+
+
+# ===== وصفات الدواء =====
+class Prescription(Base):
+    """وصفة طبية: تُنشأ من الطبيب/المدير وتُصرف كاملة أو جزئيًا من الصيدلية."""
+    __tablename__ = "prescriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"), nullable=False)
+    doctor_id = Column(Integer, ForeignKey("doctors.id", ondelete="SET NULL"), nullable=True)
+    record_id = Column(Integer, ForeignKey("medical_records.id", ondelete="SET NULL"), nullable=True)
+    notes = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="PENDING")  # PENDING/PARTIAL/DISPENSED/CANCELLED
+    created_by = Column(String, nullable=True)                  # اسم المستخدم منشئ الوصفة
+    created_at = Column(DateTime, server_default=func.now())
+    dispensed_at = Column(DateTime, nullable=True)
+
+    patient = relationship("Patient")
+    doctor = relationship("Doctor")
+    items = relationship("PrescriptionItem", back_populates="prescription",
+                         cascade="all, delete-orphan")
+
+
+class PrescriptionItem(Base):
+    """بند داخل وصفة: دواء بكمية وجرعة، مع كمية الصرف المنفَّذة."""
+    __tablename__ = "prescription_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    prescription_id = Column(Integer, ForeignKey("prescriptions.id", ondelete="CASCADE"), nullable=False)
+    medication_id = Column(Integer, ForeignKey("medications.id", ondelete="CASCADE"), nullable=False)
+    quantity = Column(Integer, nullable=False, default=1)          # الكمية الموصوفة
+    dispensed_quantity = Column(Integer, nullable=False, default=0)  # المنصَّف فعليًا
+    dosage = Column(String, nullable=True)
+    frequency = Column(String, nullable=True)
+    duration = Column(String, nullable=True)
+    instructions = Column(String, nullable=True)
+
+    prescription = relationship("Prescription", back_populates="items")
+    medication = relationship("Medication")
+
+    @property
+    def remaining(self) -> int:
+        """المتبقي من البند بعد الصرف — يُستخدم في واجهة الوصفة."""
+        return max(0, (self.quantity or 0) - (self.dispensed_quantity or 0))

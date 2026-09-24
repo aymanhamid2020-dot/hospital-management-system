@@ -14,13 +14,14 @@ from app.auth import get_current_user, require_admin
 from app.database import get_db
 from app.models import Medication, StockMovement, User
 from app.schemas import (
-    AdjustIn, InventoryItem, InventorySummary, MedicationInDB, RestockIn, StockMovementInDB,
+    AdjustIn, DisposeIn, InventoryItem, InventorySummary, MedicationInDB,
+    RestockIn, StockMovementInDB,
 )
 
 router = APIRouter(prefix="/inventory", tags=["Inventory"])
 
 STATUSES = ("ok", "low", "out", "expiring", "expired")
-MOVEMENT_TYPES = ("in", "out", "adjust")
+MOVEMENT_TYPES = ("in", "out", "adjust", "disposal", "return")
 DEFAULT_EXPIRING_DAYS = 30
 
 
@@ -127,14 +128,17 @@ async def inventory_summary(
 async def list_movements(
     medication_id: Optional[int] = Query(None, description="فلترة حسب الدواء"),
     movement_type: Optional[str] = Query(
-        None, alias="type", description="نوع الحركة: in|out|adjust"),
+        None, alias="type", description="نوع الحركة: in|out|adjust|disposal|return"),
     limit: int = Query(100, ge=1, le=500, description="أقصى عدد الحركات"),
     db: Session = Depends(get_db),
     _ = Depends(get_current_user),
 ):
     """حركات مرتبة تنازليًا (أحدث أولًا) — نوع خاطئ ⇒ 400."""
     if movement_type is not None and movement_type not in MOVEMENT_TYPES:
-        raise HTTPException(status_code=400, detail="type يجب أن يكون in أو out أو adjust")
+        raise HTTPException(
+            status_code=400,
+            detail="type يجب أن يكون in أو out أو adjust أو disposal أو return",
+        )
     q = db.query(StockMovement)
     if medication_id is not None:
         q = q.filter(StockMovement.medication_id == medication_id)
@@ -201,6 +205,38 @@ async def adjust(
         change=delta,
         quantity_after=med.quantity,
         note=payload.note or "جرد",
+        made_by=current_user.username,
+    ))
+    db.commit()
+    db.refresh(med)
+    return med
+
+
+@router.post("/{med_id}/dispose", response_model=MedicationInDB,
+             summary="إتلاف كمية منتهية الصلاحية")
+async def dispose(
+    med_id: int,
+    payload: DisposeIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """إنقاص الكمية كعملية إتلاف (للمدير فقط) — يُسجَّل حركة disposal
+    لتوثيق الكميات المنتهية في دفتر المخزون وتقاريره."""
+    med = db.query(Medication).filter(Medication.id == med_id).first()
+    if not med:
+        raise HTTPException(status_code=404, detail="لا يوجد دواء بالمعرف المحدد")
+    if payload.quantity > med.quantity:
+        raise HTTPException(
+            status_code=400,
+            detail=f"الكمية المُتلفة ({payload.quantity}) تتجاوز المتوفر ({med.quantity})",
+        )
+    med.quantity -= payload.quantity
+    db.add(StockMovement(
+        medication_id=med.id,
+        type="disposal",
+        change=-payload.quantity,
+        quantity_after=med.quantity,
+        note=payload.note or "إتلاف كمية منتهية",
         made_by=current_user.username,
     ))
     db.commit()
