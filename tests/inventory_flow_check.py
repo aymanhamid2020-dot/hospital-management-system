@@ -1,10 +1,15 @@
 # تدفق حي كامل لقسم المخزون: ملخص → أصناف وحالات → توريد → جرد → حركات → تقارير
+import time
+
 import httpx
 
 c = httpx.Client(base_url="http://127.0.0.1:8001", timeout=30)
 tok = c.post("/auth/login", json={"username": "admin", "password": "admin123"}).json()
 H = {"Authorization": "Bearer " + tok["access_token"], "Content-Type": "application/json"}
 fails = []
+
+# أكواد فريدة لكل تشغيل حتى يعمل الفحص على قاعدة مستخدمة (idempotent)
+TAG = "I" + format(int(time.time()) % 100000, "05d")
 
 
 def ok(name, cond, extra=""):
@@ -29,32 +34,31 @@ base_value = s0["total_value"]
 
 # ===== 2) أربعة أصناف بحالات مختلفة =====
 r = c.post("/medications/", headers=H, json={
-    "code": "INVFLOW1", "name": "عقار سليم", "quantity": 20, "unit": "علبة",
+    "code": TAG + "1", "name": "عقار سليم " + TAG, "quantity": 20, "unit": "علبة",
     "price": 5.0, "min_quantity": 5})
 ok("صنف سليم 20×5", r.status_code == 200, r.text[:120])
-m_ok = r.json() if r.status_code == 200 else next(
-    (x for x in c.get("/medications/", headers=H).json() if x["code"] == "INVFLOW1"), None)
+m_ok = r.json() if r.status_code == 200 else None
 
 r = c.post("/medications/", headers=H, json={
-    "code": "INVFLOW2", "name": "عقار منخفض", "quantity": 3, "unit": "علبة",
+    "code": TAG + "2", "name": "عقار منخفض " + TAG, "quantity": 3, "unit": "علبة",
     "price": 10.0, "min_quantity": 5})
 ok("صنف منخفض 3 ≤ 5", r.status_code == 200, r.text[:120])
 m_low = r.json() if r.status_code == 200 else None
 
 r = c.post("/medications/", headers=H, json={
-    "code": "INVFLOW3", "name": "عقار منتهٍ", "quantity": 6, "unit": "علبة",
+    "code": TAG + "3", "name": "عقار منتهٍ " + TAG, "quantity": 6, "unit": "علبة",
     "price": 2.0, "min_quantity": 5, "expiry_date": "2020-01-01T00:00:00"})
 ok("صنف منتهي الصلاحية", r.status_code == 200, r.text[:120])
 m_exp = r.json() if r.status_code == 200 else None
 
 r = c.post("/medications/", headers=H, json={
-    "code": "INVFLOW4", "name": "عقار نافد", "quantity": 0, "unit": "علبة",
+    "code": TAG + "4", "name": "عقار نافد " + TAG, "quantity": 0, "unit": "علبة",
     "price": 7.5, "min_quantity": 5})
 ok("صنف نافد 0", r.status_code == 200, r.text[:120])
 m_out = r.json() if r.status_code == 200 else None
 
 # ===== 3) الحالات والقيمة في القائمة =====
-items = c.get("/inventory/", headers=H, params={"search": "INVFLOW"}).json()
+items = c.get("/inventory/", headers=H, params={"search": TAG}).json()
 by_id = {x["id"]: x for x in items}
 if m_ok and m_ok["id"] in by_id:
     ok("قيمة السليم = 20 × 5 = 100", by_id[m_ok["id"]]["value"] == 100.0,
@@ -74,9 +78,9 @@ if m_out and m_out["id"] in by_id:
        by_id[m_out["id"]]["status"])
 
 # ===== 4) الفلاتر =====
-by_code = c.get("/inventory/", headers=H, params={"search": "INVFLOW2"}).json()
+by_code = c.get("/inventory/", headers=H, params={"search": TAG + "2"}).json()
 ok("بحث بالرمز يرجع الصنف فقط",
-   len(by_code) == 1 and by_code[0]["code"] == "INVFLOW2", str(len(by_code)))
+   len(by_code) == 1 and by_code[0]["code"] == TAG + "2", str(len(by_code)))
 low_only = c.get("/inventory/", headers=H, params={"status": "low"}).json()
 ok("فلتر status=low كلها low", bool(low_only)
    and all(x["status"] == "low" for x in low_only), str(len(low_only)))
