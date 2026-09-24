@@ -11,6 +11,7 @@
 """
 import os
 import sys
+from datetime import datetime
 
 import httpx
 
@@ -626,6 +627,20 @@ def main():
     c.put(f"/doctors/{d2}/availability", headers=h,
           json={"is_available": True})
 
+    # تقرير الأداء الشهري للطبيب (نهاية جديدة)
+    nowm = datetime.now().strftime("%Y-%m")
+    r_pf = c.get(f"/doctors/{d2}/performance", headers=h, params={"month": nowm})
+    j_pf = r_pf.json() if r_pf.status_code == 200 else {}
+    check("تقرير أداء شهري للطبيب", r_pf.status_code == 200
+          and j_pf.get("month") == nowm
+          and all(k in j_pf for k in ("total", "completed", "cancelled",
+                                      "completion_rate", "patients", "records")),
+          str(r_pf.status_code))
+    r_pf4 = c.get(f"/doctors/{d2}/performance", headers=h,
+                  params={"month": "13-2026"})
+    check("شهر غير صالح ⇒ 400 عربي", r_pf4.status_code == 400
+          and "YYYY-MM" in r_pf4.json().get("detail", ""), str(r_pf4.status_code))
+
     # حذف محميّ: طبيب ذي مواعيد ⇒ 409 بدل انفجار/حذف صامت للسجل
     r_del = c.delete(f"/doctors/{doctor_id}", headers=h)
     check("حذف طبيب ذي مواعيد ⇒ 409", r_del.status_code == 409
@@ -642,9 +657,9 @@ def main():
 
     # علامات الواجهة الجديدة في app.js
     ru2 = c.get("/ui/app.js")
-    check("واجهة الأطباء: بحث/فلاتر + توافر + تعديل",
+    check("واجهة الأطباء: بحث/فلاتر + توافر + تعديل + تقرير",
           b"filterDoctors" in ru2.content and b"toggleDoctorAvail" in ru2.content
-          and b"editDoctor" in ru2.content)
+          and b"editDoctor" in ru2.content and b"doctorReport" in ru2.content)
 
     print(f"\n==== LIVE CONTAINER RESULT: {PASSED} passed, {FAILED} failed ====")
     return 0 if FAILED == 0 else 1

@@ -1087,6 +1087,7 @@ const VIEWS = {
             <td>${d.is_available ? '✅' : '⛔'}</td>
             <td>
               ${isAdmin() ? `<button class="btn sm ghost" onclick="editDoctor(${d.id})">✏️ تعديل</button>` : ''}
+              <button class="btn sm ghost" onclick="doctorReport(${d.id})">📈 تقرير</button>
               ${canToggle(d) ? `<button class="btn sm ghost" onclick="toggleDoctorAvail(${d.id},${d.is_available})">${d.is_available ? '⛔ تعطيل' : '✅ تمكين'}</button>` : ''}
               ${isAdmin() ? `<button class="btn sm danger" onclick="del('doctors',${d.id},'doctors')">حذف</button>` : ''}
             </td>
@@ -2509,6 +2510,43 @@ async function toggleDoctorAvail(id, current) {
     toast((!current ? 'أصبح الطبيب متاحًا ✅' : 'أُوقف توافر الطبيب ⛔'));
     await navigate('doctors');
   } catch (e) { toast(e.message, true); }
+}
+
+/* تقرير أداء الطبيب الشهري — مواعيد الشهر ونسبة إتمامه وسجلاته */
+function doctorReport(id) {
+  const d = (DOCTORS_CACHE || []).find(x => x.id === id);
+  if (!d) return toast('الطبيب غير موجود', true);
+  openModal('📈 تقرير الأداء الشهري — ' + esc(d.full_name), `
+    <div class="toolbar" style="margin-bottom:10px">
+      <input type="month" id="rp-month" value="${new Date().toISOString().slice(0, 7)}"
+             onchange="loadDoctorReport(${id})">
+      <button class="btn ghost" onclick="loadDoctorReport(${id})">🔄 تحديث</button>
+    </div>
+    <div id="rp-body"><div class="empty">جارٍ التحميل…</div></div>`);
+  loadDoctorReport(id);
+}
+
+async function loadDoctorReport(id) {
+  const box = document.getElementById('rp-body');
+  const m = V('rp-month') || new Date().toISOString().slice(0, 7);
+  if (!box) return;
+  box.innerHTML = '<div class="empty">جارٍ التحميل…</div>';
+  try {
+    const r = await api(`/doctors/${id}/performance?month=${encodeURIComponent(m)}`);
+    const pct = Math.round((r.completion_rate || 0) * 100);
+    box.innerHTML = `
+      <div class="stats">
+        <div class="stat"><div class="num">${r.total}</div><div class="lbl">مواعيد الشهر</div></div>
+        <div class="stat green"><div class="num">${r.completed}</div><div class="lbl">مكتملة</div></div>
+        <div class="stat amber"><div class="num">${r.cancelled}</div><div class="lbl">ملغاة</div></div>
+        <div class="stat"><div class="num">${pct}%</div><div class="lbl">نسبة الإتمام</div></div>
+        <div class="stat"><div class="num">${r.patients}</div><div class="lbl">مرضى مرتبطون</div></div>
+        <div class="stat"><div class="num">${r.records}</div><div class="lbl">سجلات طبية</div></div>
+      </div>
+      <p style="margin:8px 0 0;color:#64748b">معلّقة: ${r.pending} · مؤكّدة: ${r.confirmed} — الشهر ${esc(r.month)}</p>`;
+  } catch (e) {
+    box.innerHTML = `<div class="empty" style="color:#dc3545">⚠️ ${esc(e.message)}</div>`;
+  }
 }
 
 function addAppt() {

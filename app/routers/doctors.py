@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -7,8 +8,8 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Appointment, Department, Doctor, MedicalRecord, User
 from app.schemas import (
-    DoctorAvailability, DoctorCreate, DoctorInDB, DoctorSummaryStats,
-    DoctorUpdate, DoctorWithStats, DoctorsStats,
+    DoctorAvailability, DoctorCreate, DoctorInDB, DoctorPerformance,
+    DoctorSummaryStats, DoctorUpdate, DoctorWithStats, DoctorsStats,
 )
 from app.auth import get_current_user, require_admin
 
@@ -236,6 +237,58 @@ async def set_availability(doctor_id: int, body: DoctorAvailability,
     db.commit()
     db.refresh(doctor)
     return doctor
+
+
+@router.get("/{doctor_id}/performance", response_model=DoctorPerformance,
+            summary="تقرير أداء الطبيب الشهري")
+async def doctor_performance(doctor_id: int,
+                             month: Optional[str] = Query(
+                                 None,
+                                 description="الشهر بصيغة YYYY-MM — افتراضي الشهر الحالي"),
+                             db: Session = Depends(get_db),
+                             _: User = Depends(get_current_user)):
+    """أداء الطبيب في شهر: مواعيد حسب الحالة + نسبة الإتمام + مرضاه + سجلاته."""
+    _get_or_404(db, doctor_id)
+    if month is None:
+        month = datetime.now().strftime("%Y-%m")
+    if not (len(month) == 7 and month[4] == "-"
+            and month[:4].isdigit() and month[5:7].isdigit()
+            and 1 <= int(month[5:7]) <= 12):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="month يجب أن يكون بصيغة YYYY-MM مثل 2026-09",
+        )
+
+    year, mon = int(month[:4]), int(month[5:7])
+    start = datetime(year, mon, 1)
+    end = datetime(year + 1, 1, 1) if mon == 12 else datetime(year, mon + 1, 1)
+
+    rows = (db.query(Appointment.status, func.count(Appointment.id))
+            .filter(Appointment.doctor_id == doctor_id,
+                    Appointment.appointment_date >= start,
+                    Appointment.appointment_date < end)
+            .group_by(Appointment.status).all())
+    by_status = {getattr(st, "value", str(st)): cnt for st, cnt in rows}
+    total = sum(by_status.values())
+    completed = by_status.get("completed", 0)
+    patients = (db.query(func.count(func.distinct(Appointment.patient_id)))
+                .filter(Appointment.doctor_id == doctor_id,
+                        Appointment.appointment_date >= start,
+                        Appointment.appointment_date < end)
+                .scalar() or 0)
+    records = (db.query(func.count(MedicalRecord.id))
+               .filter(MedicalRecord.doctor_id == doctor_id,
+                       MedicalRecord.created_at >= start,
+                       MedicalRecord.created_at < end)
+               .scalar() or 0)
+    return DoctorPerformance(
+        month=month, doctor_id=doctor_id, total=total, completed=completed,
+        cancelled=by_status.get("cancelled", 0),
+        pending=by_status.get("pending", 0),
+        confirmed=by_status.get("confirmed", 0),
+        completion_rate=round(completed / total, 4) if total else 0.0,
+        patients=patients, records=records,
+    )
 
 
 @router.delete("/{doctor_id}", status_code=status.HTTP_204_NO_CONTENT, summary="حذف طبيب")

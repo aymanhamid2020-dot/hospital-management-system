@@ -41,7 +41,7 @@ jobs:
         run: BASE_URL=http://127.0.0.1:8000 WAIT=60 python tests/stack_check.py
       - name: فحص PWA/Offline
         run: BASE_URL=http://127.0.0.1:8000 python tests/pwa_offline_check.py
-      - name: اختبار حمل خفيف (p95 ≤ 800ms)
+      - name: اختبار حمل خفيف (p95 ≤ 700ms)
         run: BASE_URL=http://127.0.0.1:8000 python tests/load_test.py
 
   docker:

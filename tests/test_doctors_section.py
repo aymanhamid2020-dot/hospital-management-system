@@ -3,6 +3,7 @@
 معزول عن بقية الاختبارات بوسوم فريدة (uid) حتى يعمل على القاعدة المشتركة بأمان.
 """
 import uuid
+from datetime import datetime
 
 from conftest import login
 
@@ -265,3 +266,61 @@ def test_delete_guards(client, admin):
     h = _nonadmin(client, "dl")
     d4 = _mk_doctor(client, admin)
     assert client.delete(f"/doctors/{d4['id']}", headers=h).status_code == 403
+
+
+# ========== تقرير الأداء الشهري ==========
+def test_performance_report(client, admin):
+    """تقرير شهري: مواعيد حسب الحالة + نسبة الإتمام + مرضى وسجلات الشهر + تحقق month."""
+    doc = _mk_doctor(client, admin)
+    pat = _mk_patient(client, admin)
+
+    # موعدان في 2031-04: أحدهما مكتمل والآخر ملغى
+    a1 = client.post("/appointments/", headers=admin, json={
+        "patient_id": pat, "doctor_id": doc["id"],
+        "appointment_date": "2031-04-04T10:00:00", "reason": "كشف"})
+    a2 = client.post("/appointments/", headers=admin, json={
+        "patient_id": pat, "doctor_id": doc["id"],
+        "appointment_date": "2031-04-05T10:00:00", "reason": "متابعة"})
+    assert a1.status_code == 200 and a2.status_code == 200, a1.text + a2.text
+    assert client.put(f"/appointments/{a1.json()['id']}", headers=admin,
+                      json={"status": "completed"}).status_code == 200
+    assert client.put(f"/appointments/{a2.json()['id']}", headers=admin,
+                      json={"status": "cancelled"}).status_code == 200
+
+    r = client.get(f"/doctors/{doc['id']}/performance", headers=admin,
+                   params={"month": "2031-04"})
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j["month"] == "2031-04" and j["doctor_id"] == doc["id"]
+    assert j["total"] == 2 and j["completed"] == 1 and j["cancelled"] == 1
+    assert j["pending"] == 0 and j["confirmed"] == 0
+    assert j["completion_rate"] == 0.5 and j["patients"] == 1
+    assert j["records"] == 0
+
+    # شهر بلا مواعيد ⇒ أصفار صريحة
+    j0 = client.get(f"/doctors/{doc['id']}/performance", headers=admin,
+                    params={"month": "2031-01"}).json()
+    assert j0["total"] == 0 and j0["completion_rate"] == 0.0
+    assert j0["patients"] == 0 and j0["records"] == 0
+
+    # سجل طبي يُنشأ الآن ⇒ يظهر في الشهر الحالي فقط
+    assert client.post("/medical-records/", headers=admin, json={
+        "patient_id": pat, "doctor_id": doc["id"], "diagnosis": "كشف"}
+    ).status_code == 200
+    now_m = datetime.now().strftime("%Y-%m")
+    jn = client.get(f"/doctors/{doc['id']}/performance", headers=admin,
+                    params={"month": now_m}).json()
+    assert jn["records"] == 1 and jn["total"] == 0
+
+    # month غير صالح ⇒ 400 برسالة معيارية
+    for bad in ("2031-13", "203104", "04-2031", "hack"):
+        rb = client.get(f"/doctors/{doc['id']}/performance", headers=admin,
+                        params={"month": bad})
+        assert rb.status_code == 400, (bad, rb.status_code)
+        assert "YYYY-MM" in rb.json()["detail"]
+
+    # 401 بلا توكن + 404 لمعرف مفقود
+    assert client.get(f"/doctors/{doc['id']}/performance",
+                      params={"month": "2031-04"}).status_code == 401
+    assert client.get("/doctors/999999/performance", headers=admin,
+                      params={"month": "2031-04"}).status_code == 404

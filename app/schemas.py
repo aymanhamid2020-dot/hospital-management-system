@@ -219,6 +219,20 @@ class DoctorsStats(BaseModel):
     departments: List[DepartmentCount]
 
 
+class DoctorPerformance(BaseModel):
+    """تقرير أداء الطبيب لشهر محدّد — للمراجعة الدورية."""
+    month: str = Field(..., description="الشهر المُعتمد بصيغة YYYY-MM")
+    doctor_id: int
+    total: int
+    completed: int
+    cancelled: int
+    pending: int
+    confirmed: int
+    completion_rate: float = Field(..., description="نسبة المواعيد المكتملة (0..1)")
+    patients: int = Field(0, description="مرضى فريدون خلال الشهر")
+    records: int = Field(0, description="سجلات طبية أُنشئت خلال الشهر")
+
+
 # ===== المواعيد =====
 class AppointmentBase(BaseModel):
     patient_id: int = Field(..., description="معرّف المريض")

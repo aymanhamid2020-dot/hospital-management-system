@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🩺 جولة قسم الأطباء | نظام إدارة المستشفيات</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", Tahoma, Arial, sans-serif; background: #f4f6fa; color: #1e293b; line-height: 1.85; }
+  header.hero { background: linear-gradient(135deg, #0f766e, #2c7be5); color: #fff; padding: 42px 20px; text-align: center; }
+  header.hero h1 { font-size: 30px; margin-bottom: 8px; }
+  header.hero p { opacity: .92; font-size: 16px; }
+  nav.toc { background: #fff; border-bottom: 1px solid #e2e8f0; padding: 12px 16px; text-align: center; position: sticky; top: 0; z-index: 50; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+  nav.toc a { display: inline-block; margin: 4px 7px; padding: 6px 14px; border-radius: 20px; background: #eef4ff; color: #2c7be5; text-decoration: none; font-size: 14px; font-weight: 600; }
+  nav.toc a:hover { background: #2c7be5; color: #fff; }
+  main { max-width: 1100px; margin: 30px auto 0; padding: 0 18px 50px; }
+  section.step { background: #fff; border-radius: 14px; box-shadow: 0 4px 16px rgba(0,0,0,.06); padding: 28px 30px; margin-bottom: 34px; }
+  h2 { font-size: 23px; margin-bottom: 12px; color: #0f172a; }
+  h2 .n { display: inline-block; background: #0f766e; color: #fff; width: 40px; height: 40px; border-radius: 50%; text-align: center; line-height: 40px; font-size: 18px; margin-left: 10px; vertical-align: middle; }
+  h3 { font-size: 17px; margin: 18px 0 8px; color: #0f766e; }
+  p, li { margin-bottom: 9px; font-size: 16px; }
+  ul, ol { padding-right: 24px; margin-bottom: 8px; }
+  img.shot { width: 100%; border: 1px solid #dbe3f0; border-radius: 10px; margin-top: 14px; box-shadow: 0 8px 22px rgba(0,0,0,.12); display: block; }
+  .cap { text-align: center; color: #64748b; font-size: 14px; margin-top: 8px; }
+  .badge { display: inline-block; padding: 2px 11px; border-radius: 13px; font-size: 13px; font-weight: 600; margin: 0 3px 6px 0; }
+  .b-ui   { background: #fef9c3; color: #a16207; }
+  .b-api  { background: #dcfce7; color: #15803d; }
+  .b-task { background: #e0f2fe; color: #0369a1; }
+  code { background: #f1f5f9; padding: 2px 7px; border-radius: 6px; font-size: 14px; direction: ltr; display: inline-block; unicode-bidi: embed; }
+  .note { background: #fff7ed; border-right: 4px solid #f97316; padding: 12px 16px; border-radius: 8px; margin-top: 14px; font-size: 15px; }
+  .tip  { background: #f0fdf4; border-right: 4px solid #22c55e; padding: 12px 16px; border-radius: 8px; margin-top: 14px; font-size: 15px; }
+  table.roles { width: 100%; border-collapse: collapse; margin: 10px 0 4px; }
+  table.roles th, table.roles td { border: 1px solid #e2e8f0; padding: 8px 12px; text-align: right; font-size: 15px; }
+  table.roles th { background: #f8fafc; font-weight: 700; }
+  footer { text-align: center; padding: 30px 16px 40px; color: #64748b; font-size: 14px; }
+  footer a { color: #2c7be5; text-decoration: none; font-weight: 600; margin: 0 8px; }
+  @media (max-width: 700px) { section.step { padding: 18px 16px; } header.hero h1 { font-size: 23px; } }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <h1>🩺 جولة قسم الأطباء</h1>
+  <p>ست لقطات حيّة — من بطاقات الإحصاءات والبحث الفوري 🔍 إلى التعديل الكامل ✏️ وتبديل التوافر ⛅ وتقرير الأداء الشهري 📈 (بحث · فلاتر · صلاحيات · تقرير)</p>
+</header>
+
+<nav class="toc">
+  <a href="#s1">1️⃣ الدخول</a>
+  <a href="#s2">2️⃣ الإحصاءات والجدول</a>
+  <a href="#s3">3️⃣ البحث الفوري 🔍</a>
+  <a href="#s4">4️⃣ التعديل ✏️</a>
+  <a href="#s5">5️⃣ التوافر ⛅</a>
+  <a href="#s6">6️⃣ تقرير الأداء 📈</a>
+</nav>
+
+<main>
+
+  <!-- ============ 1 ============ -->
+  <section class="step" id="s1">
+    <h2><span class="n">1</span> البداية: تسجيل الدخول 🔐</h2>
+    <p>افتح <code>/ui</code> في نافذة خاصّة (Incognito) لترى شاشة الدخول مباشرة. صلاحيات القسم
+       صارمة: <b>البحث والإحصاءات والتقرير متاحة لكل مستخدم مصادَق</b> — أما الإنشاء
+       والتعديل والحذف فللمدير وحده <b>403</b>، وبدون توكن <b>401</b> لكل النهايات.</p>
+    <table class="roles">
+      <tr><th>الدور</th><th>اسم المستخدم</th><th>كلمة المرور</th><th>قسم الأطباء</th></tr>
+      <tr><td>👨‍💼 مدير</td><td><code>admin</code></td><td><code>admin123</code></td><td>✅ كامل (إنشاء/تعديل/حذف/توافر/تقارير)</td></tr>
+      <tr><td>🩺 طبيب</td><td><code>drsara</code></td><td><code>sara12345</code></td><td>👁️ قراءة + تبديل توافره هو فقط</td></tr>
+      <tr><td>🧑‍💼 موظف استقبال</td><td><code>reception1</code></td><td><code>rec12345</code></td><td>👁️ قراءة فقط — الإنشاء 403</td></tr>
+    </table>
+    <img class="shot" src="screenshots/doctors-tour/01-login.png" alt="شاشة تسجيل الدخول">
+    <div class="cap">شاشة الدخول — نافذة خاصّة ببروفايل نظيف تمامًا</div>
+  </section>
+
+  <!-- ============ 2 ============ -->
+  <section class="step" id="s2">
+    <h2><span class="n">2</span> الإحصاءات والجدول 📊</h2>
+    <span class="badge b-api">GET /doctors/</span><span class="badge b-api">GET /doctors/stats</span><span class="badge b-ui">واجهة</span>
+    <p>الشريط الجانبي ← <b>🩺 الأطباء</b>. أعلاه <b>خمس بطاقات إحصاءات</b> تقرأ
+       <code>/doctors/stats</code> لحظيًا: إجمالي الأطباء · متاحون · غير متاحين ·
+       عدد التخصصات · المواعيد المرتبطة. وفي اللقطة: <b>15 طبيبًا · 15 متاحون · 7 تخصصات ·
+       13 موعدًا مرتبطًا</b>.</p>
+    <h3>شريط الأدوات والجدول:</h3>
+    <ul>
+      <li>🔍 <b>بحث فوري</b> بالاسم أو التخصص أو رقم الترخيص + <b>فلتر القسم</b> (مع
+          خيار «بدون قسم») + <b>فلتر التوافر</b> (متاح/غير متاح).</li>
+      <li>لكل صف أربعة أزرار: <b>✏️ تعديل</b> (مدير) · <b>📈 تقرير</b> (الكل) ·
+          <b>⛔ تعطيل / ✅ تمكين</b> (المدير أو الطبيب نفسه) · <b>حذف</b> (مدير).</li>
+      <li>صندوق <b>«➕ إضافة طبيب جديد»</b> في الأعلى — لغير المدير لا يظهر أصلًا.</li>
+    </ul>
+    <img class="shot" src="screenshots/doctors-tour/02-doctors.png" alt="قسم الأطباء: الإحصاءات والجدول">
+    <div class="cap">قسم الأطباء — بطاقات الإحصاءات الخمس + شريط البحث والفلاتر + الجدول (15 طبيبًا)</div>
+    <div class="tip">💡 الجدول يحمل <code>data-dept</code> و<code>data-avail</code> على كل صف —
+      أي الفلترة تجري في المتصفح فورًا دون أي طلب شبكة.</div>
+  </section>
+
+  <!-- ============ 3 ============ -->
+  <section class="step" id="s3">
+    <h2><span class="n">3</span> 🔍 البحث الفوري — بلا انتظار</h2>
+    <span class="badge b-ui">واجهة</span><span class="badge b-api">GET /doctors/?q=</span>
+    <p>اكتب في مربع البحث <b>«باطنية»</b> وسترى النتيجة في اللقطة: الجدول ضاقت إلى
+       <b>7 صفوف</b> فقط من أصل 15 — بلا إعادة تحميل وبلا نقر زر. الفلترة تجتمع معًا:</p>
+    <ul>
+      <li><b>q</b> يطابق الاسم أو التخصص أو رقم الترخيص (مطابقة جزئية).</li>
+      <li><b>فلتر القسم</b> و<b>فلتر التوافر</b> فوقه — والثلاثة تتراكب (AND).</li>
+      <li>وعلى الخادم نفسها: <code>?sort=name</code> للترتيب، وقيمة sort غير صالحة
+          تُرفض <b>400</b> برسالة عربية بدل الترتيب الصامت.</li>
+    </ul>
+    <img class="shot" src="screenshots/doctors-tour/03-filter.png" alt="بحث فوري بالتخصص">
+    <div class="cap">البحث «باطنية» — 7 صفوف ظاهرة من 15، وصناديق الفلاتر جاهزة للتركيب</div>
+    <div class="note">🔎 بحث الخادم يشمل أيضًا <code>department_id</code> و<code>available</code> —
+      الواجهة تستخدم النسخة المحلية للسرعة، والـAPI يغطي الاستدعاء المباشر (Swagger/cURL).</div>
+  </section>
+
+  <!-- ============ 4 ============ -->
+  <section class="step" id="s4">
+    <h2><span class="n">4</span> ✏️ تعديل كامل — سبعة حقول</h2>
+    <span class="badge b-api">PUT /doctors/{id}</span><span class="badge b-ui">واجهة</span>
+    <p>زر <b>«✏️ تعديل»</b> يفتح نافذة بحقول: الاسم الكامل · التخصص · رقم الترخيص ·
+       الهاتف · البريد الإلكتروني · <b>العنوان</b> · القسم — اللقطة تعرض بيانات
+       <b>«د. سارة العتيبي»</b> (ترخيص <code>LIC-1001</code>).</p>
+    <h3>ما الذي تغيّر عن النسخة القديمة؟</h3>
+    <ul>
+      <li><b>رقم الترخيص والعنوان كانا غائبَين</b> عن نموذج التحديث — لا يُعدَّلان أصلًا
+          مع بقية الحقول. الآن مكتملان.</li>
+      <li>تكرار ترخيص أو بريد طبيب آخر كان <b>IntegrityError 500</b> — صار
+          <b>400 برسالة عربية</b> تقول بالضبط ما الذي تكرّر.</li>
+      <li>قسم غير موجود ⇒ <b>404 «القسم غير موجود»</b> · غير مدير ⇒ <b>403</b>.</li>
+    </ul>
+    <img class="shot" src="screenshots/doctors-tour/04-edit.png" alt="نافذة تعديل بيانات الطبيب">
+    <div class="cap">نافذة التعديل — الحقول السبعة مملوءة ببيانات الطبيب الحقيقية + زر «حفظ التعديلات»</div>
+    <div class="tip">💡 ما لم يتغيّر لا يُرسل: النموذج يرسل كل الحقول السبعة في نداء
+      <code>PUT</code> واحد — النافذة تُغلق بعد الحفظ ويُعاد رسم الجدول فورًا.</div>
+  </section>
+
+  <!-- ============ 5 ============ -->
+  <section class="step" id="s5">
+    <h2><span class="n">5</span> ⛅ تبديل التوافر — صلاحية ذاتية</h2>
+    <span class="badge b-api">PUT /doctors/{id}/availability</span><span class="badge b-ui">واجهة</span>
+    <p>زر <b>«⛔ تعطيل»</b> في صف الطبيب يستدعي نهاية التوافر — وفي اللقطة بعد النقر:
+       توست <b>«أُوقف توافر الطبيب ⛔»</b> أسفل اليسار، وصف «د. سارة العتيبي» صار
+       <b>⛔ مع زر «✅ تمكين»</b>، و<b>بطاقات الإحصاءات حدّثت نفسها فورًا</b>:
+       15 متاح ← <b>14</b> · غير المتاحين 0 ← <b>1</b>.</p>
+    <h3>قواعد الصلاحيات (محكّمة في الاختبارات):</h3>
+    <ul>
+      <li>بلا توكن ⇒ <b>401</b>.</li>
+      <li>مدير ⇐ يغيّر توافر أي طبيب.</li>
+      <li>طبيب ⇐ يغيّر <b>توافره هو فقط</b> (يطابق بريده) — يمين غيره
+          <b>403 «لا تملك صلاحية تغيير توافر هذا الطبيب — للمدير أو الطبيب نفسه فقط»</b>.</li>
+    </ul>
+    <img class="shot" src="screenshots/doctors-tour/05-toggle.png" alt="تبديل التوافر مع التوست">
+    <div class="cap">بعد النقر — التوست «أُوقف توافر الطبيب ⛔» + الصف ⛔ + بطاقة «14 متاحون / 1 غير متاحين»</div>
+    <div class="note">🔎 الحالة أُعيدت إلى «متاح» بعد الالتقاط، واللقطة تُظهر ترتيب
+      الجدول الذي يعيد رسمه <code>filterDoctors()</code> بعد كل تبديل (البحث يعود فارغًا
+      لأن الشريط يُعاد بناؤه مع الجدول).</div>
+  </section>
+
+  <!-- ============ 6 ============ -->
+  <section class="step" id="s6">
+    <h2><span class="n">6</span> 📈 تقرير الأداء الشهري — للجولة التقييمية</h2>
+    <span class="badge b-api">GET /doctors/{id}/performance?month=</span><span class="badge b-ui">واجهة</span>
+    <p>زر <b>«📈 تقرير»</b> في كل صف يفتح نافذة <b>تقرير الأداء الشهري</b> مع منتقي شهر
+       (<code>&lt;input type="month"&gt;</code>) — افتراضه الشهر الحالي، ويمكن التغيير
+       والتحديث دون إغلاق النافذة. النتيجة <b>ست بطاقات</b> + سطر تفصيلي:</p>
+    <ul>
+      <li>📅 <b>مواعيد الشهر</b> · ✅ <b>مكتملة</b> · ⛔ <b>ملغاة</b>.</li>
+      <li>🎯 <b>نسبة الإتمام</b> = مكتملة ÷ إجمالي الشهر (أصفار صريحة بلا مواعيد).</li>
+      <li>👥 <b>مرضى مرتبطون</b> (فريدون) · 📁 <b>سجلات طبية</b> أُنشئت في الشهر.</li>
+      <li>والسطر الأخير: <b>المعلّقة والمؤكّدة</b> + الشهر المعتمد.</li>
+    </ul>
+    <p>في اللقطة: <b>د. سارة العتيبي — سبتمبر 2026</b>: 2 موعد (معلّق + مؤكّد) · 2 مريض ·
+       سجلان · نسبة إتمام 0%. وتحقق الخادم صارم: <code>month</code> غير صالح الصيغة ⇒
+       <b>400 «month يجب أن يكون بصيغة YYYY-MM»</b>، ومعرف طبيب مفقود ⇒ 404، بلا توكن ⇒ 401.</p>
+    <img class="shot" src="screenshots/doctors-tour/06-report.png" alt="تقرير الأداء الشهري">
+    <div class="cap">تقرير الأداء — منتقي الشهر + ست بطاقات (2 مواعيد · 0 ملغاة · 0 مكتملة · 0% · 2 مريض · سجلان)</div>
+    <div class="tip">💡 التقرير يقرأ من جدولَي المواعيد والسجلات الطبية مباشرة بحدود
+      شهرية <code>[بداية الشهر، بداية الشهر التالي)</code> — استعلام واحد لكل مصدر،
+      بلا حسابات في الذاكرة.</div>
+  </section>
+
+  <section class="step">
+    <h2>🎓 انتهى؟ الخطوة التالية</h2>
+    <ul>
+      <li>📘 <a href="user-guide.html">دليل المستخدم الكامل</a> — كل الشاشات والأدوار (وPDF: <a href="user-guide.pdf">user-guide.pdf</a>).</li>
+      <li>🛡️ <a href="backup-tour.html">جولة صلابة النسخ الاحتياطي</a> · 🎓 <a href="pharmacy-tour.html">جولة الصيدلية والمختبر</a> — الجولات السابقة (6 شاشات لكل منهما).</li>
+      <li>🧪 للفحص الآلي: <code>pytest</code> (192 اختبارًا — منها 10 لقسم الأطباء
+          <code>test_doctors_section.py</code>) · <code>stack_check.py</code> (86 فحصًا) ·
+          <code>live_container_test.py</code> (132 فحصًا حيًّا داخل الحاوية) ·
+          <code>load_test.py</code> (p95 ≤ 700ms) — والكل يجري على <b>GitHub Actions</b>
+          عند كل دفع.</li>
+      <li>🐙 المستودع: <a href="https://github.com/aymanhamid2020-dot/hospital-management-system">github.com/aymanhamid2020-dot/hospital-management-system</a>.</li>
+    </ul>
+  </section>
+
+</main>
+
+<footer>
+  نظام إدارة المستشفيات والعيادات — FastAPI · SQLite/Postgres · Docker · PWA<br>
+  <a href="user-guide.html">📘 دليل المستخدم</a>
+  <a href="pharmacy-tour.html">🎓 جولة الصيدلية</a>
+  <a href="backup-tour.html">🛡️ جولة النسخ الاحتياطي</a>
+  <a href="https://github.com/aymanhamid2020-dot/hospital-management-system">🐙 GitHub</a>
+  <a href="../#ه-المميزات">🏠 README</a>
+</footer>
+
+</body>
+</html>

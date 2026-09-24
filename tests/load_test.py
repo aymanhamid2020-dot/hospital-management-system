@@ -28,7 +28,7 @@ USERS = int(os.environ.get("USERS", "10"))
 REQUESTS = int(os.environ.get("REQUESTS", "20"))
 LOAD_USER = os.environ.get("LOAD_USER", "admin")
 LOAD_PASS = os.environ.get("LOAD_PASS", "admin123")
-P95_BUDGET_MS = float(os.environ.get("P95_BUDGET_MS", "800"))
+P95_BUDGET_MS = float(os.environ.get("P95_BUDGET_MS", "700"))
 
 # خليط قراءات تمثيلية (الحالة العامة + لوحة التحكم + القوائم الأساسية)
 READS = [
