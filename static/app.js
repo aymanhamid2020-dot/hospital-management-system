@@ -359,6 +359,8 @@ const AR2EN = {
   'إحصاءات PDF': 'Stats PDF',
   'إحصاءات CSV': 'Stats CSV',
   'إتلاف/إرجاع CSV': 'Disposals/returns CSV',
+  'طلب CSV': 'Reorder CSV',
+  'كل الوصفات': 'All prescriptions',
   'إيراد الصرف': 'Dispense revenue',
   'وحدات مصروفة': 'Units dispensed',
   'عمليات صرف': 'Dispense operations',
@@ -1424,6 +1426,7 @@ const VIEWS = {
           ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/csv?section=inventory','pharmacy_inventory.csv')">⬇️ مخزون CSV</button>` : ''}
           ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/csv?section=dispenses','pharmacy_dispenses.csv')">⬇️ صرف CSV</button>` : ''}
           ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/csv?section=disposals','pharmacy_disposals.csv')">🗑️ إتلاف/إرجاع CSV</button>` : ''}
+          ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/csv?section=reorder','pharmacy_reorder.csv')">🛒 طلب CSV</button>` : ''}
           </div>
         </div>
         <div class="toolbar">
@@ -1476,7 +1479,12 @@ const VIEWS = {
         </table></div>
       </div>
       <div class="card">
-        <div class="toolbar"><h3 style="margin:0">📋 الوصفات الطبية (${rxs.length})</h3></div>
+        <div class="toolbar"><h3 style="margin:0">📋 الوصفات الطبية (${rxs.length})</h3>
+          <select id="f-rx-status" onchange="filterRxRows()">
+            ${[['', 'كل الوصفات'], ...Object.entries(rxLbl)]
+              .map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}
+          </select>
+        </div>
         ${isAdmin() || isDoctor() ? `
         <details class="addbox"><summary>📝 وصفة جديدة</summary>
         <div class="form-grid">
@@ -1493,9 +1501,9 @@ const VIEWS = {
           <button class="btn success" onclick="createRx()">💾 حفظ الوصفة</button>
         </div>
         </details>` : ''}
-        <div style="overflow-x:auto"><table>
-          <thead><tr><th>#</th><th>التاريخ</th><th>المريض</th><th>الطبيب</th><th>البنود</th><th>الحالة</th><th></th></tr></thead>
-          <tbody>${rxs.map(r => `<tr>
+        <div style="overflow-x:auto"><table id="rx-list">
+          <thead><tr><th>#</th><th>التاريخ</th><th>المريض</th><th>الطبيب</th><th>بنود</th><th>الحالة</th><th></th></tr></thead>
+          <tbody>${rxs.map(r => `<tr data-rxstatus="${r.status}">
             <td>${r.id}</td><td>${fmtDate(r.created_at)}</td>
             <td>${esc(r.patient ? r.patient.full_name : '#' + r.patient_id)}</td>
             <td>${r.doctor ? esc(r.doctor.full_name) : '—'}</td>
@@ -1503,6 +1511,7 @@ const VIEWS = {
               ×${i.quantity} ${i.dispensed_quantity ? `<small>(صُرف ${i.dispensed_quantity})</small>` : ''}`).join('<br>')}</td>
             <td><span class="pill ${rxPillCls[r.status] || 'pending'}">${rxLbl[r.status] || r.status}</span></td>
             <td class="actions">
+              <button class="btn sm ghost" onclick="download('/prescriptions/${r.id}/pdf','prescription_${r.id}.pdf')">🖨️ طباعة</button>
               ${r.status !== 'CANCELLED' && r.status !== 'DISPENSED'
                 ? `<button class="btn sm success" onclick="dispenseRx(${r.id})">💊 صرف الوصفة</button>` : ''}
               ${r.status === 'PENDING' ? `<button class="btn sm ghost" onclick="cancelRx(${r.id})">إلغاء</button>` : ''}
@@ -2529,6 +2538,14 @@ function filterPharmacy() {
   });
   const c = document.getElementById('ph-count');
   if (c) c.textContent = shown;
+}
+
+/* فلترة جدول الوصفات حسب الحالة (عرض فقط — بدون إعادة تحميل) */
+function filterRxRows() {
+  const want = V('f-rx-status') || '';
+  document.querySelectorAll('#rx-list tbody tr[data-rxstatus]').forEach(tr => {
+    tr.style.display = (!want || tr.dataset.rxstatus === want) ? '' : 'none';
+  });
 }
 
 /* إرجاع صرف سابق — السبب إلزامي */

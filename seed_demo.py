@@ -1,4 +1,5 @@
-"""بيانات تجريبية غنية للنظام — قسم، أسرّة، أطباء، مرضى، مواعيد، سجلات، فواتير، مرفقات.
+"""بيانات تجريبية غنية للنظام — قسم، أسرّة، أطباء، مرضى، مواعيد، سجلات، فواتير،
+صيدلية (أدوية + وصفات بكل الحالات + صرف/إرجاع)، مرفقات.
 
 التشغيل:  python seed_demo.py
 آمن التكرار: يرفض التشغيل إذا وُجدت بيانات تجريبية سابقة (بريد @demo.local).
@@ -222,6 +223,140 @@ def main():
             db.add(inv)
             invoices.append(inv)
         print(f"✅ الفواتير: {len(invoices)} (مدفوعة/جزئية/غير مدفوعة/تأمين)")
+
+        # ===== الصيدلية: أدوية + وصفات بكل الحالات + صرف/إرجاع =====
+        from app.models import (
+            Medication, Prescription, PrescriptionItem, Dispense, StockMovement,
+        )
+
+        meds_spec = [
+            # (رمز، اسم، وحدة، سعر، رصيد، حد التنبيه، أيام للانتهاء؛ سالب = منتهٍ)
+            ("DEM-PAR500", "باراسيتامول 500 ملغ", "علبة", 12.5, 140, 25, 520),
+            ("DEM-AMOX500", "أموكسيسيلين 500 ملغ", "علبة", 38.0, 60, 25, 300),
+            ("DEM-IBU400", "إيبوبروفين 400 ملغ", "علبة", 15.0, 6, 10, 260),
+            ("DEM-VITD", "فيتامين د 50000 وحدة", "شريط", 45.0, 30, 8, 700),
+            ("DEM-SYRUP", "شراب أطفال خافض للحرارة", "عبوة", 22.0, 0, 5, 400),
+            ("DEM-OLDAB", "مضاد حيوي قديم (للإتلاف)", "علبة", 30.0, 12, 5, -15),
+            ("DEM-EYEDROP", "قطرات عين تنتهي قريبًا", "عبوة", 28.0, 14, 6, 45),
+        ]
+        meds = []
+        for code, name, unit, price, qty, minq, days in meds_spec:
+            m = Medication(code=code, name=name, unit=unit, price=price,
+                           quantity=qty, min_quantity=minq,
+                           expiry_date=now + timedelta(days=days))
+            db.add(m)
+            meds.append(m)
+        db.flush()
+        for m in meds:
+            if m.quantity:
+                db.add(StockMovement(
+                    medication_id=m.id, type="in", change=m.quantity,
+                    quantity_after=m.quantity, note="رصيد افتتاحي تجريبي",
+                    made_by="admin"))
+        print(f"✅ أدوية الصيدلية: {len(meds)} "
+              "(سليمة + منخفضة + نافدة + منتهية + قاربة الانتهاء)")
+
+        def _dispense(rx_obj, med, qty, pat_obj, dos=None, freq=None, dur=None,
+                      inst=None):
+            """صرف تجريبي: يخصم المخزون ويسجّل حركة صادر (مرتبط بوصفة إن وُجدت)."""
+            med.quantity = max(0, med.quantity - qty)
+            d = Dispense(
+                medication_id=med.id, patient_id=pat_obj.id, quantity=qty,
+                unit_price=med.price, total_price=round(qty * med.price, 2),
+                dosage=dos, frequency=freq, duration=dur, instructions=inst,
+                notes=rx_obj.notes if rx_obj else None,
+                prescription_id=rx_obj.id if rx_obj else None,
+                dispensed_by="admin")
+            db.add(d)
+            db.flush()
+            db.add(StockMovement(
+                medication_id=med.id, type="out", change=-qty,
+                quantity_after=med.quantity,
+                note=(f"صرف وصفة #{rx_obj.id}" if rx_obj else "صرف تجريبي"),
+                made_by="admin"))
+            return d
+
+        # وصفة معلّمة (لم تُصرف بعد)
+        rx1 = Prescription(patient_id=patients[0].id, doctor_id=doctors[0].id,
+                           notes="بعد الفحص الأولي", status="PENDING",
+                           created_by="admin")
+        db.add(rx1)
+        db.flush()
+        for med_i, qty, dos, freq, dur, inst in [
+                (0, 10, "قرص بعد الأكل", "3 مرات يوميًا", "5 أيام",
+                 "لا تتجاوز 3 غرامات يوميًا"),
+                (3, 1, "كبسولة صباحًا", "مرة يوميًا", "30 يومًا", "مع أول وجبة")]:
+            db.add(PrescriptionItem(
+                prescription_id=rx1.id, medication_id=meds[med_i].id,
+                quantity=qty, dosage=dos, frequency=freq, duration=dur,
+                instructions=inst))
+
+        # وصفة مصروفة بالكامل
+        rx2 = Prescription(patient_id=patients[3].id, doctor_id=doctors[1].id,
+                           notes="متابعة ما بعد الجراحة", status="PENDING",
+                           created_by="admin")
+        db.add(rx2)
+        db.flush()
+        for med_i, qty, dos, freq, dur in [
+                (0, 6, "قرص بعد الأكل", "مرتين يوميًا", "3 أيام"),
+                (2, 1, "قرص بعد الأكل", "3 مرات يوميًا", "5 أيام")]:
+            db.add(PrescriptionItem(
+                prescription_id=rx2.id, medication_id=meds[med_i].id,
+                quantity=qty, dispensed_quantity=qty,
+                dosage=dos, frequency=freq, duration=dur))
+            _dispense(rx2, meds[med_i], qty, patients[3], dos, freq, dur)
+        rx2.status = "DISPENSED"
+        rx2.dispensed_at = now - timedelta(days=2)
+
+        # وصفة ملغاة
+        rx3 = Prescription(patient_id=patients[6].id, doctor_id=doctors[0].id,
+                           notes="أُلغيت بعد تعديل الجرعة", status="CANCELLED",
+                           created_by="admin")
+        db.add(rx3)
+        db.flush()
+        db.add(PrescriptionItem(
+            prescription_id=rx3.id, medication_id=meds[3].id, quantity=1,
+            dosage="كبسولة أسبوعيًا", frequency="مرة أسبوعيًا",
+            duration="8 أسابيع"))
+
+        # وصفة صُرف منها بند واحد فقط (PARTIAL)
+        rx4 = Prescription(patient_id=patients[8].id, doctor_id=doctors[5].id,
+                           notes="نقص فيتامين د", status="PENDING",
+                           created_by="admin")
+        db.add(rx4)
+        db.flush()
+        db.add(PrescriptionItem(
+            prescription_id=rx4.id, medication_id=meds[3].id, quantity=6,
+            dispensed_quantity=6, dosage="كبسولة أسبوعيًا",
+            frequency="مرة أسبوعيًا", duration="6 أسابيع"))
+        db.add(PrescriptionItem(
+            prescription_id=rx4.id, medication_id=meds[0].id, quantity=10,
+            dosage="قرص بعد الأكل", frequency="مرتين يوميًا",
+            duration="10 أيام", instructions="مع وجبة الغداء"))
+        _dispense(rx4, meds[3], 6, patients[8], "كبسولة أسبوعيًا",
+                  "مرة أسبوعيًا", "6 أسابيع")
+        rx4.status = "PARTIAL"
+
+        # صرف مباشر (بيع بلا وصفة) — مدفوع
+        sale = _dispense(None, meds[1], 2, patients[5])
+        sale.status = "PAID"
+        sale.payment_method = "cash"
+        sale.paid_amount = sale.total_price
+        sale.paid_at = now - timedelta(days=1)
+
+        # صرف مُرجَعة بالكامل: يظهر في سجل الصرف ولا يدخل الإيراد
+        d_ret = _dispense(None, meds[3], 1, patients[4])
+        meds[3].quantity += d_ret.quantity  # الإرجاع يعيد الكمية للمخزون
+        db.add(StockMovement(
+            medication_id=meds[3].id, type="return", change=d_ret.quantity,
+            quantity_after=meds[3].quantity,
+            note=f"إرجاع صرف #{d_ret.id}: الدواء غير مناسب",
+            made_by="admin"))
+        d_ret.returned_at = now - timedelta(hours=6)
+        d_ret.return_reason = "الدواء غير مناسب للمريض"
+        d_ret.returned_by = "admin"
+        print("✅ وصفات الصيدلية: 4 (معلّمة/مصروفة/ملغاة/جزئية) "
+              "+ صرف مباشر + مُرجَعة")
 
         # ===== مرفقات (صور PNG تجريبية) =====
         from app.routers.attachments import UPLOAD_DIR

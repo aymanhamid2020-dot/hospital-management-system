@@ -7,7 +7,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, get_user_role, require_admin
@@ -84,6 +84,30 @@ async def get_prescription(
         _not_found()
     _check_owner(db, current_user, rx, "لا تصلحية لعرض هذه الوصفة")
     return rx
+
+
+@router.get("/{rx_id}/pdf", summary="طباعة وصفة PDF")
+async def print_prescription(
+    rx_id: int,
+    lang: str = Query("ar", description="ar | en"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """ورقة الوصفة كاملة للطباعة — عربية أو إنجليزية (الصيدلية تطبعها عند
+    الصرف، ويطبعها الطبيب لمرضاه). صلاحية العرض مطابقة لعرض الوصفة."""
+    if lang not in ("ar", "en"):
+        raise HTTPException(status_code=400, detail="lang يجب أن يكون ar أو en")
+    rx = db.query(Prescription).filter(Prescription.id == rx_id).first()
+    if not rx:
+        _not_found()
+    _check_owner(db, current_user, rx, "لا تصلحية لطباعة هذه الوصفة")
+    from app.pdf_utils import prescription_pdf
+    filename = f"prescription_{rx.id}{'_en' if lang == 'en' else ''}.pdf"
+    return Response(
+        content=prescription_pdf(rx, lang=lang),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/", response_model=PrescriptionInDB, status_code=200,

@@ -267,6 +267,7 @@ r = c.get("/pharmacy/reorder", headers=H, params={"days": 400})
 ok("days=400 => 422", r.status_code == 422, str(r.status_code))
 
 # ===== 9) الوصفات الطبية =====
+rx = None
 if m1 and pat:
     r = c.post("/prescriptions/", headers=H, json={
         "patient_id": pat["id"], "notes": "وصف " + TAG,
@@ -356,6 +357,26 @@ if mr:
 ok("PDF الصيدلية ما زال %PDF",
    c.get("/reports/pharmacy/pdf", headers=H).content[:4] == b"%PDF")
 
+# ===== 10ب) طباعة الوصفة PDF + CSV اقتراحات الطلب =====
+if rx:
+    pdf = c.get(f"/prescriptions/{rx['id']}/pdf", headers=H)
+    ok("PDF وصفة %PDF", pdf.status_code == 200 and pdf.content[:4] == b"%PDF",
+       str(pdf.status_code))
+    pdf = c.get(f"/prescriptions/{rx['id']}/pdf", headers=H,
+                params={"lang": "en"})
+    ok("PDF وصفة EN %PDF", pdf.status_code == 200 and pdf.content[:4] == b"%PDF",
+       str(pdf.status_code))
+    r = c.get(f"/prescriptions/{rx['id']}/pdf", headers=H, params={"lang": "fr"})
+    ok("وصفة lang خاطئ => 400", r.status_code == 400, str(r.status_code))
+    r = c.get("/prescriptions/999999/pdf", headers=H)
+    ok("طباعة وصفة غير موجودة => 404", r.status_code == 404, str(r.status_code))
+csv = c.get("/reports/pharmacy/csv", headers=H, params={"section": "reorder"})
+csv_text = csv.content.decode("utf-8-sig") if csv.status_code == 200 else ""
+ok("CSV اقتراحات الطلب => 200 + المقترح شراءه",
+   csv.status_code == 200 and "المقترح شراءه" in csv_text, str(csv.status_code))
+if mlow:
+    ok("الصنف المنخفض ضمن CSV الطلب", mlow["code"] in csv_text)
+
 # ===== 11) مؤشرات الواجهة =====
 ui = c.get("/ui/").text + c.get("/ui/app.js").text
 ok("رابط القائمة pharmacy", 'data-view="pharmacy"' in ui)
@@ -382,6 +403,10 @@ ok("CSV مخزون قائم", "/reports/pharmacy/csv?section=inventory" in ui)
 ok("CSV صرف قائم", "/reports/pharmacy/csv?section=dispenses" in ui)
 ok("زر الجرد قائم", "function adjustStock(" in ui)
 ok("التوريد قائم", "'/inventory/' + id + '/restock'" in ui)
+ok("زر طباعة الوصفة", "/prescriptions/${r.id}/pdf" in ui)
+ok("فلتر حالة الوصفات", "f-rx-status" in ui
+   and "function filterRxRows(" in ui)
+ok("زر اقتراحات الطلب CSV", "section=reorder" in ui)
 ok("الكاش v5 كما هو", "hms-shell-v5" in c.get("/ui/sw.js").text)
 
 print(f"\n== PHARMACY FLOW RESULT: {len(fails) == 0} — failed: {len(fails)} ==")

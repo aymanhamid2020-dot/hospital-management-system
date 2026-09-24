@@ -732,6 +732,96 @@ def pharmacy_stats_pdf(stats, lang: str = "ar") -> bytes:
     return bytes(pdf.output())
 
 
+RX_STATUS_AR = {"PENDING": "قيد الصرف", "PARTIAL": "صرف جزئي",
+                "DISPENSED": "مصروفة بالكامل", "CANCELLED": "ملغاة"}
+
+
+def prescription_pdf(rx, lang: str = "ar") -> bytes:
+    """ورقة وصفة طبية للطباعة — المريض/الطبيب + بنود الوصفة وجرعاتها (ar|en)."""
+    if lang == "en":
+        return _prescription_en(rx)
+    from datetime import datetime as _dt
+
+    pdf = ArabicPDF("وصفة طبية")
+    pdf.section("بيانات الوصفة")
+    pdf.kv_row("رقم الوصفة", f"#{rx.id}")
+    pdf.kv_row("تاريخ الإنشاء",
+               f"{rx.created_at:%Y-%m-%d %H:%M}" if rx.created_at else "-")
+    pdf.kv_row("الحالة", RX_STATUS_AR.get(rx.status, rx.status))
+    if rx.dispensed_at:
+        pdf.kv_row("تاريخ الصرف", f"{rx.dispensed_at:%Y-%m-%d %H:%M}")
+    pdf.kv_row("الطبيب", rx.doctor.full_name if rx.doctor else "-")
+    if rx.doctor:
+        pdf.kv_row("التخصص / رقم الترخيص",
+                   f"{rx.doctor.specialty or '-'} — {rx.doctor.license_number or '-'}")
+
+    pat = rx.patient
+    pdf.section("بيانات المريض")
+    pdf.kv_row("الاسم", pat.full_name if pat else "-")
+    pdf.kv_row("رقم الملف", f"#{rx.patient_id}")
+    if pat:
+        pdf.kv_row("الجوال", pat.phone or "-")
+        if pat.date_of_birth:
+            pdf.kv_row("تاريخ الميلاد", f"{pat.date_of_birth:%Y-%m-%d}")
+
+    items = sorted(rx.items, key=lambda i: i.id)
+    pdf.section(f"بنود الوصفة ({len(items)})")
+    if items:
+        for n, item in enumerate(items, 1):
+            med = item.medication
+            name = med.name if med else f"#{item.medication_id}"
+            code = med.code if med else "-"
+            pdf.set_font("ar", "B", 11)
+            pdf.set_text_color(*PRIMARY)
+            pdf.cell(0, 7, ar(f"{n}. {name} ({code}) — الكمية: {item.quantity}"),
+                     align="R", new_x="LMARGIN", new_y="NEXT")
+            pdf.set_text_color(*DARK)
+            details = " | ".join(part for part in (
+                f"الجرعة: {item.dosage}" if item.dosage else "",
+                f"التكرار: {item.frequency}" if item.frequency else "",
+                f"المدة: {item.duration}" if item.duration else "",
+            ) if part) or "—"
+            pdf.set_font("ar", "", 9)
+            pdf.cell(0, 6, ar(f"     {details}"),
+                     align="R", new_x="LMARGIN", new_y="NEXT")
+            if item.instructions:
+                pdf.set_text_color(*GRAY)
+                pdf.cell(0, 6, ar(f"     تعليمات: {item.instructions}"),
+                         align="R", new_x="LMARGIN", new_y="NEXT")
+                pdf.set_text_color(*DARK)
+            dispensed = item.dispensed_quantity or 0
+            if dispensed:
+                pdf.set_font("ar", "", 8)
+                pdf.set_text_color(*GREEN)
+                pdf.cell(0, 5, ar(f"     صُرف: {dispensed} من {item.quantity}"),
+                         align="R", new_x="LMARGIN", new_y="NEXT")
+                pdf.set_text_color(*DARK)
+            pdf.ln(1)
+    else:
+        pdf.set_font("ar", "", 11)
+        pdf.multi_cell(0, 7, ar("لا توجد بنود في هذه الوصفة."), align="R")
+
+    if rx.notes:
+        pdf.section("ملاحظات")
+        pdf.multi_cell(0, 6, ar(rx.notes), align="R")
+
+    pdf.ln(8)
+    pdf.set_font("ar", "", 10)
+    pdf.set_text_color(*DARK)
+    pdf.cell(0, 8,
+             ar("توقيع الطبيب: ..........................    "
+                "توقيع الصيدلي: .........................."),
+             align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(2)
+    pdf.set_font("ar", "", 9)
+    pdf.set_text_color(*GRAY)
+    pdf.multi_cell(0, 6,
+                   ar(f"صدرت آليًا في {_dt.now():%Y-%m-%d %H:%M} "
+                      f"من نظام إدارة المستشفيات والعيادات — وصفة طبية سرية."),
+                   align="C")
+    return bytes(pdf.output())
+
+
 def _pharmacy_stats_en(stats) -> bytes:
     """English pharmacy stats report for a period."""
     from datetime import datetime as _dt
@@ -767,6 +857,92 @@ def _pharmacy_stats_en(stats) -> bytes:
             pdf.set_font("ar", "", 10)
             pdf.set_text_color(*DARK)
             pdf.cell(0, 7, line[:110], align="L", new_x="LMARGIN", new_y="NEXT")
+    return bytes(pdf.output())
+
+
+def _prescription_en(rx) -> bytes:
+    """English prescription sheet for printing."""
+    from datetime import datetime as _dt
+
+    st_en = {"PENDING": "Pending", "PARTIAL": "Partially dispensed",
+             "DISPENSED": "Dispensed", "CANCELLED": "Cancelled"}
+    pdf = ArabicPDF("Medical Prescription", lang="en")
+    pdf.section("Prescription")
+    pdf.kv_row("Prescription #", rx.id)
+    pdf.kv_row("Created",
+               f"{rx.created_at:%Y-%m-%d %H:%M}" if rx.created_at else "-")
+    pdf.kv_row("Status", st_en.get(rx.status, rx.status))
+    if rx.dispensed_at:
+        pdf.kv_row("Dispensed at", f"{rx.dispensed_at:%Y-%m-%d %H:%M}")
+    pdf.kv_row("Doctor", rx.doctor.full_name if rx.doctor else "-")
+    if rx.doctor:
+        pdf.kv_row("Specialty / License",
+                   f"{rx.doctor.specialty or '-'} — {rx.doctor.license_number or '-'}")
+
+    pat = rx.patient
+    pdf.section("Patient")
+    pdf.kv_row("Name", pat.full_name if pat else "-")
+    pdf.kv_row("File no.", f"#{rx.patient_id}")
+    if pat:
+        pdf.kv_row("Phone", pat.phone or "-")
+        if pat.date_of_birth:
+            pdf.kv_row("Date of birth", f"{pat.date_of_birth:%Y-%m-%d}")
+
+    items = sorted(rx.items, key=lambda i: i.id)
+    pdf.section(f"Prescribed items ({len(items)})")
+    if items:
+        for n, item in enumerate(items, 1):
+            med = item.medication
+            name = med.name if med else f"#{item.medication_id}"
+            code = med.code if med else "-"
+            pdf.set_font("ar", "B", 11)
+            pdf.set_text_color(*PRIMARY)
+            pdf.cell(0, 7, f"{n}. {name} ({code}) — Qty: {item.quantity}",
+                     align="L", new_x="LMARGIN", new_y="NEXT")
+            pdf.set_text_color(*DARK)
+            details = " | ".join(part for part in (
+                f"Dosage: {item.dosage}" if item.dosage else "",
+                f"Frequency: {item.frequency}" if item.frequency else "",
+                f"Duration: {item.duration}" if item.duration else "",
+            ) if part) or "-"
+            pdf.set_font("ar", "", 9)
+            pdf.cell(0, 6, f"     {details}",
+                     align="L", new_x="LMARGIN", new_y="NEXT")
+            if item.instructions:
+                pdf.set_text_color(*GRAY)
+                pdf.cell(0, 6, f"     Notes: {item.instructions}",
+                         align="L", new_x="LMARGIN", new_y="NEXT")
+                pdf.set_text_color(*DARK)
+            dispensed = item.dispensed_quantity or 0
+            if dispensed:
+                pdf.set_font("ar", "", 8)
+                pdf.set_text_color(*GREEN)
+                pdf.cell(0, 5, f"     Dispensed: {dispensed} of {item.quantity}",
+                         align="L", new_x="LMARGIN", new_y="NEXT")
+                pdf.set_text_color(*DARK)
+            pdf.ln(1)
+    else:
+        pdf.set_font("ar", "", 11)
+        pdf.multi_cell(0, 7, "No items in this prescription.", align="L")
+
+    if rx.notes:
+        pdf.section("Notes")
+        pdf.multi_cell(0, 6, rx.notes, align="L")
+
+    pdf.ln(8)
+    pdf.set_font("ar", "", 10)
+    pdf.set_text_color(*DARK)
+    pdf.cell(0, 8,
+             "Doctor signature: ......................    "
+             "Pharmacist signature: ......................",
+             align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(2)
+    pdf.set_font("ar", "", 9)
+    pdf.set_text_color(*GRAY)
+    pdf.multi_cell(0, 6,
+                   f"Automatically issued on {_dt.now():%Y-%m-%d %H:%M} by the "
+                   "Hospital & Clinics Management System — confidential.",
+                   align="C")
     return bytes(pdf.output())
 
 

@@ -256,11 +256,13 @@ async def export_lab_csv(
 
 @router.get("/pharmacy/csv", summary="تصدير الصيدلية CSV")
 async def export_pharmacy_csv(
-    section: str = Query("inventory", description="inventory | dispenses | disposals"),
+    section: str = Query("inventory",
+                         description="inventory | dispenses | disposals | reorder"),
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    """CSV مخزون الصيدلية أو سجل الصرف أو الإتلاف/الإرجاع (للمدير فقط)"""
+    """CSV مخزون الصيدلية أو سجل الصرف أو الإتلاف/الإرجاع أو اقتراحات
+    إعادة الطلب (للمدير فقط)"""
     from app.models import Medication, Dispense
 
     if section == "inventory":
@@ -313,8 +315,23 @@ async def export_pharmacy_csv(
              "السبب", "بواسطة"],
             rows, "pharmacy_disposals.csv")
 
-    raise HTTPException(status_code=400,
-                        detail="section يجب أن يكون inventory أو dispenses أو disposals")
+    if section == "reorder":
+        from app.routers.pharmacy import build_reorder
+        items = build_reorder(db, 30)
+        rows = [[i.medication_id, i.code, i.name, i.quantity, i.min_quantity,
+                 i.unit, i.price, i.consumed, i.avg_per_day,
+                 i.days_cover if i.days_cover is not None else "",
+                 i.suggested_qty, i.suggested_cost]
+                for i in items]
+        return _csv_response(
+            ["#", "الرمز", "الدواء", "الرصيد", "حد التنبيه", "الوحدة",
+             "السعر (ر.س)", "مستهلَك (30ي)", "متوسط/يوم", "تغطية (يوم)",
+             "المقترح شراءه", "التكلفة المقترحة (ر.س)"],
+            rows, "pharmacy_reorder.csv")
+
+    raise HTTPException(
+        status_code=400,
+        detail="section يجب أن يكون inventory أو dispenses أو disposals أو reorder")
 
 
 @router.get("/payroll/csv", summary="تصدير كشف الرواتب CSV")

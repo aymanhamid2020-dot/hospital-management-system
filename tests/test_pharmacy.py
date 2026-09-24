@@ -674,6 +674,70 @@ def test_ui_pharmacy_markers():
                    "/inventory/' + id + '/dispose",
                    "/reports/pharmacy/stats/pdf",
                    "/reports/pharmacy/stats/csv",
-                   "section=disposals", "async pharmacy(main)"):
+                   "section=disposals", "async pharmacy(main)",
+                   "/prescriptions/${r.id}/pdf", "section=reorder",
+                   "f-rx-status", "function filterRxRows(",
+                   "data-rxstatus"):
         assert marker in js, f"مؤشر مفقود في الواجهة: {marker}"
     assert "dispenseMed(" not in js, "الدالة القديمة dispenseMed بقيت حية"
+
+
+# ================= طباعة الوصفة PDF =================
+def test_prescription_print_pdf(client, admin):
+    """طباعة وصفة PDF: عربي/إنجليزي + تحقق lang والملكية والمصادقة."""
+    med = _mk_med(client, admin)
+    pat = _make_patient(client, admin)
+    _, doc_h = _doctor_user(client, admin, "rxpr")
+    r = client.post("/prescriptions/", headers=doc_h, json={
+        "patient_id": pat, "notes": "اختبار الطباعة",
+        "items": [{"medication_id": med["id"], "quantity": 5,
+                   "dosage": "قرص بعد الأكل", "frequency": "مرتين يوميًا",
+                   "duration": "3 أيام", "instructions": "مع الوجبات"}]})
+    assert r.status_code == 200, r.text
+    rx_id = r.json()["id"]
+
+    # الطبيب مالك الوصفة يطبعها — عربي
+    r = client.get(f"/prescriptions/{rx_id}/pdf", headers=doc_h)
+    assert r.status_code == 200 and r.content[:4] == b"%PDF"
+    assert f"prescription_{rx_id}.pdf" in r.headers.get("content-disposition", "")
+
+    # النسخة الإنجليزية باسم مختلف
+    r = client.get(f"/prescriptions/{rx_id}/pdf", headers=admin,
+                   params={"lang": "en"})
+    assert r.status_code == 200 and r.content[:4] == b"%PDF"
+    assert (f"prescription_{rx_id}_en.pdf"
+            in r.headers.get("content-disposition", ""))
+
+    # lang خاطئ + طبيب آخر ممنوع + بلا توكن + غير موجود
+    assert client.get(f"/prescriptions/{rx_id}/pdf", headers=admin,
+                      params={"lang": "fr"}).status_code == 400
+    _, other_h = _doctor_user(client, admin, "rxot")
+    assert client.get(f"/prescriptions/{rx_id}/pdf",
+                      headers=other_h).status_code == 403
+    assert client.get(f"/prescriptions/{rx_id}/pdf").status_code == 401
+    assert client.get("/prescriptions/999999/pdf",
+                      headers=admin).status_code == 404
+
+
+# ================= CSV اقتراحات الطلب =================
+def test_reorder_csv_section(client, admin):
+    """section=reorder في CSV الصيدلية (للمدير) + تغذية /pharmacy/reorder."""
+    med = _mk_med(client, admin, quantity=2, min_quantity=10)
+
+    r = client.get("/reports/pharmacy/csv", headers=admin,
+                   params={"section": "reorder"})
+    assert r.status_code == 200
+    text = r.content.decode("utf-8-sig")
+    assert "المقترح شراءه" in text and "التكلفة المقترحة" in text
+    assert med["code"] in text
+
+    r = client.get("/pharmacy/reorder", headers=admin)
+    assert r.status_code == 200
+    row = next((x for x in r.json() if x["code"] == med["code"]), None)
+    assert row is not None and row["suggested_qty"] >= 8
+
+    assert client.get("/reports/pharmacy/csv", headers=admin,
+                      params={"section": "nope"}).status_code == 400
+    h_rec = _receptionist(client)
+    assert client.get("/reports/pharmacy/csv", headers=h_rec,
+                      params={"section": "reorder"}).status_code == 403

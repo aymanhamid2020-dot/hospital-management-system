@@ -497,15 +497,8 @@ async def pharmacy_stats(
     return build_pharmacy_stats(db, from_date, to_date)
 
 
-@pharmacy_stats_router.get("/reorder", response_model=List[ReorderItem],
-                           summary="اقتراحات إعادة الطلب")
-async def reorder_suggestions(
-    days: int = Query(30, ge=1, le=365, description="نافذة الاستهلاك بالأيام (1–365)"),
-    db: Session = Depends(get_db),
-    _ = Depends(get_current_user),
-):
-    """الأصناف المنخفضة/النافدة: معدل الاستهلاك، أيام التغطية، والكمية المقترحة
-    للشراء = (متوسط يومي × 30) + حد التنبيه − الرصيد الحالي."""
+def build_reorder(db: Session, days: int = 30) -> List[ReorderItem]:
+    """اقتراحات إعادة الطلب — مسار مشترك بين /pharmacy/reorder وتصدير CSV."""
     since = datetime.now() - timedelta(days=days)
     consumed_map: dict = {}
     rows = (db.query(Dispense.medication_id, _func.sum(Dispense.quantity))
@@ -537,3 +530,15 @@ async def reorder_suggestions(
             suggested_cost=round(suggested * (m.price or 0), 2),
         ))
     return out
+
+
+@pharmacy_stats_router.get("/reorder", response_model=List[ReorderItem],
+                           summary="اقتراحات إعادة الطلب")
+async def reorder_suggestions(
+    days: int = Query(30, ge=1, le=365, description="نافذة الاستهلاك بالأيام (1–365)"),
+    db: Session = Depends(get_db),
+    _ = Depends(get_current_user),
+):
+    """الأصناف المنخفضة/النافدة: معدل الاستهلاك، أيام التغطية، والكمية المقترحة
+    للشراء = (متوسط يومي × 30) + حد التنبيه − الرصيد الحالي."""
+    return build_reorder(db, days)
