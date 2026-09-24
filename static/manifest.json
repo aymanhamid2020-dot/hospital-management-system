@@ -1,0 +1,17 @@
+{
+  "name": "نظام إدارة المستشفيات والعيادات",
+  "short_name": "المستشفى",
+  "description": "لوحة تحكم المستشفى — مواعيد، مختبر، صيدلية، فواتير ورواتب",
+  "lang": "ar",
+  "dir": "rtl",
+  "start_url": "/ui/",
+  "scope": "/ui/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f0f2f5",
+  "theme_color": "#2c7be5",
+  "icons": [
+    { "src": "/ui/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/ui/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

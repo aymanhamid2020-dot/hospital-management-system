@@ -1,0 +1,35 @@
+# يستثنى من سياق بناء صورة Docker فقط — لا يحذف أي ملف من القرص
+
+# أدوات وطور
+.git
+.gitignore
+.pytest_cache
+__pycache__
+*.pyc
+.venv
+venv
+node_modules
+
+# بيانات الاستضافة لا تُخبَّأ في الصورة (تُنشأ fresh عند أول تشغيل + بذر admin)
+hospital.db
+hospital.db-*
+backups
+app/backups
+uploads
+outbox
+
+# مخرجات بناء سطح المكتب (PyInstaller) + ذاكرة Python
+build
+**/__pycache__
+
+# ملفات غير مطلوبة داخل الحاوية
+tests
+dist
+*.md
+.env
+.env.example
+.env.production.example
+Dockerfile
+docker-compose.yml
+docker-compose.pg.yml
+.dockerignore

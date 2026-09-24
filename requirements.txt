@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+pydantic[email]
+python-dotenv
+pyjwt
+fpdf2
+arabic-reshaper
+python-bidi
+python-multipart
+pillow
+pytest
+httpx
+psycopg2-binary

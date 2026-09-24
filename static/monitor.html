@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>لوحة المراقبة — نظام إدارة المستشفيات</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; background: #0f172a;
+         margin: 0; padding: 24px; min-height: 100vh; color: #e2e8f0; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: #94a3b8; font-size: 13px; margin-bottom: 18px; }
+  .bar { display: flex; gap: 10px; align-items: center; margin-bottom: 18px; flex-wrap: wrap; }
+  .bar a, .bar button { background: #2c7be5; color: #fff; border: 0; padding: 9px 16px;
+        border-radius: 9px; cursor: pointer; text-decoration: none; font-size: 14px; }
+  .bar a.ghost { background: #334155; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+  .card { background: #1e293b; border-radius: 14px; padding: 18px; border: 1px solid #334155; }
+  .card .icon { font-size: 26px; }
+  .card .title { font-size: 14px; color: #94a3b8; margin-top: 8px; }
+  .card .value { font-size: 20px; font-weight: bold; margin-top: 4px; }
+  .card .detail { font-size: 12px; color: #64748b; margin-top: 6px; }
+  .ok   { border-color: #22c55e; } .ok .value   { color: #4ade80; }
+  .bad  { border-color: #ef4444; } .bad .value  { color: #f87171; }
+  .warn { border-color: #f59e0b; } .warn .value { color: #fbbf24; }
+</style>
+</head>
+<body>
+  <h1>📊 لوحة مراقبة النظام</h1>
+  <div class="sub" id="meta">جارٍ الفحص…</div>
+  <div class="bar">
+    <button onclick="load()">🔄 تحديث الآن</button>
+    <a href="/ui/">🖥️ فتح الواجهة</a>
+    <a class="ghost" href="/status">raw /status (JSON)</a>
+    <a class="ghost" href="/health">/health</a>
+  </div>
+  <div class="grid" id="grid"></div>
+<script>
+function cls(v) { return v > 0 ? 'bad' : 'ok'; }
+function card(icon, title, value, detail, c) {
+  return '<div class="card ' + c + '"><div class="icon">' + icon + '</div>' +
+    '<div class="title">' + title + '</div><div class="value">' + value + '</div>' +
+    '<div class="detail">' + (detail || '') + '</div></div>';
+}
+async function load() {
+  const meta = document.getElementById('meta');
+  const grid = document.getElementById('grid');
+  let s;
+  try {
+    const r = await fetch('/status');
+    s = await r.json();
+  } catch (e) {
+    meta.textContent = 'تعذّر الاتصال بالخادم';
+    grid.innerHTML = card('🔌', 'الخادم', 'غير متاح', e.message, 'bad');
+    return;
+  }
+  const dbOk = s.database && s.database.connected;
+  const al = s.alerts || {}, rm = s.reminders || {}, ct = s.counts || {}, bk = s.backups || {};
+  meta.textContent = 'الإصدار ' + s.version + ' — آخر فحص ' +
+                     new Date().toLocaleString();
+  const cards = [
+    card('🧬', 'حالة النظام',
+         s.status === 'ok' ? 'يعمل بشكل سليم' : 'متدهور',
+         s.service || '', s.status === 'ok' ? 'ok' : 'bad'),
+    card('🗄️', 'قاعدة البيانات', dbOk ? 'متصلة' : 'غير متصلة',
+         (s.database || {}).engine || '-', dbOk ? 'ok' : 'bad'),
+    card('⏰', 'تذكير المواعيد',
+         rm.enabled ? 'مفعّلة' : 'معطّلة',
+         rm.enabled ? ('كل ' + rm.interval_minutes + ' دقيقة — قبل الموعد بـ ' + rm.hours_before + ' ساعة')
+                    : 'REMINDER_INTERVAL_MINUTES=0',
+         rm.enabled ? 'ok' : 'bad'),
+    card('💾', 'النسخ التلقائي',
+         bk.automatic ? ('كل ' + bk.interval_hours + ' ساعة') : 'غير متاح',
+         bk.automatic ? ('الاحتفاظ بآخر ' + bk.retention + ' نسخ في backups/')
+                      : 'على PostgreSQL استخدم pg_dump',
+         bk.automatic && bk.interval_hours > 0 ? 'ok' : 'warn'),
+    card('💊', 'مخزون منخفض', al.low_stock || 0,
+         (al.low_stock || 0) > 0 ? 'يحتاج توريدًا' : 'المخزون سليم', cls(al.low_stock)),
+    card('📅', 'نهاية الصلاحية', al.expired_meds || 0,
+         (al.expired_meds || 0) > 0 ? 'أدوية منتهية — أوقفها'
+         : ((al.expiring_meds || 0) > 0 ? al.expiring_meds + ' تنتهي خلال 30 يومًا' : 'لا أدوية منتهية'),
+         cls(al.expired_meds)),
+    card('🧪', 'طلبات مختبر معلّقة', al.lab_pending || 0,
+         (al.lab_pending || 0) > 0 ? 'قيد الانتظار' : 'لا طلبات معلّقة',
+         (al.lab_pending || 0) > 0 ? 'warn' : 'ok'),
+    card('📅', 'مواعيد اليوم', al.appointments_today || 0,
+         'المواعيد المجدولة اليوم', 'ok'),
+    card('💵', 'فواتير غير مسدّدة', al.unpaid_invoices || 0,
+         (al.unpaid_invoices || 0) > 0 ? 'تحتاج متابعة' : 'كل الفواتير مسدّدة',
+         (al.unpaid_invoices || 0) > 0 ? 'warn' : 'ok'),
+    card('👥', 'السجلات', (ct.patients || 0) + ' مريض',
+         (ct.doctors || 0) + ' طبيب · ' + (ct.appointments || 0) + ' موعد · ' +
+         (ct.invoices || 0) + ' فاتورة', 'ok'),
+  ];
+  grid.innerHTML = cards.join('');
+}
+load();
+setInterval(load, 15000);
+</script>
+</body>
+</html>

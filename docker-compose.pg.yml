@@ -1,0 +1,18 @@
+# تكامل PostgreSQL — يستكمل على docker-compose.yml دون المساس بالمسار الافتراضي (SQLite):
+#   docker compose -f docker-compose.yml -f docker-compose.pg.yml up -d --build
+# التطبيق يتصل بقاعدة `db` وينتظر جاهزيتها قبل الإقلاع (ترحيل الجداول تلقائيًا).
+services:
+  app:
+    environment:
+      DATABASE_URL: postgresql://hospital:hospital_pass@db:5432/hospital
+      SECRET_KEY: ${SECRET_KEY:-pg-compose-secret-change-me}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hospital -d hospital"]
+      interval: 3s
+      timeout: 3s
+      retries: 20

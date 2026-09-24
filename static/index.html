@@ -1,0 +1,2548 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>نظام إدارة المستشفيات — لوحة التحكم</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; background: #f0f2f5; color: #333; }
+  button { font-family: inherit; cursor: pointer; }
+  input, select, textarea { font-family: inherit; font-size: 14px; }
+
+  /* ===== شاشة الدخول ===== */
+  #login-view { min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #667eea, #764ba2); }
+  .login-card { background: #fff; padding: 40px; border-radius: 16px; width: 380px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.3); }
+  .login-card h1 { color: #2c7be5; font-size: 22px; text-align: center; margin-bottom: 6px; }
+  .login-card p { text-align: center; color: #888; font-size: 13px; margin-bottom: 24px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 13px; color: #555; margin-bottom: 5px; font-weight: bold; }
+  .field input, .field select, .field textarea { width: 100%; padding: 10px 12px; border: 1.5px solid #ddd;
+    border-radius: 8px; outline: none; transition: .2s; }
+  .field input:focus, .field select:focus, .field textarea:focus { border-color: #2c7be5; }
+  .btn { display: inline-block; background: #2c7be5; color: #fff; border: none; padding: 10px 18px;
+    border-radius: 8px; font-size: 14px; font-weight: bold; transition: .2s; }
+  .btn:hover { background: #1a63c4; }
+  .btn.block { width: 100%; padding: 12px; font-size: 15px; }
+  .btn.danger { background: #dc3545; } .btn.danger:hover { background: #b02a37; }
+  .btn.success { background: #28a745; } .btn.success:hover { background: #1e7e34; }
+  .btn.ghost { background: #eef4ff; color: #2c7be5; }
+  .btn.sm { padding: 5px 10px; font-size: 12px; border-radius: 6px; }
+  .err { background: #ffe3e6; color: #c0392b; padding: 10px; border-radius: 8px; font-size: 13px;
+    margin-bottom: 12px; display: none; }
+
+  /* ===== التطبيق ===== */
+  #app-view { display: none; min-height: 100vh; }
+  .layout { display: flex; min-height: 100vh; }
+  .sidebar { width: 230px; background: #1e2a3a; color: #cfd8e3; padding: 18px 0; position: fixed;
+    top: 0; bottom: 0; inset-inline-start: 0; overflow-y: auto; }
+  .sidebar .brand { color: #fff; font-size: 17px; font-weight: bold; padding: 0 20px 18px;
+    border-bottom: 1px solid #34455c; margin-bottom: 12px; }
+  .sidebar a { display: flex; align-items: center; gap: 10px; color: #cfd8e3; text-decoration: none;
+    padding: 11px 20px; font-size: 14px; border-inline-start: 3px solid transparent; transition: .15s; }
+  .sidebar a:hover { background: #283a4f; color: #fff; }
+  .sidebar a.active { background: #2c7be5; color: #fff; border-inline-start-color: #ffd166; }
+  .content { flex: 1; margin-inline-start: 230px; }
+  .topbar { background: #fff; padding: 14px 26px; display: flex; justify-content: space-between;
+    align-items: center; box-shadow: 0 2px 6px rgba(0,0,0,.06); position: sticky; top: 0; z-index: 5; }
+  .topbar h2 { font-size: 18px; color: #2c7be5; }
+  .userbox { font-size: 13px; color: #555; display: flex; gap: 12px; align-items: center; }
+  .role-badge { background: #eef4ff; color: #2c7be5; padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; }
+  main { padding: 26px; }
+
+  /* ===== بطاقات الإحصائيات ===== */
+  .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; margin-bottom: 26px; }
+  .stat { background: #fff; border-radius: 12px; padding: 18px; box-shadow: 0 2px 8px rgba(0,0,0,.05);
+    border-top: 4px solid #2c7be5; }
+  .stat .num { font-size: 26px; font-weight: bold; color: #2c7be5; }
+  .stat .lbl { font-size: 13px; color: #777; margin-top: 4px; }
+  .stat.green { border-top-color: #28a745; } .stat.green .num { color: #28a745; }
+  .stat.red { border-top-color: #dc3545; } .stat.red .num { color: #dc3545; }
+  .stat.amber { border-top-color: #f5b301; } .stat.amber .num { color: #d69300; }
+
+  /* ===== جداول ===== */
+  .card { background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.05); padding: 22px; margin-bottom: 22px; }
+  .card h3 { font-size: 16px; color: #1e2a3a; margin-bottom: 16px; padding-bottom: 10px; border-bottom: 2px solid #eef2f7; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { background: #f7f9fc; color: #555; padding: 11px 10px; text-align: start; font-size: 13px; border-bottom: 2px solid #e6ebf1; }
+  td { padding: 10px; border-bottom: 1px solid #f0f2f5; }
+  tr:hover td { background: #f9fbff; }
+  .empty { text-align: center; color: #999; padding: 30px; font-size: 14px; }
+  .pill { padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; display: inline-block; }
+  .pill.pending { background: #fff3cd; color: #8a6d00; }
+  .pill.confirmed, .pill.paid, .pill.available { background: #d4edda; color: #155724; }
+  .pill.cancelled, .pill.unpaid { background: #f8d7da; color: #721c24; }
+  .pill.completed, .pill.occupied { background: #d1ecf1; color: #0c5460; }
+  .pill.partial, .pill.maintenance { background: #e2e3e5; color: #383d41; }
+  .pill.in_progress { background: #cce5ff; color: #004085; }
+  .pill.ready, .pill.lowstock { background: #ffe8cc; color: #9c5400; }
+  .pill.reviewed { background: #e8daef; color: #4a235a; }
+
+  /* ===== نماذج الإضافة ===== */
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .toolbar { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+  .toolbar input, .toolbar select { padding: 9px 12px; border: 1.5px solid #ddd; border-radius: 8px; }
+  .toolbar input { flex: 1; min-width: 180px; }
+  details.addbox summary { cursor: pointer; color: #2c7be5; font-weight: bold; font-size: 14px; margin-bottom: 12px; user-select: none; }
+  .toast { position: fixed; bottom: 24px; inset-inline-end: 24px; background: #1e2a3a; color: #fff; padding: 13px 20px;
+    border-radius: 10px; font-size: 14px; z-index: 99; opacity: 0; transition: .3s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  .toast.err { background: #dc3545; }
+
+  /* ===== نافذة منبثقة عامة ===== */
+  .modal-back { position: fixed; inset: 0; background: rgba(15,23,42,.55); display: none;
+    align-items: center; justify-content: center; z-index: 98; padding: 20px; }
+  .modal-back.show { display: flex; }
+  .modal { background: #fff; border-radius: 14px; width: min(470px, 100%); padding: 20px;
+    box-shadow: 0 18px 50px rgba(0,0,0,.28); max-height: 90vh; overflow: auto; }
+  .modal-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+  .modal-head h3 { margin: 0; font-size: 17px; }
+  .modal .kv { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0;
+    border-bottom: 1px dashed #e6ebf1; font-size: 14px; }
+  .modal .kv b { font-weight: 700; }
+  .modal .field { margin-top: 12px; }
+  .modal .field select, .modal .field input { width: 100%; }
+  .modal .row2 { display: flex; gap: 8px; margin-top: 16px; }
+  .modal .row2 .btn { flex: 1; }
+
+  /* ===== مخطط أعمدة بسيط ===== */
+  .bars { display: flex; gap: 18px; align-items: flex-end; height: 150px; padding: 10px 0; }
+  .bar-wrap { flex: 1; text-align: center; }
+  .bar { background: linear-gradient(180deg, #2c7be5, #667eea); border-radius: 6px 6px 0 0; margin: 0 auto;
+    width: 60px; min-height: 4px; transition: height .5s; }
+  .bar-wrap .lbl { font-size: 12px; color: #777; margin-top: 6px; }
+  .bar-wrap .val { font-size: 14px; font-weight: bold; color: #2c7be5; }
+
+  /* --- تقويم المواعيد --- */
+  .cal-head { display: flex; gap: 8px; align-items: center; justify-content: center; margin: 12px 0; flex-wrap: wrap; }
+  .cal-title { font-weight: bold; font-size: 16px; min-width: 150px; text-align: center; }
+  .cal-dow { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin-bottom: 6px; }
+  .cal-dow span { text-align: center; font-size: 12px; font-weight: bold; color: #666; background: #f0f6ff; border-radius: 6px; padding: 6px 0; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+  .cal-cell { border: 1px solid #e6ebf1; border-radius: 8px; padding: 6px; min-height: 92px; background: #fff; }
+  .cal-cell.empty { background: #f8fafd; opacity: .55; }
+  .cal-cell.today { border: 2px solid #2c7be5; }
+  .cal-daynum { font-weight: bold; font-size: 13px; color: #333; margin-bottom: 4px; }
+  .cal-chip { font-size: 11px; border-radius: 5px; padding: 2px 4px; margin-bottom: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cal-chip.pending { background: #fff3cd; color: #856404; }
+  .cal-chip.confirmed { background: #d1ecf1; color: #0c5460; }
+  .cal-chip.completed { background: #d4edda; color: #155724; }
+  .cal-chip.cancelled { background: #f8d7da; color: #721c24; text-decoration: line-through; }
+  .cal-more { font-size: 11px; color: #2c7be5; font-weight: bold; }
+
+  @media (max-width: 800px) {
+    .sidebar { width: 62px; } .sidebar .brand, .sidebar a span { display: none; }
+    .content { margin-inline-start: 62px; }
+  }
+</style>
+<link rel="manifest" href="/ui/manifest.json">
+<link rel="icon" href="/ui/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/ui/icon.svg">
+<meta name="theme-color" content="#2c7be5">
+</head>
+<body>
+
+<!-- ===== شاشة الدخول ===== -->
+<div id="login-view">
+  <div class="login-card">
+    <h1>🏥 نظام إدارة المستشفيات</h1>
+    <p>سجّل دخولك للوصول إلى لوحة التحكم</p>
+    <div class="err" id="login-err"></div>
+    <div class="field"><label>اسم المستخدم</label><input id="li-user" autocomplete="username" value="admin"></div>
+    <div class="field"><label>كلمة المرور</label><input id="li-pass" type="password" autocomplete="current-password" value="admin123"></div>
+    <button class="btn block" onclick="login()">تسجيل الدخول</button>
+    <p style="margin-top:16px; font-size:12px;">admin / admin123 — طبيب: drsara / sara12345 — موظف: reception1 / rec12345</p>
+    <button class="btn ghost sm lang-btn" onclick="toggleLang()" style="width:100%;margin-top:12px" title="تبديل اللغة">🌐 EN</button>
+  </div>
+</div>
+
+<!-- ===== التطبيق ===== -->
+<div id="app-view">
+  <div class="layout">
+    <nav class="sidebar">
+      <div class="brand">🏥 المستشفى</div>
+      <a href="#" data-view="dashboard" class="active">📊 لوحة التحكم</a>
+      <a href="#" data-view="patients">🧑‍🤝‍🧑 المرضى</a>
+      <a href="#" data-view="doctors">🩺 الأطباء</a>
+      <a href="#" data-view="appointments">📅 المواعيد</a>
+      <a href="#" data-view="lab">🔬 المختبر</a>
+      <a href="#" data-view="pharmacy">💊 الصيدلية</a>
+      <a href="#" data-view="inventory">📦 المخزون</a>
+      <a href="#" data-view="records">📋 السجلات الطبية</a>
+      <a href="#" data-view="attachments">📎 المرفقات</a>
+      <a href="#" data-view="departments">🏢 الأقسام</a>
+      <a href="#" data-view="beds">🛏️ الأسرّة</a>
+      <a href="#" data-view="invoices">💳 الفواتير</a>
+      <a href="#" data-view="staff">👥 الموظفون</a>
+      <a href="#" data-view="users">👤 المستخدمون</a>
+      <a href="#" data-view="sales">🛒 المبيعات</a>
+
+      <a href="#" data-view="accounts">🧾 الحسابات</a>
+      <a href="#" data-view="payroll">💵 الرواتب</a>
+      <a href="#" data-view="backup">💾 النسخ الاحتياطي</a>
+      <a href="#" data-view="notifications">🔔 الإشعارات</a>
+      <a href="#" data-view="audit">🧾 سجل التدقيق</a>
+    </nav>
+    <div class="content">
+      <header class="topbar">
+        <h2 id="page-title">لوحة التحكم</h2>
+        <div class="userbox">
+          <button class="btn ghost sm" id="bell" onclick="navigate('notifications')" title="الإشعارات">🔔 <span id="bell-count">0</span></button>
+          <span id="ub-name"></span>
+          <span class="role-badge" id="ub-role"></span>
+          <button class="btn ghost sm" onclick="changePassword()" title="تغيير كلمة المرور">🔑</button>
+          <button class="btn ghost sm lang-btn" onclick="toggleLang()" title="تبديل اللغة">🌐 EN</button>
+          <button class="btn sm danger" onclick="logout()">خروج</button>
+        </div>
+      </header>
+      <main id="main"></main>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- ===== نافذة منبثقة عامة ===== -->
+<div class="modal-back" id="modal-back" onclick="if(event.target===this)closeModal()">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal-head">
+      <h3 id="modal-title"></h3>
+      <button class="btn ghost sm" onclick="closeModal()" title="إغلاق">✕</button>
+    </div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<script>
+const API = '';
+let TOKEN = localStorage.getItem('hms_token') || '';
+let USER = JSON.parse(localStorage.getItem('hms_user') || 'null');
+let CURRENT_VIEW = 'dashboard';
+
+/* ========== أدوات ========== */
+function toast(msg, isErr = false) {
+  const t = document.getElementById('toast');
+  t.textContent = tr(msg);
+  t.className = 'toast show' + (isErr ? ' err' : '');
+  setTimeout(() => t.className = 'toast', 3200);
+}
+
+async function api(path, opts = {}) {
+  opts.headers = Object.assign({ 'Content-Type': 'application/json; charset=utf-8' },
+    TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}, opts.headers || {});
+  const res = await fetch(API + path, opts);
+  if (res.status === 401) { logout(); throw new Error('انتهت الجلسة — سجّل دخولًا من جديد'); }
+  if (res.status === 204) return null;
+  const ct = res.headers.get('content-type') || '';
+  const data = ct.includes('application/json') ? await res.json() : await res.text();
+  if (!res.ok) throw new Error((data && data.detail) || 'خطأ غير متوقع');
+  return data;
+}
+
+async function apiBlob(path) {
+  const res = await fetch(API + path, { headers: { 'Authorization': 'Bearer ' + TOKEN } });
+  if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || 'فشل التحميل'); }
+  return await res.blob();
+}
+
+/* جلب HTML محميًا (إيصال/كشف حساب) وفتحه في نافذة طباعة */
+async function openPrint(path) {
+  /* نفتح النافذة أولًا (قبل أي انتظار) حتى لا يحجبها المتصفح */
+  const w = window.open('', '_blank');
+  if (!w) throw new Error('الرجاء السماح بالنوافذ المنبثقة للطباعة');
+  try {
+    const res = await fetch(API + path, { headers: { 'Authorization': 'Bearer ' + TOKEN } });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      throw new Error(d.detail || 'فشل التحميل');
+    }
+    w.document.write(await res.text());
+    w.document.close();
+    w.focus();
+  } catch (e) { w.close(); throw e; }
+}
+
+/* إيصال دفعة لعملية بيع */
+function openReceipt(id) {
+  openPrint('/accounts/sales/' + id + '/receipt?lang=' + LANG)
+    .then(() => toast('تم فتح الإيصال للطباعة ✅'))
+    .catch(e => toast(e.message, true));
+}
+
+/* كشف حساب مريض: ملخص JSON داخل الصفحة + طباعة HTML */
+async function showStatement() {
+  const pid = Number((document.getElementById('f-stmt-patient') || {}).value || 0);
+  if (!pid) return toast('أدخل رقم المريض أولًا', true);
+  try {
+    const st = await api('/accounts/statement/' + pid);
+    const t = st.totals;
+    const box = document.getElementById('stmt-out');
+    const row = (l, v, cls) =>
+      `<div class="kv"><span>${l}</span><b class="${cls || ''}">${v}</b></div>`;
+    box.innerHTML = `
+      <div class="kv"><span>المريض</span><b>${esc(st.patient.full_name)} (#${st.patient.id})</b></div>
+      <div class="kv"><span>الجوال</span><b>${esc(st.patient.phone || '-')}</b></div>
+      ${row('مبيعات الصيدلية', t.sales_total.toLocaleString() + ' ر.س')}
+      ${row('مدفوع من المبيعات', t.sales_paid.toLocaleString() + ' ر.س', 'ok')}
+      ${row('إجمالي الفواتير', t.inv_total.toLocaleString() + ' ر.س')}
+      ${row('مدفوع من الفواتير', t.inv_paid.toLocaleString() + ' ر.س', 'ok')}
+      ${row('إجمالي المستحقات', t.dues.toLocaleString() + ' ر.س')}
+      ${row('الرصيد المستحق', t.outstanding.toLocaleString() + ' ر.س',
+            t.outstanding > 0 ? 'bad' : 'ok')}
+      <div class="kv"><span>عدد حركات الصيدلية</span><b>${st.sales.length}</b></div>
+      <div class="kv"><span>عدد الفواتير</span><b>${st.invoices.length}</b></div>
+      <div class="row2" style="margin-top:12px">
+        <button class="btn" onclick="openPrint('/accounts/statement/${pid}/print?lang=' + LANG)
+          .then(() => toast('تم فتح الكشف للطباعة ✅')).catch(e => toast(e.message, true))">🖨️ طباعة الكشف</button>
+        <button class="btn ghost" onclick="openPrint('/accounts/statement/${pid}/print?lang=en')
+          .then(() => toast('Opened English statement ✅')).catch(e => toast(e.message, true))">🇬🇧 EN</button>
+      </div>`;
+    applyI18n(box);
+  } catch (e) { toast(e.message, true); }
+}
+
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function fmtDate(s) { return s ? String(s).replace('T', ' ').slice(0, 16) : '-'; }
+function pill(v) { return `<span class="pill ${esc(v)}">${esc(v)}</span>`; }
+function isAdmin() { return USER && USER.role === 'admin'; }
+function isDoctor() { return USER && USER.role === 'doctor'; }
+
+/* ========== اللغة: عربي / English (i18n) ========== */
+let LANG = localStorage.getItem('hms_lang') || 'ar';
+const AR2EN = {
+  /* الشاشة العامة */
+  'نظام إدارة المستشفيات — لوحة التحكم': 'Hospital Management — Dashboard',
+  '🏥 نظام إدارة المستشفيات': '🏥 Hospital Management',
+  'سجّل دخولك للوصول إلى لوحة التحكم': 'Sign in to access the dashboard',
+  'اسم المستخدم': 'Username',
+  'كلمة المرور': 'Password',
+  'تسجيل الدخول': 'Sign in',
+  'طبيب:': 'Doctor:',
+  'موظف:': 'Staff:',
+  /* القائمة والترويسة */
+  '🏥 المستشفى': '🏥 Hospital',
+  'لوحة التحكم': 'Dashboard',
+  'المرضى': 'Patients',
+  'الأطباء': 'Doctors',
+  'المواعيد': 'Appointments',
+  'المختبر والأشعة': 'Lab & Radiology',
+  'المختبر': 'Lab',
+  'الصيدلية': 'Pharmacy',
+  'السجلات الطبية': 'Medical Records',
+  'المرفقات': 'Attachments',
+  'الأقسام': 'Departments',
+  'الأسرّة': 'Beds',
+  'الفواتير': 'Invoices',
+  'الموظفون': 'Staff',
+  'الرواتب': 'Payroll',
+  'النسخ الاحتياطي': 'Backup',
+  'الإشعارات': 'Notifications',
+  'سجل التدقيق': 'Audit Log',
+  /* الحسابات والمبيعات */
+  'الحسابات والمبيعات': 'Accounts & Sales',
+  'المبيعات': 'Sales',
+  'الحسابات': 'Accounts',
+  /* كشف حساب مريض */
+  'عرض الكشف': 'Show statement',
+  'طباعة الكشف': 'Print statement',
+  'أدخل رقم المريض أولًا': 'Enter the patient ID first',
+  'أدخل رقم المريض لعرض كشف حسابه (مبيعات + فواتير + الرصيد)': 'Enter the patient ID to view their statement (sales + invoices + balance)',
+  'مبيعات الصيدلية': 'Pharmacy sales',
+  'مدفوع من المبيعات': 'Sales paid',
+  'إجمالي الفواتير': 'Invoices total',
+  'مدفوع من الفواتير': 'Invoices paid',
+  'إجمالي المستحقات': 'Total dues',
+  'الرصيد المستحق': 'Outstanding balance',
+  'عدد حركات الصيدلية': 'Pharmacy transactions',
+  'عدد الفواتير': 'Invoices count',
+  'تم فتح الكشف للطباعة ✅': 'Statement opened for printing ✅',
+  'تم فتح الإيصال للطباعة ✅': 'Receipt opened for printing ✅',
+  'الرجاء السماح بالنوافذ المنبثقة للطباعة': 'Please allow popups for printing',
+  'الحسابات': 'Accounts',
+  'عدد المدينين': 'Debtors count',
+  'كشف حساب مريض': 'Patient statement',
+  'الإيراد الشهري': 'Monthly revenue',
+  'إجمالي المدينين': 'Total debtors',
+  'تقييم طرق الدفع': 'Payment methods breakdown',
+  'توزيع طرق الدفع': 'Payment methods breakdown',
+  '📄 تقرير المبيعات PDF': '📄 Sales report PDF',
+  '⬇️ تقرير المبيعات CSV': '⬇️ Sales report CSV',
+  '🧾 إيصال': '🧾 Receipt',
+  'لا يوجد إيراد': 'No revenue',
+  '🛒 المبيعات': '🛒 Sales',
+  '🧾 الحسابات': '🧾 Accounts',
+  'إجمالي المبيعات': 'Total sales',
+  'المحصّل': 'Collected',
+  'المتبقي (مدين)': 'Outstanding',
+  'عدد العمليات': 'Operations count',
+  'سجل المبيعات': 'Sales log',
+  'كل طرق الدفع': 'All payment methods',
+  'كل الحالات': 'All statuses',
+  'كل الفترات': 'All periods',
+  'غير مدفوع': 'Unpaid',
+  'مدفوع جزئيًا': 'Partially paid',
+  'مدفوع': 'Paid',
+  'نقدًا': 'Cash',
+  'بطاقة': 'Card',
+  'تأمين': 'Insurance',
+  'رقم المريض': 'Patient ID',
+  'صرفه…': 'Dispensed by…',
+  'تطبيق': 'Apply',
+  'مسح': 'Clear',
+  'الدواء': 'Medicine',
+  'المدفوع': 'Paid',
+  'المتبقي': 'Outstanding',
+  'الطريقة': 'Method',
+  'لا توجد مبيعات في هذه الفترة': 'No sales in this period',
+  'تسديد': 'Record payment',
+  'المبلغ المدفوع (ر.س):': 'Paid amount (SAR):',
+  'طريقة الدفع (cash/card/insurance):': 'Payment method (cash/card/insurance):',
+  'تم تسجيل الدفعة ✅': 'Payment recorded ✅',
+  'لا يمكن أن يتجاوز المبلغ إجمالي العملية': 'Amount cannot exceed the operation total',
+  'قيمة غير رقمية': 'Not a number',
+  'عملية بيع #': 'Sale #',
+  /* نافذة التسديد */
+  '💰 تسديد دفعة': '💰 Record payment',
+  'عملية البيع': 'Sale operation',
+  'المبلغ (ر.س)': 'Amount (SAR)',
+  'طريقة الدفع': 'Payment method',
+  'المتبقي بعد الدفع': 'Remaining after payment',
+  'تأكيد التسديد': 'Confirm payment',
+  'لا يمكن أن يتجاوز المبلغ المتبقي': 'Amount cannot exceed the remaining balance',
+  'تعذر فتح عملية البيع': 'Cannot open this sale',
+  'لا توجد عمليات غير مسددة': 'No unpaid operations',
+  'سيتم تسديد المتبقي كاملاً للعمليات غير المسددة. متابعة؟': 'The full remaining amount of all unpaid operations will be settled. Continue?',
+  'تم تسديد كل العمليات ✅': 'All operations settled ✅',
+  'سدّد الكل': 'Settle all',
+  /* منحنى الإيراد والمدينون */
+  '📈 منحنى الإيراد': '📈 Revenue curve',
+  'يومًا': 'days',
+  'شهرًا': 'months',
+  'يومي': 'Daily',
+  'شهري': 'Monthly',
+  'لا يوجد إيراد في هذه الفترة': 'No revenue in this period',
+  '🧾 المدينون': '🧾 Debtors',
+  'عمليات غير مسدّدة': 'Unpaid operations',
+  'إجمالي مستحقاتهم': 'Their total dues',
+  'مدفوع': 'Paid',
+  '✅ لا يوجد مدينون — كل المبالغ مسدّدة': '✅ No debtors — everything is settled',
+  'الإجمالي': 'Total',
+  'تغيير كلمة المرور': 'Change password',
+  'تبديل اللغة': 'Toggle language',
+  'خروج': 'Logout',
+  /* عام */
+  'جارٍ التحميل…': 'Loading…',
+  'انتهت الجلسة — سجّل دخولًا من جديد': 'Session ended — please sign in again',
+  'خطأ غير متوقع': 'Unexpected error',
+  'فشل التحميل': 'Download failed',
+  'تم تنزيل الملف ✅': 'File downloaded ✅',
+  'طبيب': 'Doctor',
+  'مدير': 'Admin',
+  'موظف': 'Staff',
+  'ر.س': 'SAR',
+  'ذكر': 'Male',
+  'أنثى': 'Female',
+  'حذف': 'Delete',
+  'إجراء': 'Action',
+  'بحث': 'Search',
+  'تقرير': 'Report',
+  'مراجعة': 'Review',
+  'معاينة': 'View',
+  'تنزيل': 'Download',
+  'تحديث': 'Update',
+  'تعليم': 'Mark read',
+  'تأكيد': 'Confirm',
+  'إتمام': 'Complete',
+  'إلغاء': 'Cancel',
+  'وصل': 'Arrived',
+  'وصول': 'Arrive',
+  'بدء': 'Start',
+  'طباعة': 'Print',
+  'الحالة': 'Status',
+  'النوع': 'Type',
+  'القسم': 'Department',
+  'المريض': 'Patient',
+  'الطبيب': 'Doctor',
+  'التاريخ': 'Date',
+  'الهاتف': 'Phone',
+  'البريد': 'Email',
+  'الاسم': 'Name',
+  'العنوان': 'Address',
+  'السرير': 'Bed',
+  'السجل': 'Record',
+  'الملف': 'File',
+  'الرسالة': 'Message',
+  'الإجمالي': 'Total',
+  'الخصم': 'Discount',
+  'الضريبة': 'Tax',
+  'المبلغ': 'Amount',
+  'الوصف': 'Description',
+  'التخصص': 'Specialty',
+  'الترخيص': 'License',
+  'الدور': 'Floor',
+  'السعر': 'Price',
+  'النتيجة': 'Result',
+  'الكمية': 'Quantity',
+  'الوحدة': 'Unit',
+  'الحجم': 'Size',
+  'المنصب': 'Position',
+  'الراتب': 'Salary',
+  'الفترة': 'Period',
+  'الأساسي': 'Base',
+  'البدلات': 'Allowances',
+  'الاستقطاعات': 'Deductions',
+  'الوقت': 'Time',
+  'الطريقة': 'Method',
+  'المستخدم': 'User',
+  'العمليات': 'Operations',
+  'المسار': 'Path',
+  'الطلبات': 'Requests',
+  'التاريخ والوقت': 'Date & time',
+  'السبب': 'Reason',
+  'التشخيص': 'Diagnosis',
+  'الوصفة الطبية': 'Prescription',
+  'ملاحظات': 'Notes',
+  'اسم القسم': 'Department name',
+  'رقم السرير': 'Bed no.',
+  'اسم الدواء': 'Medication name',
+  'رمز الدواء': 'Code',
+  'اسم التحليل': 'Test name',
+  'حد التنبيه': 'Alert threshold',
+  'رقم الترخيص': 'License no.',
+  'تاريخ الميلاد': 'Date of birth',
+  'تاريخ التعيين': 'Hire date',
+  'تاريخ الرفع': 'Uploaded',
+  'تاريخ الإنشاء': 'Created',
+  'الهوية الوطنية': 'National ID',
+  'رقم الهوية/الإقامة': 'ID/Iqama number',
+  'شركة التأمين': 'Insurance company',
+  'رقم وثيقة التأمين': 'Insurance policy no.',
+  'مجموعة الدم': 'Blood group',
+  'البريد الإلكتروني': 'Email address',
+  'الاسم الكامل': 'Full name',
+  'أُضيف': 'Created',
+  'متاح': 'Available',
+  'مشغول': 'Occupied',
+  'صيانة': 'Maintenance',
+  'متوفر': 'In stock',
+  'مقروء': 'Read',
+  'جديد': 'New',
+  'معلّقة': 'Pending',
+  'مؤكدة': 'Confirmed',
+  'ملغاة': 'Cancelled',
+  'مكتملة': 'Completed',
+  'غير مدفوعة': 'Unpaid',
+  'مدفوعة': 'Paid',
+  'جزئية': 'Partial',
+  'مصروف': 'Paid out',
+  'غير مصروف': 'Not paid',
+  'مسجّل': 'Registered',
+  'قيد التنفيذ': 'In progress',
+  'جاهزة': 'Ready',
+  'مراجَعة': 'Reviewed',
+  /* عناوين وأزرار */
+  'إضافة مريض جديد': 'Add new patient',
+  'إضافة طبيب جديد': 'Add new doctor',
+  'إضافة قسم': 'Add department',
+  'إضافة سرير': 'Add bed',
+  'إضافة موظف': 'Add staff member',
+  'إضافة سجل طبي': 'Add medical record',
+  'إضافة قيد راتب': 'Add payroll entry',
+  'حجز موعد جديد': 'New appointment',
+  'حجز الموعد': 'Book appointment',
+  'طلب تحليل/أشعة جديد': 'New lab/radiology order',
+  'صرف دواء لمريض': 'Dispense medication',
+  'إنشاء فاتورة': 'Create invoice',
+  'إنشاء الفاتورة': 'Create invoice',
+  'إنشاء نسخة احتياطية الآن': 'Create backup now',
+  'حفظ المريض': 'Save patient',
+  'حفظ الطبيب': 'Save doctor',
+  'حفظ القسم': 'Save department',
+  'حفظ السرير': 'Save bed',
+  'حفظ الموظف': 'Save staff',
+  'حفظ السجل': 'Save record',
+  'حفظ الدواء': 'Save medication',
+  'حفظ الطلب': 'Save order',
+  'حفظ القيد': 'Save entry',
+  'رفع مرفق جديد': 'Upload new attachment',
+  'حد أقصى': 'max',
+  'رفع الملف': 'Upload file',
+  'تصدير CSV': 'Export CSV',
+  'استيراد CSV': 'Import CSV',
+  'تحميل تقرير PDF': 'Download PDF report',
+  'تقرير المختبر PDF': 'Lab report PDF',
+  'تقرير المخزون PDF': 'Inventory report PDF',
+  'كشف الرواتب': 'Payroll report',
+  'مخزون الأدوية': 'Medication inventory',
+  'سجل الصرف': 'Dispense log',
+  'كل الحالات': 'All statuses',
+  'طابور اليوم': 'Today\'s queue',
+  'في الخدمة الآن': 'Now serving',
+  'مواعيد اليوم': 'Today\'s appointments',
+  'مواعيد معلّقة': 'Pending appointments',
+  'أسرّة مشغولة': 'Occupied beds',
+  'إيرادات محصّلة': 'Paid revenue',
+  'مستحقات غير محصّلة': 'Outstanding dues',
+  'توزيع المواعيد حسب الحالة': 'Appointments by status',
+  'معاينة السجل': 'View record',
+  'الملف PDF': 'File PDF',
+  '💵 صرف': '💵 Pay out',
+  'صرف CSV': 'Dispense CSV',
+  'مخزون': 'Inventory',
+  'صرف الآن': 'Dispense now',
+  'الانتهاء': 'Expiry',
+  'توريد': 'Restock',
+  'التعيين': 'Hire',
+  'الدفع': 'Payment',
+  'دفع': 'Pay',
+  'أساسي': 'Base',
+  'خصم': 'discount',
+  'ضريبة': 'tax',
+  'علبة': 'Box',
+  'ربط بموعد': 'Link appointment',
+  'ربط بسجل طبي': 'Link record',
+  'بحث بالمستخدم أو المسار': 'Search by user or path',
+  'بحث بالاسم أو الهاتف أو الهوية': 'Search by name, phone or ID',
+  'أكثر المستخدمين نشاطًا': 'Most active users',
+  'أكثر المسارات طلبًا': 'Most requested paths',
+  'أخطاء آخر الفترة': 'Recent errors',
+  'تعليم الكل كمقروء': 'Mark all read',
+  'النسخ الاحتياطي لقاعدة البيانات': 'Database backup',
+  'سجل التدقيق — العمليات التعديلية': 'Audit log — write operations',
+  '🔒 هذه الصفحة متاحة للمدير فقط': '🔒 Admin only',
+  /* قسم المخزون */
+  '📦 المخزون': '📦 Inventory',
+  'المخزون': 'Inventory',
+  'قيمة المخزون (ر.س)': 'Inventory value (SAR)',
+  'عدد الأصناف': 'Items count',
+  'إجمالي القطع': 'Total units',
+  'مخزون منخفض': 'Low stock',
+  'أصناف نافدة': 'Out-of-stock items',
+  'أصناف تنتهي قريبًا': 'Expiring soon items',
+  'أصناف منتهية': 'Expired items',
+  'حركات المخزون': 'Stock movements',
+  'نوع الحركة': 'Movement type',
+  'الرصيد بعد الحركة': 'Balance after movement',
+  'القيمة': 'Value',
+  'الرمز': 'Code',
+  'التغير': 'Change',
+  'ملاحظة': 'Note',
+  'سليم': 'OK',
+  'منخفض': 'Low',
+  'نافد': 'Out of stock',
+  'قارب على الانتهاء': 'Expiring soon',
+  'منتهي الصلاحية': 'Expired',
+  'وارد': 'In',
+  'صادر': 'Out',
+  'جرد': 'Stocktake',
+  'ابحث بالاسم أو الرمز': 'Search by name or code',
+  'أيام قرب الانتهاء (0–365)': 'Days to expiry (0–365)',
+  'أيام متبقية للانتهاء': 'Days remaining to expiry',
+  'لا توجد أصناف مطابقة': 'No matching items',
+  'لا حركات مخزون بعد': 'No stock movements yet',
+  /* حالات فارغة */
+  'لا توجد مواعيد بعد': 'No appointments yet',
+  'لا توجد مواعيد': 'No appointments',
+  'لا يوجد مرضى': 'No patients',
+  'لا يوجد أطباء': 'No doctors',
+  'لا توجد أقسام': 'No departments',
+  'لا توجد أسرّة': 'No beds',
+  'لا توجد فواتير': 'No invoices',
+  'لا يوجد موظفون': 'No staff members',
+  'لا قيود رواتب': 'No payroll entries',
+  'لا مرفقات': 'No attachments',
+  'لا توجد مرفقات — ارفع أول ملف': 'No attachments — upload your first file',
+  'لا توجد سجلات': 'No records',
+  'لا توجد طلبات': 'No orders yet',
+  'لا عمليات صرف بعد': 'No dispenses yet',
+  'لا توجد إشعارات': 'No notifications',
+  'لا توجد عمليات بعد': 'No operations yet',
+  'لا توجد نسخ بعد': 'No backups yet',
+  'لا أدوية': 'No medications',
+  'أضف أول دواء': 'add your first medication',
+  'أنشئ أول طلب': 'create your first order',
+  /* رسائل ونوافذ */
+  'هل أنت متأكد من الحذف؟ لا يمكن التراجع.': 'Are you sure? This cannot be undone.',
+  'تم الحفظ بنجاح': 'Saved successfully',
+  'تم الحذف': 'Deleted',
+  'املأ الحقول المطلوبة': 'Fill in the required fields',
+  'التشخيص مطلوب': 'Diagnosis required',
+  'اسم القسم مطلوب': 'Department name required',
+  'رقم السرير مطلوب': 'Bed number required',
+  'المبلغ والوصف مطلوبان': 'Amount and description are required',
+  'اختر التاريخ والوقت': 'Select date and time',
+  'الصيغة يجب أن تكون YYYY-MM': 'Format must be YYYY-MM',
+  'صيغة الفترة: YYYY-MM': 'Period format: YYYY-MM',
+  'كلمة المرور الحالية:': 'Current password:',
+  'كلمة المرور الجديدة (8 أحرف على الأقل):': 'New password (min 8 characters):',
+  'تأكيد كلمة المرور الجديدة:': 'Confirm new password:',
+  'كلمتا المرور غير متطابقتين': 'Passwords do not match',
+  'كلمة المرور قصيرة (8 أحرف على الأقل)': 'Password too short (min 8 characters)',
+  'تم تغيير كلمة المرور ✅': 'Password changed ✅',
+  'تم تسجيل الوصول': 'Arrival recorded',
+  'تم تحديث الحالة': 'Status updated',
+  'تم حفظ النتيجة': 'Result saved',
+  'تم تحديث الطلب': 'Order updated',
+  'تم تحديث السرير': 'Bed updated',
+  'تم رفع الملف': 'File uploaded',
+  'تم الصرف': 'Dispensed',
+  'تم التوريد': 'Restocked',
+  'تم الدفع': 'Payment recorded',
+  'تم صرف الراتب 💵': 'Salary disbursed 💵',
+  'اختر ملفًا أولًا': 'Choose a file first',
+  'فشل الرفع': 'Upload failed',
+  'فشل فتح نافذة الطباعة': 'Failed to open the print window',
+  'اسمح بالنوافذ المنبثقة للمعاينة': 'Allow popups for the preview',
+  'أدخل الشهر (YYYY-MM) أو اتركه فارغًا للفترة الحالية:': 'Enter month (YYYY-MM) or leave empty for the current period:',
+  'أدخل نتيجة التحليل:': 'Enter the test result:',
+  'كمية التوريد:': 'Restock quantity:',
+  'أدخل كمية صحيحة': 'Enter a valid quantity',
+  'طريقة الدفع (cash / card / insurance):': 'Payment method (cash / card / insurance):',
+  'اختر: cash أو card أو insurance': 'Choose: cash, card or insurance',
+  'المبلغ (اتركه فارغًا لدفع المتبقي كاملًا):': 'Amount (leave empty to pay the remaining balance):',
+  'أدخل مبلغًا صحيحًا أكبر من صفر': 'Enter a valid amount greater than zero',
+  'اسم التحليل مطلوب': 'Test name required',
+  'الرمز والاسم مطلوبان': 'Code and name are required',
+  'الفترة والراتب الأساسي مطلوبان': 'Period and base salary are required',
+  'تأكيد صرف هذا الراتب؟': 'Confirm disbursement of this salary?',
+  /* رسائل الخادم الشائعة */
+  'اسم المستخدم أو كلمة المرور غير صحيحة': 'Invalid username or password',
+  'تجاوزت محاولات الدخول الفاشلة': 'Too many failed login attempts',
+  'أعد المحاولة بعد': 'Try again in',
+  'ثانية': 'seconds',
+  'الحساب غير نشط': 'Account is inactive',
+  'كلمة المرور يجب أن تحتوي على حرف واحد على الأقل': 'Password must contain at least one letter',
+  'كلمة المرور يجب أن تحتوي على رقم واحد على الأقل': 'Password must contain at least one digit',
+  'كلمة المرور قصيرة — يجب أن تكون 8 أحرف على الأقل': 'Password too short — at least 8 characters',
+  /* إدارة المستخدمين والصلاحيات */
+  'المستخدمون': 'Users',
+  'إضافة مستخدم جديد': 'Add new user',
+  'الصلاحية': 'Role',
+  'مدير النظام': 'Administrator',
+  'موظف استقبال': 'Receptionist',
+  'إنشاء الحساب': 'Create account',
+  'الرمز والاسم والبريد وكلمة المرور مطلوبان': 'Code, name, email and password are required',
+  'تم إنشاء المستخدم ✅': 'User created ✅',
+  'تم تحديث الحساب ✅': 'Account updated ✅',
+  'تم تغيير الصلاحية ✅': 'Role changed ✅',
+  'نشط': 'Active',
+  'معطّل': 'Disabled',
+  'تعطيل': 'Disable',
+  'تفعيل': 'Enable',
+  'المستخدم غير موجود': 'User not found',
+  'لا يمكنك تغيير دور حسابك': 'You cannot change your own role',
+  'لا يمكن سحب صلاحية آخر مدير نشط': 'Cannot revoke the last active administrator',
+  /* استعادة النسخ الاحتياطي */
+  'استعادة': 'Restore',
+  'تمت الاستعادة': 'Restore completed',
+  'نسخة الأمان': 'safety copy',
+  'سيُستبدل محتوى القاعدة الحالية — ستُصنع نسخة أمان تلقائيًا.': 'This replaces the current database contents — a safety copy is created first.',
+  'تمت استعادة قاعدة البيانات بنجاح': 'Database restored successfully',
+  'الاستعادة تتطلب ملف': 'Restore requires a',
+  'الملف ليس قاعدة SQLite صالحة': 'File is not a valid SQLite database',
+  'الملف ليس نسخة صحيحة لهذه القاعدة': 'File is not a valid copy of this database',
+  'تعذّرت نسخة الأمان — لم تُستعد النسخة': 'Safety copy failed — restore aborted',
+  /* تقويم المواعيد */
+  'تقويم': 'Calendar',
+  'الجدول': 'Table',
+  'الشهر السابق': 'Previous month',
+  'الشهر التالي': 'Next month',
+  /* حماية الدخول على مستوى الـIP */
+  'تجاوزت محاولات الدخول الفاشلة من هذا العنوان': 'Too many failed login attempts from this address',
+  'أعد المحاولة لاحقًا': 'Try again later',
+  /* سجل التدقيق: محاولات الدخول الفاشلة */
+  'محاولات الدخول الفاشلة': 'Failed login attempts',
+  'آخر 24 ساعة': 'Last 24 hours',
+  'لا توجد محاولات فاشلة': 'No failed attempts',
+  'الإجمالي': 'Total'
+};
+const _enPairs = Object.entries(AR2EN).sort((a, b) => b[0].length - a[0].length);
+
+function trEn(s) {
+  let out = String(s == null ? '' : s);
+  for (const [ar, en] of _enPairs) {
+    if (out.indexOf(ar) !== -1) out = out.split(ar).join(en);
+  }
+  return out;
+}
+function tr(s) { return LANG === 'en' ? trEn(s) : s; }
+
+/* ترجمة العقد النصية (مع حفظ النص الأصلي للاستعادة عند التبديل للعربية) */
+function applyI18n(root) {
+  if (!root) return;
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+  const nodes = [];
+  while (w.nextNode()) {
+    const n = w.currentNode;
+    const tag = n.parentElement ? n.parentElement.tagName : '';
+    if (tag === 'SCRIPT' || tag === 'STYLE') continue;
+    nodes.push(n);
+  }
+  for (const n of nodes) {
+    if (n.__ar === undefined) n.__ar = n.nodeValue;
+    const v = LANG === 'en' ? trEn(n.__ar) : n.__ar;
+    if (n.nodeValue !== v) n.nodeValue = v;
+  }
+  for (const el of root.querySelectorAll('[placeholder],[title]')) {
+    for (const attr of ['placeholder', 'title']) {
+      if (!el.hasAttribute(attr)) continue;
+      const k = '__ar_' + attr;
+      if (el[k] === undefined) el[k] = el.getAttribute(attr);
+      const v = LANG === 'en' ? trEn(el[k]) : el[k];
+      if (el.getAttribute(attr) !== v) el.setAttribute(attr, v);
+    }
+  }
+}
+
+function applyLangChrome() {
+  document.documentElement.lang = LANG === 'en' ? 'en' : 'ar';
+  document.documentElement.dir = LANG === 'en' ? 'ltr' : 'rtl';
+  document.title = LANG === 'en'
+    ? 'Hospital Management — Dashboard'
+    : 'نظام إدارة المستشفيات — لوحة التحكم';
+  document.querySelectorAll('.lang-btn').forEach(b => {
+    b.textContent = LANG === 'en' ? '🌐 عربي' : '🌐 EN';
+  });
+}
+
+function toggleLang() {
+  LANG = LANG === 'en' ? 'ar' : 'en';
+  localStorage.setItem('hms_lang', LANG);
+  applyLangChrome();
+  applyI18n(document.body);
+  if (TOKEN && USER) navigate(CURRENT_VIEW);
+}
+
+function initLang() { applyLangChrome(); applyI18n(document.body); }
+
+/* ترجمة نوافذ المتصفح الأصلية (prompt/confirm) */
+const _nativePrompt = window.prompt;
+const _nativeConfirm = window.confirm;
+window.prompt = (m, d) => _nativePrompt.call(window, tr(m), d);
+window.confirm = (m) => _nativeConfirm.call(window, tr(m));
+
+async function download(path, name) {
+  try {
+    /* تقارير PDF تتبع لغة الواجهة (ar|en) */
+    if (path.indexOf('/pdf') !== -1 && path.indexOf('lang=') === -1) {
+      path += (path.indexOf('?') !== -1 ? '&' : '?') + 'lang=' + LANG;
+    }
+    const blob = await apiBlob(path);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast('تم تنزيل الملف ✅');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function downloadPayroll(kind) {
+  const p = ((document.getElementById('f-rpp') || {}).value || '').trim();
+  await download('/reports/payroll/' + kind + (p ? '?period=' + p : ''),
+                 'payroll_report.' + kind);
+}
+
+/* ========== الحسابات والمبيعات ========== */
+let ACC = { period: '', method: '', status: '', patient: '', staff: '' };
+let accGroup = 'day';
+
+function setAccGroup(g) { accGroup = g; navigate('sales'); }
+
+/* تحويل YYYY-MM إلى (من/إلى) — يرجع {} إذا كانت الفترة فارغة أو خاطئة */
+function periodRange(period) {
+  if (!period) return {};
+  const m = /^(\d{4})-(\d{2})$/.exec(period.trim());
+  if (!m) return {};
+  const y = Number(m[1]), mo = Number(m[2]);
+  if (mo < 1 || mo > 12) return {};
+  const last = new Date(y, mo, 0).getDate();
+  const pad = n => String(n).padStart(2, '0');
+  return { from: `${y}-${pad(mo)}-01`, to: `${y}-${pad(mo)}-${pad(last)}T23:59:59` };
+}
+
+async function loadAccounts() {
+  ACC = {
+    period: V('f-acc-period') || '',
+    method: V('f-acc-method') || '',
+    status: V('f-acc-status') || '',
+    patient: V('f-acc-patient') || '',
+    staff: V('f-acc-staff') || ''
+  };
+  if (ACC.period && !/^\d{4}-\d{2}$/.test(ACC.period)) {
+    ACC.period = '';
+    return toast('صيغة الفترة: YYYY-MM', true);
+  }
+  await navigate('sales');
+}
+
+async function clearAccounts() {
+  ACC = { period: '', method: '', status: '', patient: '', staff: '' };
+  await navigate('sales');
+}
+
+/* ========== المخزون ========== */
+let INV = { q: '', status: '', days: 30 };
+
+async function loadInventory() {
+  const d = V('f-inv-days');
+  let days = (d === '' || d == null) ? 30 : Number(d);
+  if (!Number.isFinite(days) || days < 0 || days > 365) {
+    return toast('أيام قرب الانتهاء (0–365)', true);
+  }
+  INV = { q: V('f-inv-q') || '', status: V('f-inv-status') || '', days };
+  await navigate('inventory');
+}
+
+async function clearInv() {
+  INV = { q: '', status: '', days: 30 };
+  await navigate('inventory');
+}
+
+async function downloadAccounts(kind) {
+  const p = (ACC.period || '').trim();
+  await download('/reports/accounts/sales/' + kind + (p ? '?period=' + p : ''),
+                 'accounts_sales.' + kind);
+}
+
+/* تسديد دفعة لعملية بيع — نافذة منبثقة (مبلغ + طريقة + معاينة المتبقي) */
+let ACC_ROWS = [];
+
+function openModal(title, html) {
+  const t = document.getElementById('modal-title');
+  t.textContent = title;
+  document.getElementById('modal-body').innerHTML = html;
+  document.getElementById('modal-back').classList.add('show');
+  applyI18n(document.getElementById('modal-back'));
+}
+function closeModal() { document.getElementById('modal-back').classList.remove('show'); }
+
+function payRowHTML(s) {
+  const rest = Math.max(0, Math.round((s.total_price - s.paid_amount) * 100) / 100);
+  const opt = (v, label, sel) =>
+    `<option value="${v}" ${sel ? 'selected' : ''}>${label}</option>`;
+  return `
+    <div class="kv"><span>عملية البيع</span><b>#${s.id}</b></div>
+    <div class="kv"><span>الإجمالي</span><b>${s.total_price.toLocaleString()} ر.س</b></div>
+    <div class="kv"><span>المدفوع</span><b style="color:#28a745">${s.paid_amount.toLocaleString()} ر.س</b></div>
+    <div class="kv"><span>المتبقي</span><b style="color:${rest > 0 ? '#dc3545' : '#28a745'}">${rest.toLocaleString()} ر.س</b></div>
+    <div class="field"><label>المبلغ (ر.س)</label>
+      <input id="pay-amount" type="number" step="0.01" min="0" value="${rest}" oninput="payPreview()"></div>
+    <div class="field"><label>طريقة الدفع</label>
+      <select id="pay-method">
+        ${opt('cash', 'نقدًا', s.payment_method !== 'card' && s.payment_method !== 'insurance')}
+        ${opt('card', 'بطاقة', s.payment_method === 'card')}
+        ${opt('insurance', 'تأمين', s.payment_method === 'insurance')}
+      </select></div>
+    <div class="kv" id="pay-after"><span>المتبقي بعد الدفع</span><b>—</b></div>
+    <div class="row2">
+      <button class="btn success" onclick="submitPay(${s.id})">تأكيد التسديد</button>
+      <button class="btn ghost" onclick="closeModal()">إلغاء</button>
+    </div>`;
+}
+
+function payPreview() {
+  const s = window.__paySale; if (!s) return;
+  const n = Number(document.getElementById('pay-amount').value);
+  const box = document.getElementById('pay-after'); if (!box) return;
+  if (isNaN(n) || n < 0) { box.innerHTML = '<span>المتبقي بعد الدفع</span><b>—</b>'; return; }
+  const after = Math.max(0, Math.round((s.total_price - n) * 100) / 100);
+  box.innerHTML = `<span>المتبقي بعد الدفع</span><b style="color:${after > 0 ? '#dc3545' : '#28a745'}">${after.toLocaleString()} ر.س</b>`;
+  applyI18n(box);
+}
+
+function pay(id) {
+  const s = ACC_ROWS.find(r => r.id === id);
+  if (!s) return toast('تعذر فتح عملية البيع', true);
+  window.__paySale = s;
+  openModal('💰 تسديد دفعة', payRowHTML(s));
+  payPreview();
+  const el = document.getElementById('pay-amount');
+  if (el) { el.focus(); el.select(); }
+}
+
+async function submitPay(id) {
+  const s = window.__paySale; if (!s || s.id !== id) return;
+  const raw = (document.getElementById('pay-amount').value || '').trim();
+  const n = Number(raw);
+  if (!raw || isNaN(n) || n <= 0) return toast('قيمة غير رقمية', true);
+  const rest = Math.round((s.total_price - s.paid_amount) * 100) / 100;
+  if (n > rest + 0.001) return toast('لا يمكن أن يتجاوز المبلغ المتبقي', true);
+  const pm = document.getElementById('pay-method').value;
+  /* الخادم يستبدل paid_amount — نرسل المجموع التراكمي للحفاظ على الدفعات السابقة */
+  const total = Math.round((s.paid_amount + n) * 100) / 100;
+  try {
+    await api('/accounts/sales/' + id + '/payment', {
+      method: 'PUT', body: JSON.stringify({ paid_amount: total, payment_method: pm }) });
+    closeModal();
+    toast('تم تسجيل الدفعة ✅');
+    await navigate('sales');
+  } catch (e) { toast(e.message, true); }
+}
+
+/* تسديد إجمالي كل العمليات غير المسددة دفعة واحدة */
+async function payAll() {
+  const rows = ACC_ROWS.filter(r => r.status !== 'PAID');
+  if (!rows.length) return toast('لا توجد عمليات غير مسددة');
+  if (!confirm('سيتم تسديد المتبقي كاملاً للعمليات غير المسددة. متابعة؟')) return;
+  let done = 0;
+  for (const s of rows) {
+    try {
+      await api('/accounts/sales/' + s.id + '/payment', {
+        method: 'PUT',
+        body: JSON.stringify({ paid_amount: s.total_price, payment_method: s.payment_method }) });
+      done++;
+    } catch (e) { /* نتابع ونبلّغ في النهاية */ }
+  }
+  toast(done === rows.length
+    ? 'تم تسديد كل العمليات ✅'
+    : `تم تسديد ${done} من ${rows.length} ⚠️`, done !== rows.length);
+  await navigate('sales');
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeModal();
+});
+
+/* ========== الدخول / الخروج ========== */
+async function login() {
+  const u = document.getElementById('li-user').value.trim();
+  const p = document.getElementById('li-pass').value;
+  const errBox = document.getElementById('login-err');
+  errBox.style.display = 'none';
+  try {
+    const r = await api('/auth/login', { method: 'POST', body: JSON.stringify({ username: u, password: p }) });
+    TOKEN = r.access_token; USER = r.user;
+    localStorage.setItem('hms_token', TOKEN);
+    localStorage.setItem('hms_user', JSON.stringify(USER));
+    enterApp();
+  } catch (e) { errBox.textContent = tr(e.message); errBox.style.display = 'block'; }
+}
+
+function logout() {
+  TOKEN = ''; USER = null;
+  localStorage.removeItem('hms_token');
+  localStorage.removeItem('hms_user');
+  document.getElementById('app-view').style.display = 'none';
+  document.getElementById('login-view').style.display = 'flex';
+}
+
+function enterApp() {
+  document.getElementById('login-view').style.display = 'none';
+  document.getElementById('app-view').style.display = 'block';
+  document.getElementById('ub-name').textContent = USER.full_name;
+  document.getElementById('ub-role').textContent = tr(isDoctor() ? 'طبيب' : (isAdmin() ? 'مدير' : 'موظف'));
+  navigate('dashboard');
+  setInterval(refreshBell, 30000); // تحديث الجرس كل 30 ثانية
+}
+
+/* ========== التنقل ========== */
+document.querySelectorAll('.sidebar a').forEach(a => {
+  a.addEventListener('click', e => { e.preventDefault(); navigate(a.dataset.view); });
+});
+
+const TITLES = {
+  dashboard: 'لوحة التحكم', patients: 'المرضى', doctors: 'الأطباء',
+  appointments: 'المواعيد', records: 'السجلات الطبية', attachments: 'المرفقات',
+  departments: 'الأقسام', beds: 'الأسرّة', invoices: 'الفواتير',
+  staff: 'الموظفون', users: 'المستخدمون', backup: 'النسخ الاحتياطي', notifications: 'الإشعارات',
+  lab: 'المختبر والأشعة', pharmacy: 'الصيدلية', inventory: 'المخزون', payroll: 'الرواتب',
+  audit: 'سجل التدقيق', sales: 'المبيعات', accounts: 'الحسابات'
+};
+
+async function refreshBell() {
+  try {
+    const r = await api('/notifications/unread-count');
+    const el = document.getElementById('bell-count');
+    if (el) {
+      el.textContent = r.unread;
+      el.style.color = r.unread > 0 ? '#dc3545' : '';
+      el.style.fontWeight = r.unread > 0 ? 'bold' : '';
+    }
+  } catch (e) { /* تجاهل */ }
+}
+
+async function navigate(view) {
+  CURRENT_VIEW = view;
+  document.querySelectorAll('.sidebar a').forEach(a => a.classList.toggle('active', a.dataset.view === view));
+  document.getElementById('page-title').textContent = tr(TITLES[view] || '');
+  const main = document.getElementById('main');
+  main.innerHTML = '<div class="empty">جارٍ التحميل…</div>';
+  try { await VIEWS[view](main); }
+  catch (e) { main.innerHTML = `<div class="empty" style="color:#dc3545">⚠️ ${esc(e.message)}</div>`; }
+  applyI18n(main);
+  refreshBell();
+}
+
+/* ========== العروض ========== */
+const VIEWS = {
+
+  /* --- لوحة التحكم --- */
+  async dashboard(main) {
+    const s = await api('/dashboard/stats');
+    const statuses = s.appointments_by_status || {};
+    const maxVal = Math.max(1, ...Object.values(statuses));
+    const stLabels = { pending: 'معلّقة', confirmed: 'مؤكدة', cancelled: 'ملغاة', completed: 'مكتملة' };
+    main.innerHTML = `
+      <div class="stats">
+        <div class="stat"><div class="num">${s.total_patients}</div><div class="lbl">المرضى</div></div>
+        <div class="stat green"><div class="num">${s.total_doctors}</div><div class="lbl">الأطباء</div></div>
+        <div class="stat amber"><div class="num">${s.appointments_today}</div><div class="lbl">مواعيد اليوم</div></div>
+        <div class="stat red"><div class="num">${s.pending_appointments}</div><div class="lbl">مواعيد معلّقة</div></div>
+        <div class="stat"><div class="num">${s.beds_occupied}/${s.beds_total}</div><div class="lbl">أسرّة مشغولة</div></div>
+        <div class="stat green"><div class="num">${s.revenue_paid.toLocaleString()}</div><div class="lbl">إيرادات محصّلة (ر.س)</div></div>
+        <div class="stat red"><div class="num">${s.revenue_unpaid.toLocaleString()}</div><div class="lbl">مستحقات غير محصّلة</div></div>
+        <div class="stat"><div class="num">${s.total_departments}</div><div class="lbl">الأقسام</div></div>
+      </div>
+      <div class="card">
+        <h3>توزيع المواعيد حسب الحالة</h3>
+        ${isAdmin() || isDoctor() ? `<div style="margin-bottom:14px"><button class="btn ghost" onclick="downloadReport()">📄 تحميل تقرير PDF</button></div>` : ''}
+        <div class="bars">
+          ${Object.keys(statuses).length ? Object.entries(statuses).map(([k, v]) => `
+            <div class="bar-wrap">
+              <div class="val">${v}</div>
+              <div class="bar" style="height:${Math.round(v / maxVal * 110)}px"></div>
+              <div class="lbl">${stLabels[k] || k}</div>
+            </div>`).join('') : '<div class="empty">لا توجد مواعيد بعد</div>'}
+        </div>
+      </div>`;
+  },
+
+  /* --- المرضى --- */
+  async patients(main) {
+    const rows = await api('/patients/');
+    const form = isAdmin() || !isDoctor() ? `
+      <details class="addbox"><summary>➕ إضافة مريض جديد</summary>
+      <div class="form-grid">
+        <div class="field"><label>الاسم الكامل *</label><input id="f-name"></div>
+        <div class="field"><label>تاريخ الميلاد *</label><input id="f-dob" type="date"></div>
+        <div class="field"><label>النوع *</label><select id="f-gender"><option>ذكر</option><option>أنثى</option></select></div>
+        <div class="field"><label>الهاتف *</label><input id="f-phone"></div>
+        <div class="field"><label>البريد الإلكتروني *</label><input id="f-email" type="email"></div>
+        <div class="field"><label>العنوان</label><input id="f-addr"></div>
+        <div class="field"><label>مجموعة الدم</label><select id="f-blood"><option value="">—</option><option>O+</option><option>O-</option><option>A+</option><option>A-</option><option>B+</option><option>B-</option><option>AB+</option><option>AB-</option></select></div>
+        <div class="field"><label>الهوية الوطنية</label><input id="f-nat" placeholder="رقم الهوية/الإقامة"></div>
+        <div class="field"><label>شركة التأمين</label><input id="f-ins" placeholder="اختياري"></div>
+        <div class="field"><label>رقم وثيقة التأمين</label><input id="f-pol"></div>
+      </div>
+      <button class="btn success" style="margin-top:12px" onclick="addPatient()">حفظ المريض</button>
+      </details>` : '';
+    main.innerHTML = `
+      <div class="card">
+        <h3>المرضى (${rows.length})</h3>
+        <div class="toolbar">
+          <input id="q" placeholder="🔍 بحث بالاسم أو الهاتف أو الهوية…" oninput="filterTable('tbl', this.value)">
+          <button class="btn ghost" onclick="download('/patients/export.csv','patients.csv')">⬆️ تصدير CSV</button>
+          ${form ? `<label class="btn ghost" style="cursor:pointer;margin:0">⬇️ استيراد CSV<input type="file" accept=".csv,text/csv" style="display:none" onchange="importPatients(this)"></label>` : ''}
+        </div>
+        ${form}
+        <div style="overflow-x:auto"><table id="tbl">
+          <thead><tr><th>#</th><th>الاسم</th><th>النوع</th><th>الهاتف</th><th>البريد</th><th>الدم</th><th>الهوية</th><th>أُضيف</th><th></th></tr></thead>
+          <tbody>${rows.map(p => `<tr>
+            <td>${p.id}</td><td><strong>${esc(p.full_name)}</strong></td><td>${esc(p.gender)}</td>
+            <td>${esc(p.phone)}</td><td>${esc(p.email)}</td><td>${esc(p.blood_type || '-')}</td>
+            <td>${esc(p.national_id || '-')}${p.insurer ? `<br><small>🏢 ${esc(p.insurer)}</small>` : ''}</td>
+            <td>${fmtDate(p.created_at)}</td>
+            <td class="actions">
+              <button class="btn sm ghost" onclick="download('/patients/${p.id}/pdf','patient_${p.id}_file.pdf')">📄 الملف PDF</button>
+              ${isAdmin() ? `<button class="btn sm danger" onclick="del('patients',${p.id},'patients')">حذف</button>` : ''}
+            </td>
+          </tr>`).join('') || '<tr><td colspan="9" class="empty">لا يوجد مرضى</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+  },
+
+  /* --- الأطباء --- */
+  async doctors(main) {
+    const [rows, depts] = await Promise.all([api('/doctors/'), api('/departments/')]);
+    const form = isAdmin() ? `
+      <details class="addbox"><summary>➕ إضافة طبيب جديد</summary>
+      <div class="form-grid">
+        <div class="field"><label>الاسم الكامل *</label><input id="f-name"></div>
+        <div class="field"><label>التخصص *</label><input id="f-spec"></div>
+        <div class="field"><label>رقم الترخيص *</label><input id="f-lic"></div>
+        <div class="field"><label>الهاتف *</label><input id="f-phone"></div>
+        <div class="field"><label>البريد الإلكتروني *</label><input id="f-email" type="email"></div>
+        <div class="field"><label>القسم</label><select id="f-dept"><option value="">—</option>
+          ${depts.map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join('')}</select></div>
+      </div>
+      <button class="btn success" style="margin-top:12px" onclick="addDoctor()">حفظ الطبيب</button>
+      </details>` : '';
+    main.innerHTML = `
+      <div class="card">
+        <h3>الأطباء (${rows.length})</h3>
+        <div class="toolbar"><input id="q" placeholder="🔍 بحث…" oninput="filterTable('tbl', this.value)"></div>
+        ${form}
+        <div style="overflow-x:auto"><table id="tbl">
+          <thead><tr><th>#</th><th>الاسم</th><th>التخصص</th><th>الترخيص</th><th>الهاتف</th><th>القسم</th><th>متاح</th>${isAdmin() ? '<th></th>' : ''}</tr></thead>
+          <tbody>${rows.map(d => `<tr>
+            <td>${d.id}</td><td><strong>${esc(d.full_name)}</strong></td><td>${esc(d.specialty)}</td>
+            <td>${esc(d.license_number)}</td><td>${esc(d.phone)}</td>
+            <td>${esc(d.department ? d.department.name : '-')}</td>
+            <td>${d.is_available ? '✅' : '⛔'}</td>
+            ${isAdmin() ? `<td><button class="btn sm danger" onclick="del('doctors',${d.id},'doctors')">حذف</button></td>` : ''}
+          </tr>`).join('') || '<tr><td colspan="8" class="empty">لا يوجد أطباء</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+  },
+
+  /* --- المواعيد --- */
+  async appointments(main) {
+    const [rows, patients, doctors] = await Promise.all([
+      api('/appointments/'), api('/patients/'), api('/doctors/')]);
+    CAL_MODE = false;
+    main.innerHTML = `
+      <div class="card">
+        <h3>المواعيد (${rows.length})</h3>
+        <div class="toolbar">
+          <input type="date" id="flt-date" onchange="loadAppts()">
+          <select id="flt-status" onchange="loadAppts()">
+            <option value="">كل الحالات</option><option value="pending">معلّقة</option>
+            <option value="confirmed">مؤكدة</option><option value="completed">مكتملة</option>
+            <option value="cancelled">ملغاة</option>
+          </select>
+          <button class="btn ghost" id="cal-btn" onclick="toggleCal()">🗓️ تقويم</button>
+        </div>
+        <div id="cal-box" style="display:none;margin-top:12px"></div>
+        <div id="queue-box" style="margin:12px 0"></div>
+        <details class="addbox"><summary>➕ حجز موعد جديد</summary>
+        <div class="form-grid">
+          <div class="field"><label>المريض *</label><select id="f-pat">
+            ${patients.map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join('')}</select></div>
+          <div class="field"><label>الطبيب *</label><select id="f-doc">
+            ${doctors.map(d => `<option value="${d.id}">${esc(d.full_name)}</option>`).join('')}</select></div>
+          <div class="field"><label>التاريخ والوقت *</label><input id="f-date" type="datetime-local"></div>
+          <div class="field"><label>السبب</label><input id="f-reason"></div>
+        </div>
+        <button class="btn success" style="margin-top:12px" onclick="addAppt()">حجز الموعد</button>
+        </details>
+        <div id="appt-table" style="overflow-x:auto"><table id="tbl">
+          <thead><tr><th>#</th><th>التاريخ</th><th>المريض</th><th>الطبيب</th><th>السبب</th><th>الحالة</th><th>الطابور</th><th></th></tr></thead>
+          <tbody id="appt-body"></tbody>
+        </table></div>
+      </div>`;
+    window._apptCache = { patients, doctors };
+    await loadAppts();
+  },
+
+  /* --- السجلات الطبية --- */
+  async records(main) {
+    const [rows, patients, doctors, atts] = await Promise.all([
+      api('/medical-records/'), api('/patients/'), api('/doctors/'), api('/attachments/')]);
+    // مرفقات كل سجل
+    const attMap = {};
+    atts.forEach(a => { if (a.record_id) (attMap[a.record_id] = attMap[a.record_id] || []).push(a); });
+    const fmtSize = b => b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.round(b / 1024) + ' KB';
+    main.innerHTML = `
+      <div class="card">
+        <h3>السجلات الطبية (${rows.length})</h3>
+        <details class="addbox"><summary>➕ إضافة سجل طبي</summary>
+        <div class="form-grid">
+          <div class="field"><label>المريض *</label><select id="f-pat">
+            ${patients.map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join('')}</select></div>
+          ${isDoctor() ? '' : `<div class="field"><label>الطبيب</label><select id="f-doc">
+            <option value="">—</option>${doctors.map(d => `<option value="${d.id}">${esc(d.full_name)}</option>`).join('')}</select></div>`}
+          <div class="field" style="grid-column:1/-1"><label>التشخيص *</label><input id="f-dx"></div>
+          <div class="field" style="grid-column:1/-1"><label>الوصفة الطبية</label><textarea id="f-rx" rows="2"></textarea></div>
+          <div class="field" style="grid-column:1/-1"><label>ملاحظات</label><textarea id="f-notes" rows="2"></textarea></div>
+        </div>
+        <button class="btn success" style="margin-top:12px" onclick="addRecord()">حفظ السجل</button>
+        </details>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>#</th><th>التاريخ</th><th>المريض</th><th>الطبيب</th><th>التشخيص</th><th></th></tr></thead>
+          <tbody>${rows.map(r => `
+          <tr>
+            <td>${r.id}</td><td>${fmtDate(r.created_at)}</td>
+            <td>${esc(r.patient.full_name)}</td><td>${esc(r.doctor ? r.doctor.full_name : '-')}</td>
+            <td>${esc(r.diagnosis)}</td>
+            <td class="actions">
+              ${(attMap[r.id] || []).length ? `<button class="btn sm ghost" onclick="toggleRecordAtts(${r.id})">📎 ${attMap[r.id].length}</button>` : ''}
+              <button class="btn sm ghost" onclick="download('/medical-records/${r.id}/pdf','record_${r.id}.pdf')">📄 PDF</button>
+              ${(isAdmin() || (isDoctor() && r.doctor && USER.email === r.doctor.email)) ? `<button class="btn sm danger" onclick="del('medical-records',${r.id},'records')">حذف</button>` : ''}
+            </td>
+          </tr>
+          <tr id="att-row-${r.id}" style="display:none"><td colspan="6" style="background:#f8fafd">
+            <strong>📎 مرفقات هذا السجل:</strong>
+            ${(attMap[r.id] || []).map(a => `<div style="margin:6px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+              <span>${a.content_type.includes('image') ? '🖼️' : '📄'} ${esc(a.original_name)}</span>
+              <small>(${fmtSize(a.size_bytes)})</small>
+              <button class="btn sm ghost" onclick="previewAtt(${a.id})">👁️ معاينة</button>
+              <button class="btn sm ghost" onclick="download('/attachments/${a.id}/file','${esc(a.original_name)}')">⬇️ تنزيل</button>
+            </div>`).join('') || '<em>لا مرفقات</em>'}
+          </td></tr>`).join('') || '<tr><td colspan="6" class="empty">لا توجد سجلات</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+  },
+
+  /* --- الأقسام --- */
+  async departments(main) {
+    const rows = await api('/departments/');
+    const form = isAdmin() ? `
+      <details class="addbox"><summary>➕ إضافة قسم</summary>
+      <div class="form-grid">
+        <div class="field"><label>اسم القسم *</label><input id="f-name"></div>
+        <div class="field"><label>الدور</label><input id="f-floor"></div>
+        <div class="field"><label>الوصف</label><input id="f-desc"></div>
+      </div>
+      <button class="btn success" style="margin-top:12px" onclick="addDept()">حفظ القسم</button>
+      </details>` : '';
+    main.innerHTML = `
+      <div class="card">
+        <h3>الأقسام (${rows.length})</h3>
+        ${form}
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>#</th><th>الاسم</th><th>الدور</th><th>الوصف</th><th>الأسرّة</th>${isAdmin() ? '<th></th>' : ''}</tr></thead>
+          <tbody>${rows.map(d => `<tr>
+            <td>${d.id}</td><td><strong>${esc(d.name)}</strong></td><td>${esc(d.floor || '-')}</td>
+            <td>${esc(d.description || '-')}</td><td>${d.beds.length}</td>
+            ${isAdmin() ? `<td><button class="btn sm danger" onclick="del('departments',${d.id},'departments')">حذف</button></td>` : ''}
+          </tr>`).join('') || '<tr><td colspan="6" class="empty">لا توجد أقسام</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+  },
+
+  /* --- الأسرّة --- */
+  async beds(main) {
+    const [rows, depts, patients] = await Promise.all([
+      api('/beds/'), api('/departments/'), api('/patients/')]);
+    const stLabel = { available: 'متاح', occupied: 'مشغول', maintenance: 'صيانة' };
+    const form = isAdmin() ? `
+      <details class="addbox"><summary>➕ إضافة سرير</summary>
+      <div class="form-grid">
+        <div class="field"><label>رقم السرير *</label><input id="f-num"></div>
+        <div class="field"><label>القسم *</label><select id="f-dept">
+          ${depts.map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join('')}</select></div>
+      </div>
+      <button class="btn success" style="margin-top:12px" onclick="addBed()">حفظ السرير</button>
+      </details>` : '';
+    main.innerHTML = `
+      <div class="card">
+        <h3>الأسرّة (${rows.length})</h3>
+        ${form}
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>#</th><th>السرير</th><th>القسم</th><th>الحالة</th><th>المريض</th><th>إجراء</th>${isAdmin() ? '<th></th>' : ''}</tr></thead>
+          <tbody>${rows.map(b => `<tr>
+            <td>${b.id}</td><td><strong>${esc(b.bed_number)}</strong></td>
+            <td>${esc(depts.find(d => d.id === b.department_id)?.name || '-')}</td>
+            <td>${pill(b.status)}</td>
+            <td>${esc(patients.find(p => p.id === b.patient_id)?.full_name || '—')}</td>
+            <td>
+              <select onchange="updateBed(${b.id}, this.value)" style="padding:5px;border-radius:6px;border:1px solid #ddd">
+                ${Object.entries(stLabel).map(([k, v]) => `<option value="${k}" ${b.status === k ? 'selected' : ''}>${v}</option>`).join('')}
+              </select>
+            </td>
+            ${isAdmin() ? `<td><button class="btn sm danger" onclick="del('beds',${b.id},'beds')">حذف</button></td>` : ''}
+          </tr>`).join('') || '<tr><td colspan="7" class="empty">لا توجد أسرّة</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+  },
+
+  /* --- الفواتير --- */
+  async invoices(main) {
+    const [rows, patients, appts, recs] = await Promise.all([
+      api('/invoices/'), api('/patients/'), api('/appointments/'), api('/medical-records/')]);
+    const stLabel = { unpaid: 'غير مدفوعة', paid: 'مدفوعة', partial: 'جزئية' };
+    const optAppts = appts.map(a =>
+      `<option value="${a.id}">#${a.id} — ${esc(a.patient.full_name)} — ${fmtDate(a.appointment_date)}</option>`).join('');
+    const optRecs = recs.map(r =>
+      `<option value="${r.id}">#${r.id} — ${esc(r.patient.full_name)} — ${esc(r.diagnosis)}</option>`).join('');
+    main.innerHTML = `
+      <div class="card">
+        <h3>الفواتير (${rows.length})</h3>
+        <div class="toolbar" style="margin-bottom:6px">
+          <button class="btn ghost" onclick="download('/invoices/export.csv','invoices.csv')">⬆️ تصدير CSV</button>
+        </div>
+        <details class="addbox"><summary>➕ إنشاء فاتورة</summary>
+        <div class="form-grid">
+          <div class="field"><label>المريض *</label><select id="f-pat">
+            ${patients.map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join('')}</select></div>
+          <div class="field"><label>المبلغ (ر.س) *</label><input id="f-amt" type="number" step="0.01" min="1"></div>
+          <div class="field"><label>الخصم (ر.س)</label><input id="f-disc" type="number" step="0.01" min="0" value="0"></div>
+          <div class="field"><label>الضريبة %</label><input id="f-tax" type="number" step="0.1" min="0" max="100" value="0"></div>
+          <div class="field"><label>الحالة</label><select id="f-st">
+            <option value="unpaid">غير مدفوعة</option><option value="paid">مدفوعة</option><option value="partial">جزئية</option></select></div>
+          <div class="field"><label>الوصف *</label><input id="f-desc"></div>
+          <div class="field"><label>🔗 ربط بموعد</label><select id="f-appt"><option value="">—</option>${optAppts}</select></div>
+          <div class="field"><label>🔗 ربط بسجل طبي</label><select id="f-rec"><option value="">—</option>${optRecs}</select></div>
+          <div class="field"><label>🏢 شركة التأمين</label><input id="f-ins" placeholder="اختياري — مطلوب للدفع بالتأمين"></div>
+          <div class="field"><label>📄 رقم الوثيقة</label><input id="f-pol"></div>
+        </div>
+        <button class="btn success" style="margin-top:12px" onclick="addInvoice()">إنشاء الفاتورة</button>
+        </details>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>#</th><th>التاريخ</th><th>المريض</th><th>الوصف</th><th>الإجمالي</th><th>الحالة</th><th>الدفع</th><th></th></tr></thead>
+          <tbody>${rows.map(i => `<tr>
+            <td>${i.id}${i.appointment_id ? ' 🔗' : ''}${i.record_id ? ' 📋' : ''}</td>
+            <td>${fmtDate(i.created_at)}</td><td>${esc(i.patient.full_name)}</td>
+            <td>${esc(i.description)}${i.insurer ? `<br><small>🏢 ${esc(i.insurer)}${i.policy_number ? ' — #' + esc(i.policy_number) : ''}</small>` : ''}</td>
+            <td><strong>${(i.total != null ? i.total : i.amount).toLocaleString()} ر.س</strong>${(i.discount || i.tax_rate) ? `<br><small>أساسي ${i.amount.toLocaleString()}${i.discount ? ' − خصم ' + i.discount.toLocaleString() : ''}${i.tax_rate ? ' + ضريبة ' + i.tax_rate + '%' : ''}</small>` : ''}${i.paid_amount ? `<br><small style="color:#28a745">مدفوع ${i.paid_amount.toLocaleString()}</small>` : ''}</td>
+            <td>${pill(i.status)}</td>
+            <td>${i.paid_at ? `${esc(i.payment_method || '-')} · ${fmtDate(i.paid_at)}` : '—'}</td>
+            <td class="actions">
+              ${i.status !== 'paid' ? `<button class="btn sm success" onclick="payInvoice(${i.id})">💰 دفع</button>` : ''}
+              <button class="btn sm ghost" onclick="printInvoice(${i.id})">🖨️ طباعة</button>
+              <button class="btn sm ghost" onclick="download('/invoices/${i.id}/pdf','invoice_${i.id}.pdf')">📄 PDF</button>
+              ${isAdmin() ? `<button class="btn sm danger" onclick="del('invoices',${i.id},'invoices')">حذف</button>` : ''}
+            </td>
+          </tr>`).join('') || '<tr><td colspan="8" class="empty">لا توجد فواتير</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+  },
+
+  /* --- الموظفون --- */
+  async staff(main) {
+    const rows = await api('/staff/');
+    const form = isAdmin() ? `
+      <details class="addbox"><summary>➕ إضافة موظف</summary>
+      <div class="form-grid">
+        <div class="field"><label>الاسم الكامل *</label><input id="f-name"></div>
+        <div class="field"><label>المنصب *</label><input id="f-pos"></div>
+        <div class="field"><label>الهاتف *</label><input id="f-phone"></div>
+        <div class="field"><label>البريد الإلكتروني *</label><input id="f-email" type="email"></div>
+        <div class="field"><label>تاريخ التعيين *</label><input id="f-hire" type="date"></div>
+        <div class="field"><label>الراتب</label><input id="f-sal" type="number" step="0.01"></div>
+      </div>
+      <button class="btn success" style="margin-top:12px" onclick="addStaff()">حفظ الموظف</button>
+      </details>` : '';
+    main.innerHTML = `
+      <div class="card">
+        <h3>الموظفون (${rows.length})</h3>
+        ${form}
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>#</th><th>الاسم</th><th>المنصب</th><th>الهاتف</th><th>البريد</th><th>التعيين</th><th>الراتب</th>${isAdmin() ? '<th></th>' : ''}</tr></thead>
+          <tbody>${rows.map(s => `<tr>
+            <td>${s.id}</td><td><strong>${esc(s.full_name)}</strong></td><td>${esc(s.position)}</td>
+            <td>${esc(s.phone)}</td><td>${esc(s.email)}</td><td>${fmtDate(s.hire_date)}</td>
+            <td>${s.salary ? s.salary.toLocaleString() : '-'}</td>
+            ${isAdmin() ? `<td><button class="btn sm danger" onclick="del('staff',${s.id},'staff')">حذف</button></td>` : ''}
+          </tr>`).join('') || '<tr><td colspan="8" class="empty">لا يوجد موظفون</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+  },
+
+  /* --- المرفقات --- */
+  async attachments(main) {
+    const [rows, patients, records] = await Promise.all([
+      api('/attachments/'), api('/patients/'), api('/medical-records/')]);
+    const fmtSize = b => b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.round(b / 1024) + ' KB';
+    const icon = t => t.includes('image') ? '🖼️' : (t.includes('pdf') ? '📕' : '📄');
+    main.innerHTML = `
+      <div class="card">
+        <h3>المرفقات الطبية (${rows.length})</h3>
+        <details class="addbox"><summary>⬆️ رفع مرفق جديد (حد أقصى 10MB)</summary>
+        <div class="form-grid">
+          <div class="field"><label>المريض *</label><select id="f-pat">
+            ${patients.map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join('')}</select></div>
+          <div class="field"><label>ربط بسجل طبي</label><select id="f-rec"><option value="">—</option>
+            ${records.map(r => `<option value="${r.id}">#${r.id} — ${esc(r.patient.full_name)} — ${esc(r.diagnosis)}</option>`).join('')}</select></div>
+          <div class="field" style="grid-column:1/-1"><label>الملف *</label><input id="f-file" type="file"></div>
+        </div>
+        <button class="btn success" style="margin-top:12px" onclick="uploadAtt()">رفع الملف</button>
+        </details>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>#</th><th>الملف</th><th>المريض</th><th>السجل</th><th>النوع</th><th>الحجم</th><th>تاريخ الرفع</th><th></th></tr></thead>
+          <tbody>${rows.map(a => `<tr>
+            <td>${a.id}</td>
+            <td>${icon(a.content_type)} ${esc(a.original_name)}</td>
+            <td>${esc(a.patient ? a.patient.full_name : '#'+a.patient_id)}</td>
+            <td>${a.record_id ? '#' + a.record_id : '—'}</td>
+            <td>${esc(a.content_type)}</td>
+            <td>${fmtSize(a.size_bytes)}</td>
+            <td>${fmtDate(a.uploaded_at)}</td>
+            <td class="actions">
+              <button class="btn sm ghost" onclick="previewAtt(${a.id})">👁️ معاينة</button>
+              <button class="btn sm ghost" onclick="download('/attachments/${a.id}/file','${esc(a.original_name)}')">⬇️ تنزيل</button>
+              <button class="btn sm danger" onclick="del('attachments',${a.id},'attachments')">حذف</button>
+            </td>
+          </tr>`).join('') || '<tr><td colspan="8" class="empty">لا توجد مرفقات — ارفع أول ملف</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+  },
+
+  /* --- الإشعارات --- */
+  async notifications(main) {
+    const rows = await api('/notifications/');
+    const icon = t => t === 'reminder' ? '⏰'
+      : (t === 'appointment' ? '📅'
+      : (t === 'lab_result' ? '🔬'
+      : (t === 'low_stock' ? '💊' : 'ℹ️')));
+    main.innerHTML = `
+      <div class="card">
+        <h3>الإشعارات (${rows.length})</h3>
+        ${rows.some(n => !n.is_read) ? `<button class="btn ghost" style="margin-bottom:14px" onclick="readAll()">✓ تعليم الكل كمقروء</button>` : ''}
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>#</th><th>النوع</th><th>العنوان</th><th>الرسالة</th><th>التاريخ</th><th>الحالة</th><th></th></tr></thead>
+          <tbody>${rows.map(n => `<tr style="${n.is_read ? '' : 'background:#fff8e1'}">
+            <td>${n.id}</td><td>${icon(n.type)}</td>
+            <td><strong>${esc(n.title)}</strong></td>
+            <td>${esc(n.message)}</td>
+            <td>${fmtDate(n.created_at)}</td>
+            <td>${n.is_read ? '<span class="pill completed">مقروء</span>' : '<span class="pill pending">جديد</span>'}</td>
+            <td class="actions">
+              ${!n.is_read ? `<button class="btn sm success" onclick="readNotif(${n.id})">تعليم</button>` : ''}
+              <button class="btn sm danger" onclick="del('notifications',${n.id},'notifications')">حذف</button>
+            </td>
+          </tr>`).join('') || '<tr><td colspan="7" class="empty">لا توجد إشعارات</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+  },
+
+  /* --- المختبر والأشعة --- */
+  async lab(main) {
+    const [rows, patients, doctors] = await Promise.all([
+      api('/lab-orders/'), api('/patients/'), api('/doctors/')]);
+    const stLabels = { pending: 'مسجّل', in_progress: 'قيد التنفيذ',
+                       ready: 'جاهزة', reviewed: 'مراجَعة', cancelled: 'ملغاة' };
+    main.innerHTML = `
+      <div class="card">
+        <div class="toolbar"><h3 style="margin:0">طلبات المختبر والأشعة (${rows.length})</h3>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${isAdmin() || isDoctor() ? `<button class="btn ghost" onclick="download('/reports/lab/pdf','lab_report.pdf')">📄 تقرير المختبر PDF</button>` : ''}
+          ${isAdmin() || isDoctor() ? `<button class="btn ghost" onclick="download('/reports/lab/csv','lab_orders.csv')">⬇️ CSV</button>` : ''}
+          </div>
+        </div>
+        <details class="addbox"><summary>➕ طلب تحليل/أشعة جديد</summary>
+        <div class="form-grid">
+          <div class="field"><label>المريض *</label><select id="f-pat">
+            ${patients.map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join('')}</select></div>
+          <div class="field"><label>الطبيب</label><select id="f-doc"><option value="">—</option>
+            ${doctors.map(d => `<option value="${d.id}">${esc(d.full_name)}</option>`).join('')}</select></div>
+          <div class="field"><label>النوع</label><select id="f-type">
+            <option value="lab">تحليل مختبري</option><option value="radiology">أشعة</option></select></div>
+          <div class="field"><label>اسم التحليل *</label><input id="f-test" placeholder="مثال: CBC — صورة أشعة صدر"></div>
+          <div class="field"><label>السعر (ر.س)</label><input id="f-price" type="number" step="0.01" min="0"></div>
+          <div class="field"><label>ملاحظات</label><input id="f-lnotes"></div>
+        </div>
+        <button class="btn success" style="margin-top:12px" onclick="addLabOrder()">حفظ الطلب</button>
+        </details>
+        <div class="toolbar"><input placeholder="🔍 بحث…" oninput="filterTable('tbl', this.value)"></div>
+        <div style="overflow-x:auto"><table id="tbl">
+          <thead><tr><th>#</th><th>التاريخ</th><th>المريض</th><th>الطبيب</th><th>النوع</th><th>التحليل</th><th>الحالة</th><th>النتيجة</th><th></th></tr></thead>
+          <tbody>${rows.map(o => `<tr>
+            <td>${o.id}</td><td>${fmtDate(o.ordered_at)}</td>
+            <td>${esc(o.patient.full_name)}</td><td>${esc(o.doctor ? o.doctor.full_name : '-')}</td>
+            <td>${o.test_type === 'radiology' ? 'أشعة 🔬' : 'تحليل 🧪'}</td>
+            <td><strong>${esc(o.test_name)}</strong>${o.price ? `<br><small>${o.price.toLocaleString()} ر.س</small>` : ''}</td>
+            <td><span class="pill ${o.status}">${stLabels[o.status] || o.status}</span></td>
+            <td>${o.result ? esc(o.result) : '—'}</td>
+            <td class="actions">
+              ${o.status === 'pending' ? `<button class="btn sm ghost" onclick="setLabStatus(${o.id},'in_progress')">▶ بدء</button>` : ''}
+              ${o.status === 'in_progress' ? `<button class="btn sm success" onclick="setLabResult(${o.id})">📥 النتيجة</button>` : ''}
+              ${o.status === 'ready' && (isAdmin() || isDoctor()) ? `<button class="btn sm success" onclick="setLabStatus(${o.id},'reviewed')">🔎 مراجعة</button>` : ''}
+              ${o.status !== 'cancelled' && o.status !== 'reviewed' ? `<button class="btn sm danger" onclick="setLabStatus(${o.id},'cancelled')">إلغاء</button>` : ''}
+              ${isAdmin() ? `<button class="btn sm danger" onclick="del('lab-orders',${o.id},'lab')">حذف</button>` : ''}
+            </td>
+          </tr>`).join('') || '<tr><td colspan="9" class="empty">لا توجد طلبات — أنشئ أول طلب</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+  },
+
+  /* --- الصيدلية --- */
+  async pharmacy(main) {
+    const [meds, patients, dispenses] = await Promise.all([
+      api('/medications/'), api('/patients/'), api('/dispenses/')]);
+    const medForm = isAdmin() ? `
+      <details class="addbox"><summary>➕ إضافة دواء للمخزون</summary>
+      <div class="form-grid">
+        <div class="field"><label>رمز الدواء *</label><input id="f-code" placeholder="PAR500"></div>
+        <div class="field"><label>اسم الدواء *</label><input id="f-mname"></div>
+        <div class="field"><label>الكمية</label><input id="f-qty" type="number" min="0" value="0"></div>
+        <div class="field"><label>الوحدة</label><input id="f-unit" value="علبة"></div>
+        <div class="field"><label>السعر (ر.س)</label><input id="f-mprice" type="number" step="0.01" min="0"></div>
+        <div class="field"><label>حد التنبيه</label><input id="f-minq" type="number" min="0" value="10"></div>
+      </div>
+      <button class="btn success" style="margin-top:12px" onclick="addMedication()">حفظ الدواء</button>
+      </details>` : '';
+    main.innerHTML = `
+      <div class="card">
+        <div class="toolbar"><h3 style="margin:0">مخزون الأدوية (${meds.length})</h3>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/pdf','pharmacy_report.pdf')">📄 تقرير المخزون PDF</button>` : ''}
+          ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/csv?section=inventory','pharmacy_inventory.csv')">⬇️ مخزون CSV</button>` : ''}
+          ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/csv?section=dispenses','pharmacy_dispenses.csv')">⬇️ صرف CSV</button>` : ''}
+          </div>
+        </div>
+        <details class="addbox"><summary>💊 صرف دواء لمريض</summary>
+        <div class="form-grid">
+          <div class="field"><label>الدواء *</label><select id="f-dmed">
+            ${meds.map(m => `<option value="${m.id}">${esc(m.name)} — متوفر ${m.quantity} ${esc(m.unit)}</option>`).join('')}</select></div>
+          <div class="field"><label>المريض *</label><select id="f-dpat">
+            ${patients.map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join('')}</select></div>
+          <div class="field"><label>الكمية *</label><input id="f-dqty" type="number" min="1" value="1"></div>
+        </div>
+        <button class="btn success" style="margin-top:12px" onclick="dispenseMed()">صرف الآن</button>
+        </details>
+        ${medForm}
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>#</th><th>الرمز</th><th>الاسم</th><th>الكمية</th><th>السعر</th><th>حد التنبيه</th><th>الانتهاء</th><th></th></tr></thead>
+          <tbody>${meds.map(m => `<tr style="${m.quantity <= m.min_quantity ? 'background:#fff8e1' : ''}">
+            <td>${m.id}</td><td>${esc(m.code)}</td><td><strong>${esc(m.name)}</strong></td>
+            <td>${m.quantity <= m.min_quantity
+              ? `<span class="pill lowstock">${m.quantity} ${esc(m.unit)} ⚠️</span>`
+              : `<span class="pill confirmed">${m.quantity} ${esc(m.unit)}</span>`}</td>
+            <td>${m.price.toLocaleString()} ر.س</td>
+            <td>${m.min_quantity}</td>
+            <td>${m.expiry_date ? fmtDate(m.expiry_date) : '—'}</td>
+            <td class="actions">
+              ${isAdmin() ? `<button class="btn sm ghost" onclick="restock(${m.id})">📦 توريد</button>` : ''}
+              ${isAdmin() ? `<button class="btn sm danger" onclick="del('medications',${m.id},'pharmacy')">حذف</button>` : ''}
+            </td>
+          </tr>`).join('') || '<tr><td colspan="8" class="empty">لا أدوية — أضف أول دواء</td></tr>'}</tbody>
+        </table></div>
+      </div>
+      <div class="card">
+        <h3>سجل الصرف (${dispenses.length})</h3>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>#</th><th>التاريخ</th><th>المريض</th><th>الدواء</th><th>الكمية</th><th>السعر</th><th>صرفه</th></tr></thead>
+          <tbody>${dispenses.map(d => `<tr>
+            <td>${d.id}</td><td>${fmtDate(d.created_at)}</td>
+            <td>${esc(d.patient.full_name)}</td>
+            <td>${esc(d.medication ? d.medication.name : '#' + d.medication_id)}</td>
+            <td>${d.quantity}</td><td>${d.unit_price.toLocaleString()} ر.س</td>
+            <td>${esc(d.dispensed_by || '-')}</td>
+          </tr>`).join('') || '<tr><td colspan="7" class="empty">لا عمليات صرف بعد</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+  },
+
+  /* --- المخزون: ملخص + أصناف بحالة + دفتر الحركات --- */
+  async inventory(main) {
+    const qs = new URLSearchParams();
+    if (INV.q) qs.set('search', INV.q);
+    if (INV.status) qs.set('status', INV.status);
+    qs.set('expiring_days', INV.days);
+    const [items, sum, moves] = await Promise.all([
+      api('/inventory/?' + qs.toString()),
+      api('/inventory/summary?expiring_days=' + INV.days),
+      api('/inventory/movements?limit=50')]);
+    const stPill = { ok: 'confirmed', low: 'lowstock', out: 'unpaid',
+                     expiring: 'pending', expired: 'cancelled' };
+    const stLbl = { ok: 'سليم', low: 'منخفض', out: 'نافد',
+                    expiring: 'قارب على الانتهاء', expired: 'منتهي الصلاحية' };
+    const mvPill = { in: 'confirmed', out: 'cancelled', adjust: 'in_progress' };
+    const mvLbl = { in: 'وارد', out: 'صادر', adjust: 'جرد' };
+    const opts = [['', 'كل الحالات'], ['ok', 'سليم'], ['low', 'منخفض'], ['out', 'نافد'],
+                  ['expiring', 'قارب على الانتهاء'], ['expired', 'منتهي الصلاحية']]
+      .map(([v, l]) => `<option value="${v}" ${INV.status === v ? 'selected' : ''}>${l}</option>`)
+      .join('');
+    const medForm = isAdmin() ? `
+      <details class="addbox"><summary>➕ إضافة دواء للمخزون</summary>
+      <div class="form-grid">
+        <div class="field"><label>رمز الدواء *</label><input id="f-code" placeholder="PAR500"></div>
+        <div class="field"><label>اسم الدواء *</label><input id="f-mname"></div>
+        <div class="field"><label>الكمية</label><input id="f-qty" type="number" min="0" value="0"></div>
+        <div class="field"><label>الوحدة</label><input id="f-unit" value="علبة"></div>
+        <div class="field"><label>السعر (ر.س)</label><input id="f-mprice" type="number" step="0.01" min="0"></div>
+        <div class="field"><label>حد التنبيه</label><input id="f-minq" type="number" min="0" value="10"></div>
+      </div>
+      <button class="btn success" style="margin-top:12px" onclick="addMedication('inventory')">حفظ الدواء</button>
+      </details>` : '';
+    main.innerHTML = `
+      <div class="stats">
+        <div class="stat"><div class="num">${sum.total_value.toLocaleString()} ر.س</div><div class="lbl">قيمة المخزون (ر.س)</div></div>
+        <div class="stat green"><div class="num">${sum.items}</div><div class="lbl">عدد الأصناف</div></div>
+        <div class="stat"><div class="num">${sum.units}</div><div class="lbl">إجمالي القطع</div></div>
+        <div class="stat amber"><div class="num">${sum.low}</div><div class="lbl">مخزون منخفض</div></div>
+        <div class="stat red"><div class="num">${sum.out}</div><div class="lbl">أصناف نافدة</div></div>
+        <div class="stat amber"><div class="num">${sum.expiring}</div><div class="lbl">أصناف تنتهي قريبًا</div></div>
+        <div class="stat red"><div class="num">${sum.expired}</div><div class="lbl">أصناف منتهية</div></div>
+      </div>
+      <div class="card">
+        <div class="toolbar">
+          <input id="f-inv-q" placeholder="ابحث بالاسم أو الرمز" value="${esc(INV.q)}" style="min-width:200px">
+          <select id="f-inv-status">${opts}</select>
+          <input id="f-inv-days" type="number" min="0" max="365" value="${INV.days}"
+                 placeholder="أيام قرب الانتهاء (0–365)" style="width:140px">
+          <button class="btn" onclick="loadInventory()">تطبيق</button>
+          <button class="btn ghost" onclick="clearInv()">مسح</button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/pdf','inventory_report.pdf')">📄 تقرير المخزون PDF</button>` : ''}
+          ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/csv?section=inventory','inventory_items.csv')">⬇️ مخزون CSV</button>` : ''}
+          </div>
+        </div>
+        ${medForm}
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>#</th><th>الرمز</th><th>الاسم</th><th>الكمية</th><th>الحالة</th><th>السعر</th><th>القيمة</th><th>حد التنبيه</th><th>الانتهاء</th><th></th></tr></thead>
+          <tbody>${items.map(m => `<tr>
+            <td>${m.id}</td><td>${esc(m.code)}</td><td><strong>${esc(m.name)}</strong></td>
+            <td>${m.quantity} ${esc(m.unit)}</td>
+            <td><span class="pill ${stPill[m.status] || 'partial'}">${stLbl[m.status] || m.status}</span></td>
+            <td>${m.price.toLocaleString()} ر.س</td>
+            <td>${m.value.toLocaleString()} ر.س</td>
+            <td>${m.min_quantity}</td>
+            <td>${m.expiry_date ? fmtDate(m.expiry_date) : '—'}${(m.status === 'expiring' || m.status === 'expired') && m.days_to_expiry !== null ? ` <small title="أيام متبقية للانتهاء">⏱ ${m.days_to_expiry}</small>` : ''}</td>
+            <td class="actions">
+              ${isAdmin() ? `<button class="btn sm ghost" onclick="restock(${m.id})">📦 توريد</button>` : ''}
+              ${isAdmin() ? `<button class="btn sm ghost" onclick="adjustStock(${m.id})">🧮 جرد</button>` : ''}
+              ${isAdmin() ? `<button class="btn sm danger" onclick="del('medications',${m.id},'inventory')">حذف</button>` : ''}
+            </td>
+          </tr>`).join('') || '<tr><td colspan="10" class="empty">لا توجد أصناف مطابقة</td></tr>'}</tbody>
+        </table></div>
+      </div>
+      <div class="card">
+        <h3>حركات المخزون (${moves.length})</h3>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>#</th><th>التاريخ</th><th>الدواء</th><th>نوع الحركة</th><th>التغير</th><th>الرصيد بعد الحركة</th><th>ملاحظة</th><th>المستخدم</th></tr></thead>
+          <tbody>${moves.map(mv => `<tr>
+            <td>${mv.id}</td><td>${fmtDate(mv.created_at)}</td>
+            <td>${esc(mv.medication_name)}</td>
+            <td><span class="pill ${mvPill[mv.type] || 'partial'}">${mvLbl[mv.type] || mv.type}</span></td>
+            <td style="color:${mv.change > 0 ? '#155724' : '#721c24'};font-weight:700">${mv.change > 0 ? '+' : ''}${mv.change}</td>
+            <td>${mv.quantity_after}</td>
+            <td>${esc(mv.note || '-')}</td>
+            <td>${esc(mv.made_by || '-')}</td>
+          </tr>`).join('') || '<tr><td colspan="8" class="empty">لا حركات مخزون بعد</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+  },
+
+  /* --- المبيعات: السجل + التسديد + المنحنى --- */
+  async sales(main) {
+    const f = ACC;
+    const p = periodRange(f.period);
+    const q = new URLSearchParams();
+    if (p.from) { q.set('from_date', p.from); q.set('to_date', p.to); }
+    if (f.method) q.set('payment_method', f.method);
+    if (f.status) q.set('status', f.status);
+    if (f.patient) q.set('patient_id', f.patient);
+    if (f.staff) q.set('staff', f.staff);
+    const periodQ = f.period ? '?period=' + encodeURIComponent(f.period)
+      : (p.from ? '?from_date=' + p.from + '&to_date=' + encodeURIComponent(p.to) : '');
+    const [sum, sales, rev] = await Promise.all([
+      api('/accounts/summary' + periodQ),
+      api('/accounts/sales' + (q.toString() ? '?' + q.toString() : '')),
+      api('/accounts/revenue' + (periodQ ? periodQ + '&group=' + accGroup : '?group=' + accGroup))]);
+    ACC_ROWS = sales;
+    const unpaidCount = sales.filter(x => x.status !== 'PAID').length;
+    const maxRev = Math.max(1, ...rev.map(r => r.sales));
+    main.innerHTML = `
+      <div class="stats">
+        <div class="stat"><div class="num">${sum.total_sales.toLocaleString()} ر.س</div><div class="lbl">إجمالي المبيعات</div></div>
+        <div class="stat green"><div class="num">${sum.total_paid.toLocaleString()} ر.س</div><div class="lbl">المحصّل</div></div>
+        <div class="stat red"><div class="num">${(sum.total_outstanding || 0).toLocaleString()} ر.س</div><div class="lbl">المتبقي (مدين)</div></div>
+        <div class="stat amber"><div class="num">${sum.count}</div><div class="lbl">عدد العمليات</div></div>
+      </div>
+      <div class="card">
+        <div class="toolbar" style="margin-bottom:6px">
+          <h3 style="margin:0">📈 منحنى الإيراد (${rev.length} ${rev.length && rev[0] && rev[0].date.length === 7 ? 'شهرًا' : 'يومًا'})</h3>
+          <button class="btn ghost sm" onclick="setAccGroup('day')" ${accGroup === 'day' ? 'disabled' : ''}>يومي</button>
+          <button class="btn ghost sm" onclick="setAccGroup('month')" ${accGroup === 'month' ? 'disabled' : ''}>شهري</button>
+        </div>
+        <div class="bars">
+          ${rev.length ? rev.map(r => `
+            <div class="bar-wrap" title="${r.date}: ${r.sales.toLocaleString()} ر.س (${r.count} عملية)">
+              <div class="val">${Math.round(r.sales)}</div>
+              <div class="bar" style="height:${Math.max(4, Math.round(r.sales / maxRev * 110))}px;
+                background:linear-gradient(180deg,#28a745,#85ce8f)"></div>
+              <div class="lbl">${accGroup === 'month' ? r.date : r.date.slice(5)}</div>
+            </div>`).join('') : '<div class="empty">لا يوجد إيراد في هذه الفترة</div>'}
+        </div>
+      </div>
+      <div class="card">
+        <div class="toolbar"><h3 style="margin:0">سجل المبيعات (${sales.length})</h3>
+          <input id="f-acc-period" placeholder="YYYY-MM (كل الفترات)" value="${esc(f.period || '')}" style="max-width:170px">
+          <select id="f-acc-method">
+            <option value="">كل طرق الدفع</option>
+            <option value="cash" ${f.method === 'cash' ? 'selected' : ''}>نقدًا</option>
+            <option value="card" ${f.method === 'card' ? 'selected' : ''}>بطاقة</option>
+            <option value="insurance" ${f.method === 'insurance' ? 'selected' : ''}>تأمين</option>
+          </select>
+          <select id="f-acc-status">
+            <option value="">كل الحالات</option>
+            <option value="UNPAID" ${f.status === 'UNPAID' ? 'selected' : ''}>غير مدفوع</option>
+            <option value="PARTIAL" ${f.status === 'PARTIAL' ? 'selected' : ''}>مدفوع جزئيًا</option>
+            <option value="PAID" ${f.status === 'PAID' ? 'selected' : ''}>مدفوع</option>
+          </select>
+          <input id="f-acc-patient" type="number" min="1" placeholder="رقم المريض" value="${esc(f.patient || '')}" style="max-width:130px">
+          <input id="f-acc-staff" placeholder="صرفه…" value="${esc(f.staff || '')}" style="max-width:140px">
+          <button class="btn" onclick="loadAccounts()">تطبيق</button>
+          <button class="btn ghost" onclick="clearAccounts()">مسح</button>
+          ${unpaidCount ? `<button class="btn success" onclick="payAll()">💰 سدّد الكل (${unpaidCount})</button>` : ''}
+        </div>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>#</th><th>التاريخ</th><th>المريض</th><th>الدواء</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th><th>المدفوع</th><th>المتبقي</th><th>الطريقة</th><th>الحالة</th><th></th></tr></thead>
+          <tbody>${sales.map(s => {
+            const rest = Math.max(0, Math.round((s.total_price - s.paid_amount) * 100) / 100);
+            return `<tr>
+            <td>${s.id}</td><td>${fmtDate(s.created_at)}</td>
+            <td>${esc(s.patient ? s.patient.full_name : '#' + s.patient_id)}</td>
+            <td>${esc(s.medication ? s.medication.name : '#' + s.medication_id)}</td>
+            <td>${s.quantity}</td>
+            <td>${s.unit_price.toLocaleString()} ر.س</td>
+            <td><strong>${s.total_price.toLocaleString()} ر.س</strong></td>
+            <td>${s.paid_amount.toLocaleString()} ر.س</td>
+            <td style="color:${rest > 0 ? '#dc3545' : '#28a745'}">${rest.toLocaleString()} ر.س</td>
+            <td>${s.payment_method === 'card' ? 'بطاقة' : (s.payment_method === 'insurance' ? 'تأمين' : 'نقدًا')}</td>
+            <td>${s.status === 'PAID'
+              ? `<span class="pill paid">مدفوع</span>`
+              : (s.status === 'PARTIAL'
+                ? `<span class="pill partial">مدفوع جزئيًا</span>`
+                : `<span class="pill unpaid">غير مدفوع</span>`)}</td>
+            <td class="actions">
+              ${s.status !== 'PAID'
+                ? `<button class="btn sm success" onclick="pay(${s.id})">💰 تسديد</button> ` : ''}
+              <button class="btn sm ghost" onclick="openReceipt(${s.id})">🧾 إيصال</button>
+            </td>
+          </tr>`; }).join('') || '<tr><td colspan="12" class="empty">لا توجد مبيعات في هذه الفترة</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+  },
+
+  /* --- الحسابات: الأرصدة + المدينون + كشف الحساب + التقارير --- */
+  async accounts(main) {
+    const f = ACC;
+    const p = periodRange(f.period);
+    const periodQ = f.period ? '?period=' + encodeURIComponent(f.period)
+      : (p.from ? '?from_date=' + p.from + '&to_date=' + encodeURIComponent(p.to) : '');
+    const [sum, debtors, revMonth] = await Promise.all([
+      api('/accounts/summary' + periodQ),
+      api('/accounts/debtors' + periodQ),
+      api('/accounts/revenue?group=month' + (periodQ ? '&' + periodQ.slice(1) : ''))]);
+    const pm = Object.entries(sum.by_payment_method || {});
+    const outstanding = sum.total_outstanding || 0;
+    const totalDues = debtors.reduce((a, d) => a + d.outstanding, 0);
+    const maxM = Math.max(1, ...revMonth.map(r => r.sales));
+    main.innerHTML = `
+      <div class="stats">
+        <div class="stat"><div class="num">${sum.total_sales.toLocaleString()} ر.س</div><div class="lbl">إجمالي المبيعات</div></div>
+        <div class="stat green"><div class="num">${sum.total_paid.toLocaleString()} ر.س</div><div class="lbl">المحصّل</div></div>
+        <div class="stat red"><div class="num">${outstanding.toLocaleString()} ر.س</div><div class="lbl">المتبقي (مدين)</div></div>
+        <div class="stat amber"><div class="num">${debtors.length}</div><div class="lbl">عدد المدينين</div></div>
+      </div>
+      <div class="card">
+        <div class="toolbar">
+          <h3 style="margin:0">🧾 كشف حساب مريض</h3>
+          <input id="f-stmt-patient" type="number" min="1" placeholder="رقم المريض" style="max-width:150px">
+          <button class="btn" onclick="showStatement()">عرض الكشف</button>
+          ${isAdmin() ? `<button class="btn ghost" onclick="downloadAccounts('pdf')">📄 تقرير المبيعات PDF</button>` : ''}
+          ${isAdmin() ? `<button class="btn ghost" onclick="downloadAccounts('csv')">⬇️ تقرير المبيعات CSV</button>` : ''}
+        </div>
+        <div id="stmt-out"><div class="empty">أدخل رقم المريض لعرض كشف حسابه (مبيعات + فواتير + الرصيد)</div></div>
+      </div>
+      ${pm.length ? `<div class="card"><h3>توزيع طرق الدفع</h3>
+        <div class="toolbar">${pm.map(([k, v]) =>
+          `<span class="pill ${k === 'cash' ? 'paid' : (k === 'card' ? 'completed' : 'in_progress')}">${k === 'cash' ? 'نقدًا' : (k === 'card' ? 'بطاقة' : 'تأمين')}: ${Number(v).toLocaleString()} ر.س</span>`).join('')}</div>
+      </div>` : ''}
+      <div class="card">
+        <div class="toolbar" style="margin-bottom:6px">
+          <h3 style="margin:0">📊 الإيراد الشهري (${revMonth.length} شهرًا)</h3>
+          <span class="pill paid">إجمالي المدينين: ${totalDues.toLocaleString()} ر.س</span>
+        </div>
+        <div class="bars">
+          ${revMonth.length ? revMonth.map(r => `
+            <div class="bar-wrap" title="${r.date}: ${r.sales.toLocaleString()} ر.س">
+              <div class="val">${Math.round(r.sales)}</div>
+              <div class="bar" style="height:${Math.max(4, Math.round(r.sales / maxM * 110))}px;
+                background:linear-gradient(180deg,#2c7be5,#7aa8f5)"></div>
+              <div class="lbl">${r.date}</div>
+            </div>`).join('') : '<div class="empty">لا يوجد إيراد</div>'}
+        </div>
+      </div>
+      <div class="card">
+        <h3>🧾 المدينون (${debtors.length})</h3>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>المريض</th><th>عمليات غير مسدّدة</th><th>إجمالي مستحقاتهم</th><th>مدفوع</th><th>المتبقي</th><th></th></tr></thead>
+          <tbody>${debtors.map(d => `<tr>
+            <td><strong>${esc(d.full_name)}</strong> <span style="color:#999">#${d.patient_id}</span></td>
+            <td>${d.operations}</td>
+            <td>${d.total.toLocaleString()} ر.س</td>
+            <td style="color:#28a745">${d.paid.toLocaleString()} ر.س</td>
+            <td style="color:#dc3545;font-weight:bold">${d.outstanding.toLocaleString()} ر.س</td>
+            <td class="actions"><button class="btn sm ghost"
+              onclick="document.getElementById('f-stmt-patient').value=${d.patient_id};showStatement()">🧾 كشف حساب</button></td>
+          </tr>`).join('') || '<tr><td colspan="6" class="empty">✅ لا يوجد مدينون — كل المبالغ مسدّدة</td></tr>'}</tbody>
+          ${debtors.length ? `<tfoot><tr>
+            <td><strong>الإجمالي</strong></td>
+            <td>${debtors.reduce((a, d) => a + d.operations, 0)}</td>
+            <td><strong>${debtors.reduce((a, d) => a + d.total, 0).toLocaleString()} ر.س</strong></td>
+            <td style="color:#28a745">${debtors.reduce((a, d) => a + d.paid, 0).toLocaleString()} ر.س</td>
+            <td style="color:#dc3545;font-weight:bold">${totalDues.toLocaleString()} ر.س</td>
+            <td></td>
+          </tr></tfoot>` : ''}
+        </table></div>
+      </div>`;
+  },
+
+  /* --- الرواتب --- */
+  async payroll(main) {
+    if (!isAdmin()) { main.innerHTML = '<div class="empty">🔒 هذه الصفحة متاحة للمدير فقط</div>'; return; }
+    const [rows, staff] = await Promise.all([api('/payroll/'), api('/staff/')]);
+    const thisMonth = new Date().toISOString().slice(0, 7);
+    main.innerHTML = `
+      <div class="card">
+        <div class="toolbar"><h3 style="margin:0">كشف الرواتب (${rows.length})</h3>
+          <input id="f-rpp" placeholder="YYYY-MM (كل الفترات)" style="max-width:180px">
+          <button class="btn ghost" onclick="downloadPayroll('pdf')">📄 كشف الرواتب PDF</button>
+          <button class="btn ghost" onclick="downloadPayroll('csv')">⬇️ كشف الرواتب CSV</button>
+        </div>
+        <details class="addbox"><summary>➕ إضافة قيد راتب</summary>
+        <div class="form-grid">
+          <div class="field"><label>الموظف *</label><select id="f-staff">
+            ${staff.map(s => `<option value="${s.id}" data-sal="${s.salary || 0}">${esc(s.full_name)} — ${esc(s.position)}</option>`).join('')}</select></div>
+          <div class="field"><label>الفترة *</label><input id="f-period" placeholder="YYYY-MM" value="${thisMonth}"></div>
+          <div class="field"><label>الأساسي (ر.س) *</label><input id="f-base" type="number" step="0.01" min="0"></div>
+          <div class="field"><label>البدلات</label><input id="f-bonus" type="number" step="0.01" min="0" value="0"></div>
+          <div class="field"><label>الاستقطاعات</label><input id="f-ded" type="number" step="0.01" min="0" value="0"></div>
+          <div class="field"><label>ملاحظات</label><input id="f-pnotes"></div>
+        </div>
+        <button class="btn success" style="margin-top:12px" onclick="addPayroll()">حفظ القيد</button>
+        </details>
+        <div class="toolbar"><input placeholder="🔍 بحث…" oninput="filterTable('tbl', this.value)"></div>
+        <div style="overflow-x:auto"><table id="tbl">
+          <thead><tr><th>#</th><th>الفترة</th><th>الموظف</th><th>الأساسي</th><th>بدلات</th><th>استقطاعات</th><th>الصافي</th><th>الحالة</th><th></th></tr></thead>
+          <tbody>${rows.map(r => `<tr>
+            <td>${r.id}</td><td><strong>${esc(r.period)}</strong></td>
+            <td>${esc(r.staff ? r.staff.full_name : '#' + r.staff_id)}</td>
+            <td>${r.base_salary.toLocaleString()}</td><td>${r.bonus.toLocaleString()}</td>
+            <td>${r.deduction.toLocaleString()}</td>
+            <td><strong style="color:#2c7be5">${r.net.toLocaleString()} ر.س</strong></td>
+            <td>${r.status === 'paid'
+              ? `<span class="pill paid">مصروف ${r.paid_at ? '· ' + fmtDate(r.paid_at) : ''}</span>`
+              : `<span class="pill unpaid">غير مصروف</span>`}</td>
+            <td class="actions">
+              ${r.status !== 'paid' ? `<button class="btn sm success" onclick="payPayroll(${r.id})">💵 صرف</button>` : ''}
+              <button class="btn sm danger" onclick="del('payroll',${r.id},'payroll')">حذف</button>
+            </td>
+          </tr>`).join('') || '<tr><td colspan="9" class="empty">لا قيود رواتب</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+  },
+
+  /* --- سجل التدقيق --- */
+  async audit(main) {
+    if (!isAdmin()) { main.innerHTML = '<div class="empty">🔒 هذه الصفحة متاحة للمدير فقط</div>'; return; }
+    const [rows, st] = await Promise.all([
+      api('/audit-logs/?limit=200'), api('/audit-logs/stats')]);
+    const bm = st.by_method || {};
+    const lf = st.login_failures || { total: 0, last_24h: 0, recent: [] };
+    const sec = (title, items, head, row) => !items || !items.length ? '' : `
+      <div class="card"><h3>${title}</h3><div style="overflow-x:auto"><table>
+        <thead><tr>${head}</tr></thead><tbody>${items.map(row).join('')}</tbody>
+      </table></div></div>`;
+    main.innerHTML = `
+      <div class="card">
+        <h3>📈 ملخّص استخدام النظام (آخر ${st.window_days} يومًا)</h3>
+        <div class="toolbar" style="margin-top:12px">
+          <span class="pill confirmed">الإجمالي: ${st.total}</span>
+          <span class="pill pending">الفترة: ${st.recent}</span>
+          ${Object.entries(bm).map(([m, c]) => `<span class="pill ${m === 'DELETE' ? 'cancelled' : (m === 'POST' ? 'confirmed' : 'pending')}">${m}: ${c}</span>`).join('')}
+        </div>
+      </div>
+      ${sec('👥 أكثر المستخدمين نشاطًا', st.top_users,
+            '<th>المستخدم</th><th>العمليات</th>',
+            u => `<tr><td>${esc(u.username)}</td><td>${u.count}</td></tr>`)}
+      ${sec('🛣️ أكثر المسارات طلبًا', st.top_paths,
+            '<th>المسار</th><th>الطلبات</th>',
+            p => `<tr><td style="direction:ltr;text-align:left">${esc(p.path)}</td><td>${p.count}</td></tr>`)}
+      ${sec('⚠️ أخطاء آخر الفترة', st.recent_errors,
+            '<th>الوقت</th><th>الطريقة</th><th>المسار</th><th>الحالة</th>',
+            e => `<tr><td>${esc(e.time)}</td><td>${e.method}</td><td style="direction:ltr;text-align:left">${esc(e.path)}</td><td><span class="pill cancelled">${e.status_code}</span></td></tr>`)}
+      <div class="card">
+        <h3>🔒 محاولات الدخول الفاشلة</h3>
+        <div class="toolbar" style="margin-top:12px">
+          <span class="pill cancelled">الإجمالي: ${lf.total}</span>
+          <span class="pill pending">آخر 24 ساعة: ${lf.last_24h}</span>
+        </div>
+        ${lf.recent.length ? `<div style="overflow-x:auto"><table>
+          <thead><tr><th>الوقت</th><th>المستخدم</th><th>الحالة</th></tr></thead>
+          <tbody>${lf.recent.map(r => `<tr>
+            <td>${esc(r.time)}</td><td>${esc(r.username)}</td>
+            <td><span class="pill cancelled">${r.status_code}</span></td>
+          </tr>`).join('')}</tbody></table></div>` : '<div class="empty">لا توجد محاولات فاشلة</div>'}
+      </div>
+      <div class="card">
+        <h3>سجل التدقيق — العمليات التعديلية (${rows.length})</h3>
+        <div class="toolbar">
+          <input placeholder="🔍 بحث بالمستخدم أو المسار…" oninput="filterTable('tbl', this.value)">
+          <button class="btn ghost" onclick="navigate('audit')">🔄 تحديث</button>
+        </div>
+        <div style="overflow-x:auto"><table id="tbl">
+          <thead><tr><th>#</th><th>الوقت</th><th>المستخدم</th><th>الطريقة</th><th>المسار</th><th>الحالة</th></tr></thead>
+          <tbody>${rows.map(l => `<tr>
+            <td>${l.id}</td><td>${fmtDate(l.created_at)}</td>
+            <td>${esc(l.username || '—')}</td>
+            <td><span class="pill ${l.method === 'DELETE' ? 'cancelled' : (l.method === 'POST' ? 'confirmed' : 'pending')}">${l.method}</span></td>
+            <td style="direction:ltr;text-align:left">${esc(l.path)}</td>
+            <td>${l.status_code ? `<span class="pill ${l.status_code < 400 ? 'completed' : 'cancelled'}">${l.status_code}</span>` : '—'}</td>
+          </tr>`).join('') || '<tr><td colspan="6" class="empty">لا توجد عمليات بعد</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+  },
+
+  /* --- إدارة المستخدمين --- */
+  async users(main) {
+    if (!isAdmin()) { main.innerHTML = '<div class="empty">🔒 هذه الصفحة متاحة للمدير فقط</div>'; return; }
+    const users = await api('/auth/users');
+    const roles = [['admin', 'مدير النظام'], ['doctor', 'طبيب'], ['موظف استقبال', 'موظف استقبال']];
+    main.innerHTML = `
+      <div class="card">
+        <h3>المستخدمون (${users.length})</h3>
+        <details class="addbox"><summary>➕ إضافة مستخدم جديد</summary>
+        <div class="form-grid">
+          <div class="field"><label>اسم المستخدم</label><input id="u-username"></div>
+          <div class="field"><label>الاسم الكامل</label><input id="u-fullname"></div>
+          <div class="field"><label>البريد الإلكتروني</label><input id="u-email" type="email"></div>
+          <div class="field"><label>الصلاحية</label><select id="u-role">
+            ${roles.map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join('')}</select></div>
+          <div class="field"><label>كلمة المرور</label><input id="u-pass" type="password"></div>
+        </div>
+        <button class="btn success" style="margin-top:12px" onclick="saveUser()">إنشاء الحساب</button>
+        </details>
+        <div style="overflow-x:auto; margin-top:18px"><table>
+          <thead><tr><th>#</th><th>اسم المستخدم</th><th>الاسم الكامل</th><th>البريد الإلكتروني</th>
+            <th>الصلاحية</th><th>الحالة</th><th></th></tr></thead>
+          <tbody>${users.map(u => `<tr>
+            <td>${u.id}</td><td>${esc(u.username)}</td><td>${esc(u.full_name)}</td>
+            <td style="direction:ltr;text-align:left">${esc(u.email)}</td>
+            <td>
+              <select onchange="setRole(${u.id}, this.value)" ${u.id === USER.id ? 'disabled' : ''}>
+                ${roles.map(([v, t]) => `<option value="${esc(v)}" ${u.role === v ? 'selected' : ''}>${esc(t)}</option>`).join('')}
+              </select>
+            </td>
+            <td>${u.is_active ? '<span class="pill completed">نشط</span>' : '<span class="pill cancelled">معطّل</span>'}</td>
+            <td class="actions">
+              <button class="btn sm ${u.is_active ? 'danger' : 'success'}" onclick="toggleUser(${u.id})">${u.is_active ? 'تعطيل' : 'تفعيل'}</button>
+            </td>
+          </tr>`).join('')}</tbody>
+        </table></div>
+      </div>`;
+  },
+
+  /* --- النسخ الاحتياطي --- */
+  async backup(main) {
+    if (!isAdmin()) { main.innerHTML = '<div class="empty">🔒 هذه الصفحة متاحة للمدير فقط</div>'; return; }
+    const rows = await api('/backup');
+    main.innerHTML = `
+      <div class="card">
+        <h3>النسخ الاحتياطي لقاعدة البيانات</h3>
+        <button class="btn success" onclick="makeBackup()">💾 إنشاء نسخة احتياطية الآن</button>
+        <div style="overflow-x:auto; margin-top:18px"><table>
+          <thead><tr><th>الملف</th><th>الحجم (KB)</th><th>تاريخ الإنشاء</th><th></th><th></th></tr></thead>
+          <tbody>${rows.map(f => `<tr>
+            <td><strong>${esc(f.file)}</strong></td><td>${f.size_kb}</td><td>${fmtDate(f.created_at)}</td>
+            <td><button class="btn sm ghost" onclick="download('/backup/${encodeURIComponent(f.file)}','${esc(f.file)}')">⬇️ تنزيل</button></td>
+            <td>${f.restorable ? `<button class="btn sm danger" onclick="restoreBackup('${esc(f.file)}')">♻️ استعادة</button>` : ''}</td>
+          </tr>`).join('') || '<tr><td colspan="5" class="empty">لا توجد نسخ بعد</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+  }
+};
+
+/* --- تقويم المواعيد الشهري --- */
+let CAL_MODE = false, CAL_Y = null, CAL_M = null, CAL_DATA = [];
+const CAL_MONTHS = {
+  ar: ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس',
+       'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'],
+  en: ['January', 'February', 'March', 'April', 'May', 'June',
+       'July', 'August', 'September', 'October', 'November', 'December'],
+};
+const CAL_DOW = {
+  ar: ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'],
+  en: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+};
+
+async function toggleCal() {
+  CAL_MODE = !CAL_MODE;
+  const cb = document.getElementById('cal-box');
+  const tb = document.getElementById('appt-table');
+  const qb = document.getElementById('queue-box');
+  const btn = document.getElementById('cal-btn');
+  if (!cb || !tb) return;
+  if (CAL_MODE) {
+    tb.style.display = 'none';
+    if (qb) qb.style.display = 'none';
+    cb.style.display = 'block';
+    if (btn) btn.textContent = '📋 ' + tr('الجدول');
+    if (CAL_Y === null) { const n = new Date(); CAL_Y = n.getFullYear(); CAL_M = n.getMonth(); }
+    try {
+      if (!CAL_DATA.length) CAL_DATA = await api('/appointments/');
+      renderCalendar();
+    } catch (e) { toast(e.message, true); }
+  } else {
+    tb.style.display = '';
+    if (qb) qb.style.display = '';
+    cb.style.display = 'none';
+    if (btn) btn.textContent = '🗓️ ' + tr('تقويم');
+  }
+}
+
+function calNav(step) {
+  CAL_M += step;
+  if (CAL_M < 0) { CAL_M = 11; CAL_Y--; }
+  if (CAL_M > 11) { CAL_M = 0; CAL_Y++; }
+  renderCalendar();
+}
+
+function renderCalendar() {
+  const cb = document.getElementById('cal-box');
+  if (!cb) return;
+  const L = LANG === 'en' ? 'en' : 'ar';
+  const months = CAL_MONTHS[L], dows = CAL_DOW[L];
+  const first = new Date(CAL_Y, CAL_M, 1);
+  const startDow = first.getDay();
+  const daysIn = new Date(CAL_Y, CAL_M + 1, 0).getDate();
+  const today = new Date();
+  const byDay = {};
+  CAL_DATA.forEach(a => {
+    const d = new Date(a.appointment_date);
+    if (isNaN(d.getTime())) return;
+    if (d.getFullYear() !== CAL_Y || d.getMonth() !== CAL_M) return;
+    const k = d.getDate();
+    (byDay[k] = byDay[k] || []).push({
+      a,
+      hhmm: String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'),
+    });
+  });
+  const head = `
+    <div class="cal-head">
+      <button class="btn ghost sm" onclick="calNav(-1)" title="${tr('الشهر السابق')}">‹</button>
+      <span class="cal-title">${months[CAL_M]} ${CAL_Y}</span>
+      <button class="btn ghost sm" onclick="calNav(1)" title="${tr('الشهر التالي')}">›</button>
+      <button class="btn sm ghost" onclick="toggleCal()" style="margin-inline-start:auto">📋 ${tr('الجدول')}</button>
+    </div>`;
+  const dowsRow = `<div class="cal-dow">${dows.map(d => `<span>${d}</span>`).join('')}</div>`;
+  let cells = '';
+  for (let i = 0; i < startDow; i++) cells += `<div class="cal-cell empty"></div>`;
+  for (let day = 1; day <= daysIn; day++) {
+    const items = byDay[day] || [];
+    const isToday = today.getFullYear() === CAL_Y && today.getMonth() === CAL_M
+      && today.getDate() === day;
+    cells += `<div class="cal-cell${isToday ? ' today' : ''}">
+      <div class="cal-daynum">${day}</div>
+      ${items.slice(0, 3).map(({ a, hhmm }) => `<div class="cal-chip ${esc(a.status)}" title="${esc(hhmm + ' — ' + (a.reason || '') + ' — ' + a.patient.full_name)}">${hhmm} ${esc(a.patient.full_name)}</div>`).join('')}
+      ${items.length > 3 ? `<div class="cal-more">+${items.length - 3}</div>` : ''}
+    </div>`;
+  }
+  const tail = (7 - ((startDow + daysIn) % 7)) % 7;
+  for (let i = 0; i < tail; i++) cells += `<div class="cal-cell empty"></div>`;
+  cb.innerHTML = head + dowsRow + `<div class="cal-grid">${cells}</div>`;
+}
+
+/* --- استعادة النسخ الاحتياطي (للمدير) --- */
+async function restoreBackup(name) {
+  const msg = 'استعادة "' + name + '"؟ سيُستبدل محتوى القاعدة الحالية — ستُصنع نسخة أمان تلقائيًا.';
+  if (!confirm(msg)) return;
+  try {
+    const r = await api('/backup/' + encodeURIComponent(name) + '/restore', { method: 'POST' });
+    toast('تمت الاستعادة: ' + r.restored + ' (نسخة الأمان: ' + r.safety_copy + ')');
+    await navigate('backup');
+  } catch (e) { toast(e.message, true); }
+}
+
+/* --- إدارة المستخدمين (للمدير) --- */
+async function saveUser() {
+  const g = id => ((document.getElementById(id) || {}).value || '').trim();
+  const payload = {
+    username: g('u-username'), full_name: g('u-fullname'), email: g('u-email'),
+    role: ((document.getElementById('u-role') || {}).value || 'موظف استقبال'),
+    password: ((document.getElementById('u-pass') || {}).value || ''),
+  };
+  if (!payload.username || !payload.full_name || !payload.email || !payload.password) {
+    toast('الرمز والاسم والبريد وكلمة المرور مطلوبان', true);
+    return;
+  }
+  try {
+    await api('/auth/register', { method: 'POST', body: JSON.stringify(payload) });
+    toast('تم إنشاء المستخدم ✅');
+    await navigate('users');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function toggleUser(id) {
+  try {
+    await api('/auth/users/' + id + '/toggle', { method: 'PUT' });
+    toast('تم تحديث الحساب ✅');
+    await navigate('users');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function setRole(id, role) {
+  try {
+    await api('/auth/users/' + id + '/role', { method: 'PUT', body: JSON.stringify({ role }) });
+    toast('تم تغيير الصلاحية ✅');
+    await navigate('users');
+  } catch (e) { toast(e.message, true); navigate('users'); }
+}
+
+/* ========== عمليات إضافية ========== */
+async function loadAppts() {
+  const date = document.getElementById('flt-date')?.value;
+  const st = document.getElementById('flt-status')?.value;
+  let q = '/appointments/?';
+  if (date) q += 'date=' + date + '&';
+  if (st) q += 'status=' + st + '&';
+  const rows = await api(q);
+  const c = window._apptCache || { patients: [], doctors: [] };
+
+  // بطاقة طابور الوصول اليوم
+  const qbox = document.getElementById('queue-box');
+  if (qbox) {
+    try {
+      const queue = await api('/appointments/queue');
+      qbox.innerHTML = queue.length ? `
+        <div class="card" style="margin:0;background:#f8fafd;padding:14px">
+          <strong>🎫 طابور اليوم (${queue.length})</strong>
+          — في الخدمة الآن: <strong>${esc(queue[0].patient.full_name)}</strong> (رقم ${queue[0].queue_number})
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+            ${queue.map((a, idx) => `<span class="pill ${idx === 0 ? 'confirmed' : 'pending'}" title="${fmtDate(a.checked_in_at)}">
+              #${a.queue_number} ${esc(a.patient.full_name)}</span>`).join('')}
+          </div>
+        </div>` : '';
+    } catch (e) { qbox.innerHTML = ''; }
+  }
+
+  document.getElementById('appt-body').innerHTML = rows.map(a => `<tr>
+    <td>${a.id}</td><td>${fmtDate(a.appointment_date)}</td>
+    <td>${esc(a.patient.full_name)}</td><td>${esc(a.doctor.full_name)}</td>
+    <td>${esc(a.reason || '-')}</td><td>${pill(a.status)}</td>
+    <td>${a.queue_number ? '<strong>#' + a.queue_number + '</strong>' : '—'}${a.checked_in_at ? `<br><small>✅ وصل</small>` : ''}</td>
+    <td class="actions">
+      ${!a.checked_in_at && a.status !== 'cancelled' && a.status !== 'completed' ? `<button class="btn sm ghost" onclick="checkIn(${a.id})">🎫 وصول</button>` : ''}
+      ${a.status === 'pending' ? `<button class="btn sm success" onclick="setApptStatus(${a.id},'confirmed')">تأكيد</button>` : ''}
+      ${a.status === 'confirmed' ? `<button class="btn sm success" onclick="setApptStatus(${a.id},'completed')">✔ إتمام</button>` : ''}
+      ${a.status !== 'cancelled' && a.status !== 'completed' ? `<button class="btn sm danger" onclick="setApptStatus(${a.id},'cancelled')">إلغاء</button>` : ''}
+      ${isAdmin() ? `<button class="btn sm danger" onclick="del('appointments',${a.id},'appointments')">حذف</button>` : ''}
+    </td></tr>`).join('') || '<tr><td colspan="8" class="empty">لا توجد مواعيد</td></tr>';
+}
+
+async function checkIn(id) {
+  try {
+    await api('/appointments/' + id + '/checkin', { method: 'POST' });
+    toast('تم تسجيل الوصول 🎫'); await loadAppts();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function setApptStatus(id, status) {
+  try {
+    await api('/appointments/' + id, { method: 'PUT', body: JSON.stringify({ status }) });
+    toast('تم تحديث الحالة ✅'); await loadAppts();
+  } catch (e) { toast(e.message, true); }
+}
+
+function filterTable(tblId, term) {
+  const rows = document.querySelectorAll('#' + tblId + ' tbody tr');
+  rows.forEach(r => { r.style.display = r.textContent.includes(term) ? '' : 'none'; });
+}
+
+function printInvoice(id) {
+  fetch(API + `/invoices/${id}/print`, { headers: { 'Authorization': 'Bearer ' + TOKEN } })
+    .then(r => r.text())
+    .then(html => {
+      const w = window.open('', '_blank');
+      w.document.write(html); w.document.close();
+      setTimeout(() => w.print(), 400);
+    }).catch(e => toast('فشل فتح نافذة الطباعة', true));
+}
+
+async function makeBackup() {
+  try { const r = await api('/backup', { method: 'POST' }); toast(r.message + ' ✅'); await navigate('backup'); }
+  catch (e) { toast(e.message, true); }
+}
+
+async function readNotif(id) {
+  try { await api('/notifications/' + id + '/read', { method: 'PUT' }); await navigate('notifications'); }
+  catch (e) { toast(e.message, true); }
+}
+
+function toggleRecordAtts(id) {
+  const row = document.getElementById('att-row-' + id);
+  if (row) row.style.display = row.style.display === 'none' ? '' : 'none';
+}
+
+async function readAll() {
+  try { await api('/notifications/read-all', { method: 'PUT' }); toast('تم ✓'); await navigate('notifications'); }
+  catch (e) { toast(e.message, true); }
+}
+
+async function uploadAtt() {
+  const fileInput = document.getElementById('f-file');
+  if (!fileInput.files.length) return toast('اختر ملفًا أولًا', true);
+  const fd = new FormData();
+  fd.append('patient_id', V('f-pat'));
+  if (V('f-rec')) fd.append('record_id', V('f-rec'));
+  fd.append('file', fileInput.files[0]);
+  try {
+    const res = await fetch(API + '/attachments/', {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + TOKEN }, body: fd });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || 'فشل الرفع'); }
+    toast('تم رفع الملف ✅'); await navigate('attachments');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function previewAtt(id) {
+  try {
+    const blob = await apiBlob('/attachments/' + id + '/preview');
+    const url = URL.createObjectURL(blob);
+    const w = window.open(url, '_blank');
+    if (!w) { toast('اسمح بالنوافذ المنبثقة للمعاينة', true); return; }
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function downloadReport() {
+  const month = prompt('أدخل الشهر (YYYY-MM) أو اتركه فارغًا للفترة الحالية:');
+  if (month === null) return;
+  const m = month.trim();
+  if (m && !/^\d{4}-\d{2}$/.test(m)) return toast('الصيغة يجب أن تكون YYYY-MM', true);
+  await download('/dashboard/report/pdf' + (m ? '?month=' + m : ''), `report_${m || 'current'}.pdf`);
+}
+
+async function importPatients(input) {
+  const file = input.files[0];
+  input.value = '';
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const res = await fetch(API + '/patients/import', {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + TOKEN }, body: fd });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(typeof d.detail === 'string' ? d.detail : 'فشل الاستيراد');
+    const errs = (d.errors || []).slice(0, 3)
+      .map(e => (e.row > 0 ? `سطر ${e.row}: ` : '') + e.error).join(' | ');
+    toast(`✅ أُضيف ${d.created} — مكرّر ${d.skipped}` + (errs ? ` — أخطاء: ${errs}` : ''),
+      (d.errors || []).length > 0);
+    await navigate('patients');
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ========== عمليات الإضافة والحذف ========== */
+async function post(path, body, view) {
+  try {
+    await api(path, { method: 'POST', body: JSON.stringify(body) });
+    toast('تم الحفظ بنجاح ✅');
+    await navigate(view);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function del(resource, id, view) {
+  if (!confirm('هل أنت متأكد من الحذف؟ لا يمكن التراجع.')) return;
+  try {
+    await api(`/${resource}/${id}`, { method: 'DELETE' });
+    toast('تم الحذف ✅'); await navigate(view);
+  } catch (e) { toast(e.message, true); }
+}
+
+const V = id => document.getElementById(id)?.value?.trim();
+
+function addPatient() {
+  if (!V('f-name') || !V('f-email') || !V('f-phone') || !V('f-dob')) return toast('املأ الحقول المطلوبة (*)', true);
+  post('/patients/', {
+    full_name: V('f-name'), date_of_birth: V('f-dob'), gender: V('f-gender'),
+    phone: V('f-phone'), email: V('f-email'), address: V('f-addr') || null,
+    blood_type: V('f-blood') || null,
+    national_id: V('f-nat') || null,
+    insurer: V('f-ins') || null,
+    policy_number: V('f-pol') || null
+  }, 'patients');
+}
+
+function addDoctor() {
+  if (!V('f-name') || !V('f-spec') || !V('f-lic') || !V('f-phone') || !V('f-email')) return toast('املأ الحقول المطلوبة (*)', true);
+  post('/doctors/', {
+    full_name: V('f-name'), specialty: V('f-spec'), license_number: V('f-lic'),
+    phone: V('f-phone'), email: V('f-email'),
+    department_id: V('f-dept') ? Number(V('f-dept')) : null
+  }, 'doctors');
+}
+
+function addAppt() {
+  if (!V('f-date')) return toast('اختر التاريخ والوقت', true);
+  post('/appointments/', {
+    patient_id: Number(V('f-pat')), doctor_id: Number(V('f-doc')),
+    appointment_date: V('f-date'), reason: V('f-reason') || null
+  }, 'appointments');
+}
+
+function addRecord() {
+  if (!V('f-dx')) return toast('التشخيص مطلوب', true);
+  const body = {
+    patient_id: Number(V('f-pat')), diagnosis: V('f-dx'),
+    prescription: V('f-rx') || null, notes: V('f-notes') || null
+  };
+  if (V('f-doc')) body.doctor_id = Number(V('f-doc'));
+  post('/medical-records/', body, 'records');
+}
+
+function addDept() {
+  if (!V('f-name')) return toast('اسم القسم مطلوب', true);
+  post('/departments/', { name: V('f-name'), floor: V('f-floor') || null, description: V('f-desc') || null }, 'departments');
+}
+
+function addBed() {
+  if (!V('f-num')) return toast('رقم السرير مطلوب', true);
+  post('/beds/', { bed_number: V('f-num'), department_id: Number(V('f-dept')) }, 'beds');
+}
+
+async function updateBed(id, status) {
+  try { await api('/beds/' + id, { method: 'PUT', body: JSON.stringify({ status }) }); toast('تم تحديث السرير ✅'); await navigate('beds'); }
+  catch (e) { toast(e.message, true); }
+}
+
+function addInvoice() {
+  if (!V('f-amt') || !V('f-desc')) return toast('المبلغ والوصف مطلوبان', true);
+  const body = {
+    patient_id: Number(V('f-pat')), amount: Number(V('f-amt')),
+    description: V('f-desc'), status: V('f-st'),
+    discount: V('f-disc') ? Number(V('f-disc')) : 0,
+    tax_rate: V('f-tax') ? Number(V('f-tax')) : 0
+  };
+  if (V('f-appt')) body.appointment_id = Number(V('f-appt'));
+  if (V('f-rec')) body.record_id = Number(V('f-rec'));
+  if (V('f-ins')) body.insurer = V('f-ins');
+  if (V('f-pol')) body.policy_number = V('f-pol');
+  post('/invoices/', body, 'invoices');
+}
+
+async function payInvoice(id) {
+  const method = prompt('طريقة الدفع (cash / card / insurance):', 'cash');
+  if (method === null) return;
+  const m = method.trim().toLowerCase() || 'cash';
+  if (!['cash', 'card', 'insurance'].includes(m))
+    return toast('اختر: cash أو card أو insurance', true);
+  const amtStr = prompt('المبلغ (اتركه فارغًا لدفع المتبقي كاملًا):', '');
+  if (amtStr === null) return;
+  const body = { method: m };
+  if (amtStr.trim()) {
+    const amt = Number(amtStr);
+    if (!amt || amt <= 0) return toast('أدخل مبلغًا صحيحًا أكبر من صفر', true);
+    body.amount = amt;
+  }
+  try {
+    await api('/invoices/' + id + '/pay', { method: 'POST', body: JSON.stringify(body) });
+    toast('تم الدفع 💰');
+    await navigate('invoices');
+  } catch (e) { toast(e.message, true); }
+}
+
+function addStaff() {
+  if (!V('f-name') || !V('f-pos') || !V('f-phone') || !V('f-email') || !V('f-hire')) return toast('املأ الحقول المطلوبة (*)', true);
+  post('/staff/', {
+    full_name: V('f-name'), position: V('f-pos'), phone: V('f-phone'),
+    email: V('f-email'), hire_date: V('f-hire'), salary: V('f-sal') ? Number(V('f-sal')) : null
+  }, 'staff');
+}
+
+/* ========== عمليات المحاور الجديدة ========== */
+function addLabOrder() {
+  if (!V('f-test')) return toast('اسم التحليل مطلوب', true);
+  const body = {
+    patient_id: Number(V('f-pat')), test_type: V('f-type') || 'lab',
+    test_name: V('f-test'), price: V('f-price') ? Number(V('f-price')) : 0
+  };
+  if (V('f-doc')) body.doctor_id = Number(V('f-doc'));
+  if (V('f-lnotes')) body.notes = V('f-lnotes');
+  post('/lab-orders/', body, 'lab');
+}
+
+async function setLabStatus(id, status) {
+  try {
+    await api('/lab-orders/' + id, { method: 'PUT', body: JSON.stringify({ status }) });
+    toast('تم تحديث الطلب ✅'); await navigate('lab');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function setLabResult(id) {
+  const result = prompt('أدخل نتيجة التحليل:');
+  if (result === null || !result.trim()) return;
+  try {
+    await api('/lab-orders/' + id, {
+      method: 'PUT', body: JSON.stringify({ status: 'ready', result: result.trim() }) });
+    toast('تم حفظ النتيجة ✅'); await navigate('lab');
+  } catch (e) { toast(e.message, true); }
+}
+
+function addMedication(view) {
+  if (!V('f-code') || !V('f-mname')) return toast('الرمز والاسم مطلوبان', true);
+  post('/medications/', {
+    code: V('f-code'), name: V('f-mname'),
+    quantity: V('f-qty') ? Number(V('f-qty')) : 0,
+    unit: V('f-unit') || 'علبة',
+    price: V('f-mprice') ? Number(V('f-mprice')) : 0,
+    min_quantity: V('f-minq') ? Number(V('f-minq')) : 10
+  }, view || 'pharmacy');
+}
+
+async function restock(id) {
+  const qty = prompt('كمية التوريد:', '10');
+  if (qty === null || !qty.trim()) return;
+  const n = Number(qty);
+  if (!n || n <= 0) return toast('أدخل كمية صحيحة', true);
+  try {
+    await api('/inventory/' + id + '/restock', {
+      method: 'POST', body: JSON.stringify({ quantity: n }) });
+    toast('تم التوريد 📦'); await navigate(CURRENT_VIEW);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function adjustStock(id) {
+  const v = prompt('الرصيد الفعلي بعد الجرد:', '');
+  if (v === null || !v.trim()) return;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 0) return toast('أدخل عدداً صحيحاً (0 فأكثر)', true);
+  try {
+    await api('/inventory/' + id + '/adjust', {
+      method: 'PUT', body: JSON.stringify({ quantity: n }) });
+    toast('تم الجرد ✅'); await navigate(CURRENT_VIEW);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function dispenseMed() {
+  const qty = Number(V('f-dqty'));
+  if (!qty || qty < 1) return toast('أدخل كمية صحيحة', true);
+  try {
+    await api('/dispenses/', { method: 'POST', body: JSON.stringify({
+      medication_id: Number(V('f-dmed')), patient_id: Number(V('f-dpat')), quantity: qty }) });
+    toast('تم الصرف ✅'); await navigate('pharmacy');
+  } catch (e) { toast(e.message, true); }
+}
+
+function addPayroll() {
+  if (!V('f-period') || !V('f-base')) return toast('الفترة والراتب الأساسي مطلوبان', true);
+  if (!/^\d{4}-\d{2}$/.test(V('f-period'))) return toast('صيغة الفترة: YYYY-MM', true);
+  post('/payroll/', {
+    staff_id: Number(V('f-staff')), period: V('f-period'),
+    base_salary: Number(V('f-base')),
+    bonus: V('f-bonus') ? Number(V('f-bonus')) : 0,
+    deduction: V('f-ded') ? Number(V('f-ded')) : 0,
+    notes: V('f-pnotes') || null
+  }, 'payroll');
+}
+
+async function payPayroll(id) {
+  if (!confirm('تأكيد صرف هذا الراتب؟')) return;
+  try {
+    await api('/payroll/' + id + '/pay', { method: 'POST' });
+    toast('تم صرف الراتب 💵'); await navigate('payroll');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function changePassword() {
+  const cur = prompt('كلمة المرور الحالية:');
+  if (cur === null) return;
+  const nw = prompt('كلمة المرور الجديدة (8 أحرف على الأقل):');
+  if (nw === null) return;
+  const nw2 = prompt('تأكيد كلمة المرور الجديدة:');
+  if (nw2 === null) return;
+  if (nw !== nw2) return toast('كلمتا المرور غير متطابقتين', true);
+  if (nw.length < 8) return toast('كلمة المرور قصيرة (8 أحرف على الأقل)', true);
+  try {
+    await api('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ current_password: cur, new_password: nw }) });
+    toast('تم تغيير كلمة المرور ✅');
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ========== بدء التشغيل ========== */
+initLang();
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('/ui/sw.js').catch(() => {}));
+}
+if (TOKEN && USER) enterApp();
+</script>
+</body>
+</html>

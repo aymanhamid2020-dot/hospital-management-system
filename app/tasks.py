@@ -1,0 +1,192 @@
+"""المهام الخلفية: تذكير بالمواعيد (إشعار داخلي + بريد + فوري) والنسخ التلقائي."""
+import asyncio
+import logging
+from datetime import datetime, timedelta
+
+from app.config import REMINDER_INTERVAL_MINUTES, REMINDER_HOURS_BEFORE
+
+logger = logging.getLogger("hms.reminders")
+
+
+def check_and_send_reminders() -> int:
+    """فحص المواعيد القادمة وإنشاء التذكيرات — يرجع عدد التذكيرات الجديدة.
+
+    تعمل مرة واحدة بشكل متزامن (مناسبة للاستدعاء من حلقة async عبر
+    asyncio.to_thread أو اختبارات pytest المباشرة).
+    """
+    from app.database import SessionLocal
+    from app.models import Appointment, Notification, AppointmentStatus
+    from app.email_utils import send_email, appointment_reminder_email
+
+    db = SessionLocal()
+    try:
+        now = datetime.now()
+        window_end = now + timedelta(hours=REMINDER_HOURS_BEFORE)
+
+        upcoming = (
+            db.query(Appointment)
+            .filter(
+                Appointment.appointment_date >= now,
+                Appointment.appointment_date <= window_end,
+                Appointment.status.in_([
+                    AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED
+                ]),
+            )
+            .all()
+        )
+
+        sent = 0
+        for appt in upcoming:
+            # هل أُرسل تذكير من قبل لهذا الموعد؟
+            already = (
+                db.query(Notification)
+                .filter(
+                    Notification.appointment_id == appt.id,
+                    Notification.type == "reminder",
+                )
+                .first()
+            )
+            if already:
+                continue
+
+            pat = appt.patient
+            doc = appt.doctor
+            when = f"{appt.appointment_date:%Y-%m-%d %H:%M}"
+
+            db.add(Notification(
+                type="reminder",
+                title="تذكير بموعد قادم",
+                message=f"موعد {pat.full_name if pat else '-'} مع {doc.full_name if doc else '-'} في {when}",
+                appointment_id=appt.id,
+                patient_id=appt.patient_id,
+            ))
+            db.commit()
+            sent += 1
+
+            # بريد التذكير (تعمل في خيط worker أصلاً عبر asyncio.to_thread)
+            if pat and pat.email:
+                subj, body = appointment_reminder_email(
+                    pat.full_name if pat else "-",
+                    doc.full_name if doc else "-", when)
+                send_email(pat.email, subj, body)
+
+            # إشعار فوري اختياري (تلغرام/ويبهوك) — لا يُصعّد أبدًا
+            from app.notifier import notify
+            notify("reminder",
+                   f"تذكير موعد {when}: {pat.full_name if pat else '-'} "
+                   f"مع {doc.full_name if doc else '-'}")
+
+        if sent:
+            logger.info(f"تم إنشاء {sent} تذكير جديد")
+        return sent
+    finally:
+        db.close()
+
+
+async def reminder_loop():
+    """حلقة تعمل كل REMINDER_INTERVAL_MINUTES دقائق (0 = معطّلة)."""
+    if REMINDER_INTERVAL_MINUTES <= 0:
+        logger.info("مهمة التذكير معطّلة (REMINDER_INTERVAL_MINUTES=0)")
+        return
+
+    logger.info(
+        f"بدء مهمة التذكير — كل {REMINDER_INTERVAL_MINUTES} دقيقة، "
+        f"قبل الموعد بـ {REMINDER_HOURS_BEFORE} ساعة"
+    )
+    while True:
+        try:
+            await asyncio.to_thread(check_and_send_reminders)
+        except Exception:
+            logger.exception("خطأ في مهمة التذكير")
+        await asyncio.sleep(REMINDER_INTERVAL_MINUTES * 60)
+
+
+# ===== النسخ الاحتياطي المجدول التلقائي (SQLite فقط) =====
+backup_logger = logging.getLogger("hms.backup")
+
+
+def _sqlite_db_path():
+    """مسار ملف قاعدة SQLite الحالية — None لو كانت القاعدة غير مدعومة."""
+    import os
+    from app.config import DATABASE_URL
+    if not DATABASE_URL.startswith("sqlite:///"):
+        return None
+    path = DATABASE_URL.replace("sqlite:///", "", 1)
+    return path if os.path.exists(path) else None
+
+
+def create_auto_backup(backup_dir=None, retention=None):
+    """نسخة متسقة للقاعدة (sqlite backup API) + تقليم القديم — يرجع المسار.
+
+    الافتراضي: مجلد backups/ بجانب المشروع والاحتفاظ بآخر BACKUP_RETENTION
+    (7) نسخ تلقائية (auto_*). ترجع None عند عدم الدعم أو المصدر غير الموجود.
+    """
+    import os
+    import sqlite3
+    import sys
+    from datetime import datetime as _dt
+
+    src = _sqlite_db_path()
+    if not src:
+        return None
+    if backup_dir is None:
+        if getattr(sys, "frozen", False):
+            # نسخة سطح المكتب (PyInstaller): النسخ بجانب الملف التنفيذي
+            backup_dir = os.path.join(os.path.dirname(sys.executable), "backups")
+        else:
+            # مجلد backups/ بجانب main.py (نفس منطق app/backup.py)
+            backup_dir = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backups")
+    if retention is None:
+        retention = int(os.getenv("BACKUP_RETENTION", "7"))
+    os.makedirs(backup_dir, exist_ok=True)
+
+    now = _dt.now()
+    dest = os.path.join(
+        backup_dir, f"auto_{now:%Y%m%d_%H%M%S}_{now.microsecond:06d}.db")
+    src_con = sqlite3.connect(src, timeout=10)
+    try:
+        dst_con = sqlite3.connect(dest)
+        try:
+            src_con.backup(dst_con)  # لقطة متزامنة وصالحة حتى أثناء الكتابة
+        finally:
+            dst_con.close()
+    finally:
+        src_con.close()
+
+    # تقليم: الاحتفاظ بآخر N نسخ auto_* فقط (الأسماء ترتّب زمنيًا تصاعديًا)
+    autos = sorted(
+        (os.path.join(backup_dir, n) for n in os.listdir(backup_dir)
+         if n.startswith("auto_") and n.endswith(".db")),
+        reverse=True,
+    )
+    for old in autos[max(retention, 1):]:
+        try:
+            os.remove(old)
+        except OSError:
+            pass
+    backup_logger.info("نسخة تلقائية محفوظة: %s", dest)
+    return dest
+
+
+async def backup_loop():
+    """نسخة تلقائية كل BACKUP_INTERVAL_HOURS ساعة (0 = معطّلة) — SQLite فقط."""
+    import os
+    interval_h = float(os.getenv("BACKUP_INTERVAL_HOURS", "24"))
+    if interval_h <= 0:
+        backup_logger.info("النسخ التلقائي معطّل (BACKUP_INTERVAL_HOURS=0)")
+        return
+    if _sqlite_db_path() is None:
+        backup_logger.info(
+            "النسخ التلقائي متاح لـSQLite — على PostgreSQL استخدم pg_dump مجدولًا")
+        return
+
+    backup_logger.info(
+        "بدء النسخ التلقائي — كل %s ساعة، الاحتفاظ بآخر %s نسخ",
+        interval_h, os.getenv("BACKUP_RETENTION", "7"))
+    while True:
+        try:
+            await asyncio.to_thread(create_auto_backup)
+        except Exception:  # noqa: BLE001 — حلقة الخلفية لا تنهار أبدًا
+            backup_logger.exception("فشل دورة النسخ التلقائي")
+        await asyncio.sleep(interval_h * 3600)
