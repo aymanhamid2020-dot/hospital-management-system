@@ -563,6 +563,89 @@ def main():
           b"verifyBackups" in ru.content and b"pruneNow" in ru.content
           and "فحص السلامة".encode() in ru.content)
 
+    # ===== 17) تطوير قسم الأطباء: إحصاءات · فلاتر · صلاحيات · حذف محميّ =====
+    r_stats = c.get("/doctors/stats", headers=h)
+    stt = r_stats.json() if r_stats.status_code == 200 else {}
+    check("إحصاءات الأطباء /doctors/stats", r_stats.status_code == 200
+          and stt.get("total") == stt.get("available", 0) + stt.get("unavailable", -1)
+          and isinstance(stt.get("departments"), list)
+          and isinstance(stt.get("specialties"), int),
+          str(r_stats.status_code))
+
+    r_q = c.get("/doctors/", headers=h, params={"q": "CNT-0001"})
+    check("بحث q يجد طبيبًا بترخيصه", r_q.status_code == 200
+          and any(d.get("license_number") == "CNT-0001" for d in r_q.json()),
+          str(r_q.status_code))
+
+    r_f = c.get("/doctors/", headers=h, params={"available": "false", "sort": "name"})
+    check("فلتر التوافر + الترتيب name", r_f.status_code == 200
+          and all(not d["is_available"] for d in r_f.json()), str(r_f.status_code))
+
+    r_bad = c.get("/doctors/", headers=h, params={"sort": "hack"})
+    check("ترتيب غير صالح ⇒ 400", r_bad.status_code == 400
+          and "sort" in r_bad.json().get("detail", ""), str(r_bad.status_code))
+
+    doc2 = c.post("/doctors/", headers=h, json={
+        "full_name": "د. فحص حيّ", "specialty": "طب أسرة",
+        "license_number": "CNT-0002", "phone": "0502222222",
+        "email": "container_doc2@hospital-demo.com"})
+    check("إنشاء طبيب ثانٍ (admin)", doc2.status_code == 200, doc2.text[:120])
+    d2 = doc2.json().get("id")
+
+    r_det = c.get(f"/doctors/{d2}", headers=h)
+    st2 = r_det.json().get("stats", {}) if r_det.status_code == 200 else {}
+    check("تفاصيل طبيب مع إحصاءات stats", r_det.status_code == 200
+          and all(k in st2 for k in ("appointments", "records", "patients")),
+          str(r_det.status_code))
+
+    # صلاحيات: مستخدم مسجَّل غير مدير ⇒ 403 (الإنشاء صار admin فقط)
+    c.post("/auth/register", json={
+        "username": "live_docuser", "email": "live_docuser@hospital-demo.com",
+        "full_name": "مستخدم حيّ", "role": "doctor", "password": "secret123"})
+    tl = c.post("/auth/login",
+                json={"username": "live_docuser", "password": "secret123"})
+    h2 = ({"Authorization": "Bearer " + tl.json()["access_token"]}
+          if tl.status_code == 200 else {})
+    ro = c.post("/doctors/", headers=h2, json={
+        "full_name": "د. مرفوض", "specialty": "جراحة",
+        "license_number": "CNT-9999", "phone": "0509999999",
+        "email": "live_denied@hospital-demo.com"})
+    check("إنشاء طبيب لغير مدير ⇒ 403", ro.status_code == 403,
+          str(ro.status_code))
+
+    # تحديث بتكرار ترخيص طبيب آخر ⇒ 400 (كان IntegrityError 500)
+    rp = c.put(f"/doctors/{d2}", headers=h, json={"license_number": "CNT-0001"})
+    check("تحديث بتكرار ترخيص ⇒ 400 عربي", rp.status_code == 400
+          and "رقم التراخيص" in rp.json().get("detail", ""), str(rp.status_code))
+
+    # توافر: تبديل عبر النهاية الجديدة ثم إعادة
+    r_av = c.put(f"/doctors/{d2}/availability", headers=h,
+                 json={"is_available": False})
+    check("تعطيل التوافر عبر /availability", r_av.status_code == 200
+          and r_av.json().get("is_available") is False, str(r_av.status_code))
+    c.put(f"/doctors/{d2}/availability", headers=h,
+          json={"is_available": True})
+
+    # حذف محميّ: طبيب ذي مواعيد ⇒ 409 بدل انفجار/حذف صامت للسجل
+    r_del = c.delete(f"/doctors/{doctor_id}", headers=h)
+    check("حذف طبيب ذي مواعيد ⇒ 409", r_del.status_code == 409
+          and "موعد" in r_del.json().get("detail", ""), str(r_del.status_code))
+    check("الطبيب المحميّ باقٍ بعد 409",
+          c.get(f"/doctors/{doctor_id}", headers=h).status_code == 200)
+
+    # حذف طبيب نظيف ⇒ 204 ثم 404
+    r_dc = c.delete(f"/doctors/{d2}", headers=h)
+    check("حذف طبيب نظيف ⇒ 204 ثم 404",
+          r_dc.status_code == 204
+          and c.get(f"/doctors/{d2}", headers=h).status_code == 404,
+          str(r_dc.status_code))
+
+    # علامات الواجهة الجديدة في app.js
+    ru2 = c.get("/ui/app.js")
+    check("واجهة الأطباء: بحث/فلاتر + توافر + تعديل",
+          b"filterDoctors" in ru2.content and b"toggleDoctorAvail" in ru2.content
+          and b"editDoctor" in ru2.content)
+
     print(f"\n==== LIVE CONTAINER RESULT: {PASSED} passed, {FAILED} failed ====")
     return 0 if FAILED == 0 else 1
 

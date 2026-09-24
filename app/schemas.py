@@ -167,8 +167,14 @@ class DoctorUpdate(BaseModel):
     phone: Optional[str] = None
     email: Optional[EmailStr] = None
     specialty: Optional[str] = None
+    license_number: Optional[str] = None
+    address: Optional[str] = None
     is_available: Optional[bool] = None
     department_id: Optional[int] = None
+
+
+class DoctorAvailability(BaseModel):
+    is_available: bool = Field(..., description="هل الطبيب متاح للحجز")
 
 
 class DepartmentBrief(ORMModel):
@@ -183,6 +189,34 @@ class DoctorInDB(DoctorBase):
     department: Optional[DepartmentBrief] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class DoctorSummaryStats(BaseModel):
+    """إحصاءات مرتبطة بطبيب واحد — تظهر في تفاصيل الطبيب."""
+    appointments: int = Field(0, description="عدد مواعيده")
+    records: int = Field(0, description="عدد سجلاته الطبية")
+    patients: int = Field(0, description="عدد مرضاه الفريد")
+
+
+class DoctorWithStats(DoctorInDB):
+    stats: DoctorSummaryStats
+
+
+class DepartmentCount(BaseModel):
+    id: Optional[int] = None
+    name: str
+    count: int
+
+
+class DoctorsStats(BaseModel):
+    """إحصاءات قسم الأطباء للوحة والواجهة."""
+    total: int
+    available: int
+    unavailable: int
+    specialties: int
+    without_department: int
+    appointments: int
+    departments: List[DepartmentCount]
 
 
 # ===== المواعيد =====

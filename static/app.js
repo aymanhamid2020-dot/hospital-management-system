@@ -1038,7 +1038,10 @@ const VIEWS = {
 
   /* --- الأطباء --- */
   async doctors(main) {
-    const [rows, depts] = await Promise.all([api('/doctors/'), api('/departments/')]);
+    const [rows, depts, stats] = await Promise.all([
+      api('/doctors/'), api('/departments/'),
+      api('/doctors/stats').catch(() => null)]);
+    DOCTORS_CACHE = rows; DOCTORS_DEPTS = depts;
     const form = isAdmin() ? `
       <details class="addbox"><summary>➕ إضافة طبيب جديد</summary>
       <div class="form-grid">
@@ -1047,24 +1050,46 @@ const VIEWS = {
         <div class="field"><label>رقم الترخيص *</label><input id="f-lic"></div>
         <div class="field"><label>الهاتف *</label><input id="f-phone"></div>
         <div class="field"><label>البريد الإلكتروني *</label><input id="f-email" type="email"></div>
+        <div class="field"><label>العنوان</label><input id="f-addr"></div>
         <div class="field"><label>القسم</label><select id="f-dept"><option value="">—</option>
           ${depts.map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join('')}</select></div>
       </div>
       <button class="btn success" style="margin-top:12px" onclick="addDoctor()">حفظ الطبيب</button>
       </details>` : '';
+    const statCards = stats ? `
+      <div class="stats" style="margin-bottom:16px">
+        <div class="stat"><div class="num">${stats.total}</div><div class="lbl">إجمالي الأطباء</div></div>
+        <div class="stat green"><div class="num">${stats.available}</div><div class="lbl">أطباء متاحون</div></div>
+        <div class="stat amber"><div class="num">${stats.unavailable}</div><div class="lbl">غير متاحين</div></div>
+        <div class="stat"><div class="num">${stats.specialties}</div><div class="lbl">تخصصات</div></div>
+        <div class="stat"><div class="num">${stats.appointments}</div><div class="lbl">مواعيد مرتبطة</div></div>
+      </div>` : '';
+    const canToggle = d => isAdmin() || (isDoctor() && USER && d.email === USER.email);
     main.innerHTML = `
+      ${statCards}
       <div class="card">
         <h3>الأطباء (${rows.length})</h3>
-        <div class="toolbar"><input id="q" placeholder="🔍 بحث…" oninput="filterTable('tbl', this.value)"></div>
+        <div class="toolbar">
+          <input id="q" placeholder="🔍 بحث بالاسم/التخصص/الترخيص…" oninput="filterDoctors()">
+          <select id="flt-dept" onchange="filterDoctors()"><option value="">كل الأقسام</option>
+            ${depts.map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join('')}
+            <option value="none">بدون قسم</option></select>
+          <select id="flt-avail" onchange="filterDoctors()"><option value="">كل الحالات</option>
+            <option value="1">✅ متاح</option><option value="0">⛔ غير متاح</option></select>
+        </div>
         ${form}
         <div style="overflow-x:auto"><table id="tbl">
-          <thead><tr><th>#</th><th>الاسم</th><th>التخصص</th><th>الترخيص</th><th>الهاتف</th><th>القسم</th><th>متاح</th>${isAdmin() ? '<th></th>' : ''}</tr></thead>
-          <tbody>${rows.map(d => `<tr>
+          <thead><tr><th>#</th><th>الاسم</th><th>التخصص</th><th>الترخيص</th><th>الهاتف</th><th>القسم</th><th>متاح</th><th></th></tr></thead>
+          <tbody>${rows.map(d => `<tr data-dept="${d.department_id == null ? 'none' : d.department_id}" data-avail="${d.is_available ? '1' : '0'}">
             <td>${d.id}</td><td><strong>${esc(d.full_name)}</strong></td><td>${esc(d.specialty)}</td>
             <td>${esc(d.license_number)}</td><td>${esc(d.phone)}</td>
             <td>${esc(d.department ? d.department.name : '-')}</td>
             <td>${d.is_available ? '✅' : '⛔'}</td>
-            ${isAdmin() ? `<td><button class="btn sm danger" onclick="del('doctors',${d.id},'doctors')">حذف</button></td>` : ''}
+            <td>
+              ${isAdmin() ? `<button class="btn sm ghost" onclick="editDoctor(${d.id})">✏️ تعديل</button>` : ''}
+              ${canToggle(d) ? `<button class="btn sm ghost" onclick="toggleDoctorAvail(${d.id},${d.is_available})">${d.is_available ? '⛔ تعطيل' : '✅ تمكين'}</button>` : ''}
+              ${isAdmin() ? `<button class="btn sm danger" onclick="del('doctors',${d.id},'doctors')">حذف</button>` : ''}
+            </td>
           </tr>`).join('') || '<tr><td colspan="8" class="empty">لا يوجد أطباء</td></tr>'}</tbody>
         </table></div>
       </div>`;
@@ -2420,9 +2445,70 @@ function addDoctor() {
   if (!V('f-name') || !V('f-spec') || !V('f-lic') || !V('f-phone') || !V('f-email')) return toast('املأ الحقول المطلوبة (*)', true);
   post('/doctors/', {
     full_name: V('f-name'), specialty: V('f-spec'), license_number: V('f-lic'),
-    phone: V('f-phone'), email: V('f-email'),
+    phone: V('f-phone'), email: V('f-email'), address: V('f-addr') || null,
     department_id: V('f-dept') ? Number(V('f-dept')) : null
   }, 'doctors');
+}
+
+/* ========== الأطباء: فلترة + تعديل + توافر ========== */
+let DOCTORS_CACHE = [], DOCTORS_DEPTS = [];
+
+function filterDoctors() {
+  const term = (document.getElementById('q')?.value || '').trim();
+  const dept = document.getElementById('flt-dept')?.value || '';
+  const av = document.getElementById('flt-avail')?.value || '';
+  document.querySelectorAll('#tbl tbody tr').forEach(r => {
+    if (r.dataset.dept === undefined) return; // صف الرسائل (لا يوجد أطباء)
+    const okT = !term || r.textContent.includes(term);
+    const okD = !dept || r.dataset.dept === dept;
+    const okA = !av || r.dataset.avail === av;
+    r.style.display = (okT && okD && okA) ? '' : 'none';
+  });
+}
+
+function editDoctor(id) {
+  const d = (DOCTORS_CACHE || []).find(x => x.id === id);
+  if (!d) return toast('الطبيب غير موجود', true);
+  openModal('✏️ تعديل بيانات الطبيب', `
+    <div class="form-grid">
+      <div class="field"><label>الاسم الكامل *</label><input id="e-name" value="${esc(d.full_name)}"></div>
+      <div class="field"><label>التخصص *</label><input id="e-spec" value="${esc(d.specialty)}"></div>
+      <div class="field"><label>رقم الترخيص *</label><input id="e-lic" value="${esc(d.license_number)}"></div>
+      <div class="field"><label>الهاتف *</label><input id="e-phone" value="${esc(d.phone)}"></div>
+      <div class="field"><label>البريد الإلكتروني *</label><input id="e-email" type="email" value="${esc(d.email)}"></div>
+      <div class="field"><label>العنوان</label><input id="e-addr" value="${esc(d.address || '')}"></div>
+      <div class="field"><label>القسم</label><select id="e-dept"><option value="">—</option>
+        ${(DOCTORS_DEPTS || []).map(x => `<option value="${x.id}" ${d.department_id === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>
+    </div>
+    <button class="btn success" style="margin-top:12px" onclick="saveDoctor(${id})">حفظ التعديلات</button>`);
+}
+
+async function saveDoctor(id) {
+  if (!V('e-name') || !V('e-spec') || !V('e-lic') || !V('e-phone') || !V('e-email'))
+    return toast('املأ الحقول المطلوبة (*)', true);
+  try {
+    await api('/doctors/' + id, {
+      method: 'PUT',
+      body: JSON.stringify({
+        full_name: V('e-name'), specialty: V('e-spec'), license_number: V('e-lic'),
+        phone: V('e-phone'), email: V('e-email'), address: V('e-addr') || null,
+        department_id: V('e-dept') ? Number(V('e-dept')) : null
+      })
+    });
+    toast('تم حفظ التعديلات ✅');
+    closeModal();
+    await navigate('doctors');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function toggleDoctorAvail(id, current) {
+  try {
+    await api(`/doctors/${id}/availability`, {
+      method: 'PUT', body: JSON.stringify({ is_available: !current })
+    });
+    toast((!current ? 'أصبح الطبيب متاحًا ✅' : 'أُوقف توافر الطبيب ⛔'));
+    await navigate('doctors');
+  } catch (e) { toast(e.message, true); }
 }
 
 function addAppt() {
