@@ -5,18 +5,31 @@ import os
 
 from app.config import DATABASE_URL
 
+_IS_SQLITE = "sqlite" in DATABASE_URL
+
+# توازن اتصالات يكفي العمل المتزامن (كانت 5+10 = 15 تكفي حتى 10 مستخدمين
+# ثم تنفد عند 20-30 متزامن فتنتهي كل طلبات بانتظار 30 ثانية)
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
+    connect_args={"check_same_thread": False, "timeout": 15} if _IS_SQLITE else {},
+    pool_size=int(os.getenv("DB_POOL_SIZE", "20")),
+    max_overflow=int(os.getenv("DB_POOL_MAX_OVERFLOW", "30")),
+    pool_timeout=int(os.getenv("DB_POOL_TIMEOUT", "30")),
+    pool_pre_ping=True,
     echo=os.getenv("SQL_ECHO", "False").lower() == "true",
 )
 
-if "sqlite" in DATABASE_URL:
+if _IS_SQLITE:
     @event.listens_for(engine, "connect")
     def _enable_sqlite_foreign_keys(dbapi_connection, connection_record):
-        """تفعيل مفاتيح الـ FK في SQLite (مطفأ افتراضيًا) ليعمل ondelete الصحيح."""
+        """إعدادات SQLite لكل اتصال: FK + وضع WAL.
+
+        WAL يمنع تعارض القرّاء مع الكاتب: في الوضع العادي (delete) كان أي
+        كتابة (تذكير/تدقيق) يوقف كل الاستعلامات على حلقة الأحداث حتى /health.
+        """
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA journal_mode=WAL")
         cursor.close()
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
