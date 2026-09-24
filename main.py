@@ -194,6 +194,14 @@ async def system_status(db: Session = Depends(get_db)):
             .scalar() or 0,
         }
 
+    # إحصاءة مجلد النسخ الفعلية (SQLite — للوحة المراقبة /status)
+    _bdir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app", "backups")
+    try:
+        _bfiles = [f for f in os.listdir(_bdir) if f.endswith(".db")]
+        _bbytes = sum(os.path.getsize(os.path.join(_bdir, f)) for f in _bfiles)
+    except OSError:
+        _bfiles, _bbytes = [], 0
+
     return {
         "status": "ok" if connected else "degraded",
         "service": APP_NAME,
@@ -210,6 +218,8 @@ async def system_status(db: Session = Depends(get_db)):
             "automatic": bool(engine.url.get_backend_name() == "sqlite"),
             "interval_hours": float(os.getenv("BACKUP_INTERVAL_HOURS", "24")),
             "retention": int(os.getenv("BACKUP_RETENTION", "7")),
+            "files": len(_bfiles),
+            "total_mb": round(_bbytes / (1024 * 1024), 2),
         },
         "time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }

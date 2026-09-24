@@ -186,11 +186,50 @@ def _sqlite_db_path():
     return path if os.path.exists(path) else None
 
 
+def prune_backups(backup_dir, keep=None):
+    """تقليم النسخ الزائدة داخل مجلد backups — يرجع أسماء المحذوفات.
+
+    الاحتفاظ بآخر ``BACKUP_RETENTION`` (7 افتراضيًا) من كل بادئة على حدة:
+    ``hospital_*.db`` (الإنشاء اليدوي والفحوصات) و``auto_*.db`` (المجدول)؛
+    وأي ملف آخر (مثل ملفات الاختبار ``_*.db``) لا يُمسّ إطلاقًا.
+    الأسماء تحوي طابعًا زمنيًا بترتيب تصاعدي، فالفرز التنازلي = الأحدث أولًا.
+    """
+    import os
+    if keep is None:
+        keep = int(os.getenv("BACKUP_RETENTION", "7"))
+    keep = max(int(keep), 1)
+    if not os.path.isdir(backup_dir):
+        return []
+    try:
+        names = os.listdir(backup_dir)
+    except OSError:
+        return []
+    deleted = []
+    for prefix in ("hospital_", "auto_"):
+        group = sorted(
+            (n for n in names
+             if n.startswith(prefix) and n.endswith(".db")),
+            reverse=True,
+        )
+        for old in group[keep:]:
+            try:
+                os.remove(os.path.join(backup_dir, old))
+                deleted.append(old)
+            except OSError:
+                pass
+    if deleted:
+        backup_logger.info(
+            "تقليم النسخ: حُذف %d زائدًا (الاحتفاظ بآخر %d لكل بادئة)",
+            len(deleted), keep)
+    return deleted
+
+
 def create_auto_backup(backup_dir=None, retention=None):
     """نسخة متسقة للقاعدة (sqlite backup API) + تقليم القديم — يرجع المسار.
 
     الافتراضي: مجلد backups/ بجانب المشروع والاحتفاظ بآخر BACKUP_RETENTION
-    (7) نسخ تلقائية (auto_*). ترجع None عند عدم الدعم أو المصدر غير الموجود.
+    (7) نسخ من كل بادئة (auto_* المجدول وhospital_* اليدوي عبر prune_backups).
+    ترجع None عند عدم الدعم أو المصدر غير الموجود.
     """
     import os
     import sqlite3
@@ -225,17 +264,8 @@ def create_auto_backup(backup_dir=None, retention=None):
     finally:
         src_con.close()
 
-    # تقليم: الاحتفاظ بآخر N نسخ auto_* فقط (الأسماء ترتّب زمنيًا تصاعديًا)
-    autos = sorted(
-        (os.path.join(backup_dir, n) for n in os.listdir(backup_dir)
-         if n.startswith("auto_") and n.endswith(".db")),
-        reverse=True,
-    )
-    for old in autos[max(retention, 1):]:
-        try:
-            os.remove(old)
-        except OSError:
-            pass
+    # تقليم موحّد حسب السياسة (آخر N من hospital_* وآخر N من auto_*)
+    prune_backups(backup_dir, retention)
     backup_logger.info("نسخة تلقائية محفوظة: %s", dest)
     return dest
 

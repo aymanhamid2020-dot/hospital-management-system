@@ -532,6 +532,37 @@ def main():
     check("PWA manifest start_url=/ui/", r.status_code == 200
           and r.json().get("start_url") == "/ui/", str(r.status_code))
 
+    # ===== 16) صلابة النسخ: حالة/فحص/تنظيف =====
+    rs = c.get("/backup/status", headers=h)
+    st = rs.json() if rs.status_code == 200 else {}
+    check("حالة النسخ /backup/status", rs.status_code == 200
+          and all(k in st for k in ("files", "by_kind", "total_mb",
+                                    "retention", "disk_free_mb")),
+          str(rs.status_code))
+    rb2 = c.post("/backup", headers=h)
+    check("إنشاء نسخة مع تقليم مُبلَّغ (pruned)",
+          rb2.status_code == 200 and "pruned" in rb2.json()
+          and "file" in rb2.json(), str(rb2.status_code))
+    rv = c.get("/backup/verify", headers=h, params={"limit": 5})
+    vj = rv.json() if rv.status_code == 200 else {}
+    check("فحص السلامة على نسخة حديثة",
+          rv.status_code == 200 and vj.get("checked", 0) >= 1
+          and vj.get("ok", 0) >= 1 and not vj.get("bad"),
+          str(vj.get("checked")))
+    rp2 = c.post("/backup/prune", headers=h)
+    check("تنظيف فوري يعيد السياسة",
+          rp2.status_code == 200 and rp2.json().get("retention", 0) >= 1,
+          str(rp2.status_code))
+    rs2 = c.get("/status")
+    bkp = rs2.json().get("backups", {}) if rs2.status_code == 200 else {}
+    check("/status يكشف عدد النسخ وحجمها",
+          rs2.status_code == 200 and "files" in bkp and "total_mb" in bkp,
+          str(rs2.status_code))
+    ru = c.get("/ui/app.js")
+    check("أزرار فحص/تنظيف في الواجهة",
+          b"verifyBackups" in ru.content and b"pruneNow" in ru.content
+          and "فحص السلامة".encode() in ru.content)
+
     print(f"\n==== LIVE CONTAINER RESULT: {PASSED} passed, {FAILED} failed ====")
     return 0 if FAILED == 0 else 1
 

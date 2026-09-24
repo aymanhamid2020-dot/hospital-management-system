@@ -71,7 +71,8 @@ async function load() {
          rm.enabled ? 'ok' : 'bad'),
     card('💾', 'النسخ التلقائي',
          bk.automatic ? ('كل ' + bk.interval_hours + ' ساعة') : 'غير متاح',
-         bk.automatic ? ('الاحتفاظ بآخر ' + bk.retention + ' نسخ في backups/')
+         bk.automatic ? ('الاحتفاظ بآخر ' + bk.retention + ' من كل نوع في backups/'
+                         + (bk.files != null ? ' · الآن ' + bk.files + ' ملف (' + bk.total_mb + ' م.ب)' : ''))
                       : 'على PostgreSQL استخدم pg_dump',
          bk.automatic && bk.interval_hours > 0 ? 'ok' : 'warn'),
     card('💊', 'مخزون منخفض', al.low_stock || 0,

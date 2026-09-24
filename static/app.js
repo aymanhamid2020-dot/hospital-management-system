@@ -378,6 +378,8 @@ const AR2EN = {
   'إنشاء فاتورة': 'Create invoice',
   'إنشاء الفاتورة': 'Create invoice',
   'إنشاء نسخة احتياطية الآن': 'Create backup now',
+  'فحص السلامة': 'Verify integrity',
+  'تنظيف النسخ حسب السياسة': 'Prune backups',
   'حفظ المريض': 'Save patient',
   'حفظ الطبيب': 'Save doctor',
   'حفظ القسم': 'Save department',
@@ -2067,11 +2069,15 @@ const VIEWS = {
   /* --- النسخ الاحتياطي --- */
   async backup(main) {
     if (!isAdmin()) { main.innerHTML = '<div class="empty">🔒 هذه الصفحة متاحة للمدير فقط</div>'; return; }
-    const rows = await api('/backup');
+    const [rows, st] = await Promise.all([
+      api('/backup'), api('/backup/status').catch(() => null)]);
     main.innerHTML = `
       <div class="card">
         <h3>النسخ الاحتياطي لقاعدة البيانات</h3>
         <button class="btn success" onclick="makeBackup()">💾 إنشاء نسخة احتياطية الآن</button>
+        <button class="btn ghost" onclick="verifyBackups()">🩺 فحص السلامة</button>
+        <button class="btn ghost" onclick="pruneNow()">🧹 تنظيف النسخ حسب السياسة</button>
+        ${st ? `<p style="margin:12px 0 0; color:#64748b; font-size:13px">📁 ${st.files} ملف (${st.total_mb} م.ب) · الاحتفاظ بآخر ${st.retention} من كل نوع · حرّ ${st.disk_free_mb ?? '—'} م.ب</p>` : ''}
         <div style="overflow-x:auto; margin-top:18px"><table>
           <thead><tr><th>الملف</th><th>الحجم (KB)</th><th>تاريخ الإنشاء</th><th></th><th></th></tr></thead>
           <tbody>${rows.map(f => `<tr>
@@ -2293,6 +2299,23 @@ function printInvoice(id) {
 async function makeBackup() {
   try { const r = await api('/backup', { method: 'POST' }); toast(r.message + ' ✅'); await navigate('backup'); }
   catch (e) { toast(e.message, true); }
+}
+
+async function verifyBackups() {
+  try {
+    const r = await api('/backup/verify?limit=20');
+    if (!r.bad.length) toast(`🩺 سليمات ${r.ok}/${r.checked} نسخة ✅`);
+    else toast(`⚠️ ${r.bad.length} من ${r.checked} تالفة: ${r.bad.map(b => b.file).join('، ')}`, true);
+    await navigate('backup');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function pruneNow() {
+  try {
+    const r = await api('/backup/prune', { method: 'POST' });
+    toast(r.message + ' ✅');
+    await navigate('backup');
+  } catch (e) { toast(e.message, true); }
 }
 
 async function readNotif(id) {
