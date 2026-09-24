@@ -161,6 +161,57 @@ async def list_movements(
     ]
 
 
+@router.get("/labels", summary="ملصقات باركود الأدوية PDF")
+async def download_med_labels(
+    ids: Optional[str] = Query(
+        None, description="قائمة معرفات مفصولة بفواصل — فارغة = كل الأدوية"),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """ملصقات باركود Code39 (PDF) — للمدير فقط.
+
+    ids فارغة ⇒ كل الأدوية · ids غير رقمية ⇒ 400 ·
+    معرّف مجهول أو لا توجد أدوية ⇒ 404
+    """
+    from fastapi.responses import Response
+
+    from app.pdf_utils import labels_pdf
+
+    wanted: Optional[List[int]] = None
+    if ids is not None and ids.strip():
+        parts = [p.strip() for p in ids.split(",") if p.strip()]
+        if parts:
+            try:
+                wanted = [int(p) for p in parts]
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="ids يجب أن تكون أرقامًا مفصولة بفواصل (مثال: 1,2,3)",
+                )
+    q = db.query(Medication)
+    if wanted is not None:
+        meds = q.filter(Medication.id.in_(wanted)).all()
+        found = {m.id for m in meds}
+        missing = [i for i in wanted if i not in found]
+        if missing:
+            raise HTTPException(
+                status_code=404,
+                detail=f"لا يوجد دواء بالمعرف {missing[0]}",
+            )
+        meds.sort(key=lambda m: wanted.index(m.id))
+    else:
+        meds = q.order_by(Medication.id).all()
+    if not meds:
+        raise HTTPException(
+            status_code=404, detail="لا توجد أدوية لطباعة ملصقاتها")
+    return Response(
+        content=labels_pdf(meds),
+        media_type="application/pdf",
+        headers={"Content-Disposition":
+                 'attachment; filename="med_labels.pdf"'},
+    )
+
+
 @router.post("/{med_id}/restock", response_model=MedicationInDB, summary="توريد كمية إلى صنف")
 async def restock(
     med_id: int,

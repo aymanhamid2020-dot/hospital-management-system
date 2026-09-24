@@ -360,6 +360,12 @@ const AR2EN = {
   'إحصاءات CSV': 'Stats CSV',
   'إتلاف/إرجاع CSV': 'Disposals/returns CSV',
   'طلب CSV': 'Reorder CSV',
+  '🏷️ ملصقات الكل': '🏷️ All labels',
+  '🏷️ ملصق': '🏷️ Label',
+  '🖨️ ورقة النتيجة': '🖨️ Result sheet',
+  'عرض المعلّقات': 'Show pending',
+  '⏳ وصفات معلّقة منذ أكثر من 24 ساعة': '⏳ Prescriptions pending over 24 hours',
+  'وصفة معلّقة': 'Pending prescription',
   'كل الوصفات': 'All prescriptions',
   'إيراد الصرف': 'Dispense revenue',
   'وحدات مصروفة': 'Units dispensed',
@@ -1287,7 +1293,8 @@ const VIEWS = {
     const icon = t => t === 'reminder' ? '⏰'
       : (t === 'appointment' ? '📅'
       : (t === 'lab_result' ? '🔬'
-      : (t === 'low_stock' ? '💊' : 'ℹ️')));
+      : (t === 'low_stock' ? '💊'
+      : (t === 'rx_stale' ? '⏳' : 'ℹ️'))));
     main.innerHTML = `
       <div class="card">
         <h3>الإشعارات (${rows.length})</h3>
@@ -1337,10 +1344,14 @@ const VIEWS = {
         </div>
         <button class="btn success" style="margin-top:12px" onclick="addLabOrder()">حفظ الطلب</button>
         </details>
-        <div class="toolbar"><input placeholder="🔍 بحث…" oninput="filterTable('tbl', this.value)"></div>
+        <div class="toolbar"><input id="f-lab-q" placeholder="🔍 بحث…" oninput="filterLabRows()">
+          <select id="f-lab-status" onchange="filterLabRows()">
+            ${[['', 'كل الحالات'], ...Object.entries(stLabels)]
+              .map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}
+          </select></div>
         <div style="overflow-x:auto"><table id="tbl">
           <thead><tr><th>#</th><th>التاريخ</th><th>المريض</th><th>الطبيب</th><th>النوع</th><th>التحليل</th><th>الحالة</th><th>النتيجة</th><th></th></tr></thead>
-          <tbody>${rows.map(o => `<tr>
+          <tbody>${rows.map(o => `<tr data-status="${o.status}">
             <td>${o.id}</td><td>${fmtDate(o.ordered_at)}</td>
             <td>${esc(o.patient.full_name)}</td><td>${esc(o.doctor ? o.doctor.full_name : '-')}</td>
             <td>${o.test_type === 'radiology' ? 'أشعة 🔬' : 'تحليل 🧪'}</td>
@@ -1348,6 +1359,7 @@ const VIEWS = {
             <td><span class="pill ${o.status}">${stLabels[o.status] || o.status}</span></td>
             <td>${o.result ? esc(o.result) : '—'}</td>
             <td class="actions">
+              <button class="btn sm ghost" onclick="download('/lab-orders/${o.id}/pdf','lab_result_${o.id}.pdf')">🖨️ ورقة النتيجة</button>
               ${o.status === 'pending' ? `<button class="btn sm ghost" onclick="setLabStatus(${o.id},'in_progress')">▶ بدء</button>` : ''}
               ${o.status === 'in_progress' ? `<button class="btn sm success" onclick="setLabResult(${o.id})">📥 النتيجة</button>` : ''}
               ${o.status === 'ready' && (isAdmin() || isDoctor()) ? `<button class="btn sm success" onclick="setLabStatus(${o.id},'reviewed')">🔎 مراجعة</button>` : ''}
@@ -1403,6 +1415,29 @@ const VIEWS = {
         <div class="stat amber"><div class="num">${stats.low + stats.out}</div><div class="lbl">منخفض/نافد</div></div>
         <div class="stat red"><div class="num">${stats.expired}</div><div class="lbl">منتهي الصلاحية</div></div>
       </div>` : '';
+    /* وصفات معلّقة (PENDING أقدم من 24 ساعة) — تنبيه الصيدلية */
+    const staleRx = rxs.filter(r => r.status === 'PENDING'
+      && r.created_at && nowMs - new Date(r.created_at).getTime() > 24 * 3600e3);
+    const staleCard = staleRx.length ? `
+      <div class="card" id="rx-stale">
+        <div class="toolbar"><h3 style="margin:0">⏳ وصفات معلّقة منذ أكثر من 24 ساعة (${staleRx.length})</h3>
+          <button class="btn ghost" onclick="showStaleRx()">عرض المعلّقات</button></div>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>#</th><th>التاريخ</th><th>المريض</th><th>الطبيب</th><th>البنود</th><th>العمر</th><th></th></tr></thead>
+          <tbody>${staleRx.map(r => `<tr>
+            <td>${r.id}</td><td>${fmtDate(r.created_at)}</td>
+            <td>${esc(r.patient ? r.patient.full_name : '#' + r.patient_id)}</td>
+            <td>${r.doctor ? esc(r.doctor.full_name) : '—'}</td>
+            <td>${(r.items || []).map(i => `${esc(i.medication ? i.medication.name : '#' + i.medication_id)} ×${i.quantity}`).join('<br>')}</td>
+            <td><span class="pill pending">${Math.floor((nowMs - new Date(r.created_at).getTime()) / 3600e3)} ساعة</span></td>
+            <td class="actions">
+              <button class="btn sm ghost" onclick="download('/prescriptions/${r.id}/pdf','prescription_${r.id}.pdf')">🖨️ طباعة</button>
+              ${isAdmin() ? `<button class="btn sm success" onclick="dispenseRx(${r.id})">💊 صرف</button>` : ''}
+              ${isAdmin() ? `<button class="btn sm danger" onclick="cancelRx(${r.id})">إلغاء</button>` : ''}
+            </td>
+          </tr>`).join('')}</tbody>
+        </table></div>
+      </div>` : '';
     /* فلاتر الجدول: بحث + حالة */
     const filterOpts = [['', 'كل الحالات'], ['ok', 'سليم'], ['low', 'منخفض'],
                         ['out', 'نافد'], ['expired', 'منتهي الصلاحية']]
@@ -1417,6 +1452,7 @@ const VIEWS = {
     const payLbl = { PAID: 'مدفوع', PARTIAL: 'جزئيًا', UNPAID: 'غير مدفوع' };
     main.innerHTML = `
       ${statsRow}
+      ${staleCard}
       <div class="card">
         <div class="toolbar"><h3 style="margin:0">مخزون الأدوية (<span id="ph-count">${meds.length}</span>)</h3>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -1427,6 +1463,7 @@ const VIEWS = {
           ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/csv?section=dispenses','pharmacy_dispenses.csv')">⬇️ صرف CSV</button>` : ''}
           ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/csv?section=disposals','pharmacy_disposals.csv')">🗑️ إتلاف/إرجاع CSV</button>` : ''}
           ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/csv?section=reorder','pharmacy_reorder.csv')">🛒 طلب CSV</button>` : ''}
+          ${isAdmin() ? `<button class="btn ghost" onclick="download('/inventory/labels','med_labels.pdf')">🏷️ ملصقات الكل</button>` : ''}
           </div>
         </div>
         <div class="toolbar">
@@ -1472,6 +1509,7 @@ const VIEWS = {
             <td>${m.expiry_date ? fmtDate(m.expiry_date) : '—'}</td>
             <td class="actions">
               ${isAdmin() ? `<button class="btn sm ghost" onclick="restock(${m.id})">📦 توريد</button>` : ''}
+              ${isAdmin() ? `<button class="btn sm ghost" onclick="download('/inventory/labels?ids=${m.id}','label_${m.code}.pdf')">🏷️ ملصق</button>` : ''}
               ${isAdmin() ? `<button class="btn sm danger" onclick="disposeMed(${m.id})">🗑️ إتلاف</button>` : ''}
               ${isAdmin() ? `<button class="btn sm danger" onclick="del('medications',${m.id},'pharmacy')">حذف</button>` : ''}
             </td>
@@ -1620,6 +1658,7 @@ const VIEWS = {
           <div style="display:flex;gap:8px;flex-wrap:wrap">
           ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/pdf','inventory_report.pdf')">📄 تقرير المخزون PDF</button>` : ''}
           ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/csv?section=inventory','inventory_items.csv')">⬇️ مخزون CSV</button>` : ''}
+          ${isAdmin() ? `<button class="btn ghost" onclick="download('/inventory/labels','med_labels.pdf')">🏷️ ملصقات الكل</button>` : ''}
           </div>
         </div>
         ${medForm}
@@ -1635,6 +1674,7 @@ const VIEWS = {
             <td>${m.expiry_date ? fmtDate(m.expiry_date) : '—'}${(m.status === 'expiring' || m.status === 'expired') && m.days_to_expiry !== null ? ` <small title="أيام متبقية للانتهاء">⏱ ${m.days_to_expiry}</small>` : ''}</td>
             <td class="actions">
               ${isAdmin() ? `<button class="btn sm ghost" onclick="restock(${m.id})">📦 توريد</button>` : ''}
+              ${isAdmin() ? `<button class="btn sm ghost" onclick="download('/inventory/labels?ids=${m.id}','label_${m.code}.pdf')">🏷️ ملصق</button>` : ''}
               ${isAdmin() ? `<button class="btn sm ghost" onclick="adjustStock(${m.id})">🧮 جرد</button>` : ''}
               ${isAdmin() ? `<button class="btn sm danger" onclick="del('medications',${m.id},'inventory')">حذف</button>` : ''}
             </td>
@@ -2545,6 +2585,25 @@ function filterRxRows() {
   const want = V('f-rx-status') || '';
   document.querySelectorAll('#rx-list tbody tr[data-rxstatus]').forEach(tr => {
     tr.style.display = (!want || tr.dataset.rxstatus === want) ? '' : 'none';
+  });
+}
+
+/* الانتقال إلى فلترة الوصفات المعلّقة من بطاقة rx-stale */
+function showStaleRx() {
+  const sel = document.getElementById('f-rx-status');
+  if (sel) { sel.value = 'PENDING'; filterRxRows(); }
+  const list = document.getElementById('rx-list');
+  if (list) list.scrollIntoView({ behavior: 'smooth' });
+}
+
+/* فلترة المختبر: بحث + حالة معًا (data-status) */
+function filterLabRows() {
+  const q = (V('f-lab-q') || '').toLowerCase();
+  const want = V('f-lab-status') || '';
+  document.querySelectorAll('#tbl tbody tr[data-status]').forEach(tr => {
+    const okQ = !q || tr.textContent.toLowerCase().includes(q);
+    const okS = !want || tr.dataset.status === want;
+    tr.style.display = (okQ && okS) ? '' : 'none';
   });
 }
 

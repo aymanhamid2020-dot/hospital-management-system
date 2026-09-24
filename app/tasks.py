@@ -3,7 +3,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 
-from app.config import REMINDER_INTERVAL_MINUTES, REMINDER_HOURS_BEFORE
+from app.config import REMINDER_INTERVAL_MINUTES, REMINDER_HOURS_BEFORE, STALE_RX_HOURS
 
 logger = logging.getLogger("hms.reminders")
 
@@ -84,21 +84,92 @@ def check_and_send_reminders() -> int:
 
 
 async def reminder_loop():
-    """حلقة تعمل كل REMINDER_INTERVAL_MINUTES دقائق (0 = معطّلة)."""
+    """حلقة تعمل كل REMINDER_INTERVAL_MINUTES دقائق (0 = معطّلة).
+
+    في كل دورة: تذكير المواعيد + تنبيه الوصفات المعلّقة (PENDING أقدم
+    من STALE_RX_HOURS ساعة — 0 لتعطيل تنبيه الوصفات).
+    """
     if REMINDER_INTERVAL_MINUTES <= 0:
         logger.info("مهمة التذكير معطّلة (REMINDER_INTERVAL_MINUTES=0)")
         return
 
     logger.info(
         f"بدء مهمة التذكير — كل {REMINDER_INTERVAL_MINUTES} دقيقة، "
-        f"قبل الموعد بـ {REMINDER_HOURS_BEFORE} ساعة"
+        f"قبل الموعد بـ {REMINDER_HOURS_BEFORE} ساعة، "
+        f"والوصفات المعلّقة بعد {STALE_RX_HOURS} ساعة"
     )
     while True:
         try:
             await asyncio.to_thread(check_and_send_reminders)
         except Exception:
             logger.exception("خطأ في مهمة التذكير")
+        try:
+            await asyncio.to_thread(notify_stale_prescriptions)
+        except Exception:
+            logger.exception("خطأ في تنبيه الوصفات المعلّقة")
         await asyncio.sleep(REMINDER_INTERVAL_MINUTES * 60)
+
+
+def notify_stale_prescriptions() -> int:
+    """تنبيه بالوصفات المعلّقة (PENDING أقدم من STALE_RX_HOURS ساعة).
+
+    ينشئ إشعارًا داخليًا واحدًا لكل وصفة معلّقة (مرتبط بـ prescription_id
+    لمنع التكرار عند كل دورة) + إشعار فوري اختياري مجمّع — يرجع عدد
+    التنبيهات الجديدة. تعمل مرة واحدة متزامنة (مناسبة للاستدعاء من
+    asyncio.to_thread أو اختبارات pytest المباشرة).
+    """
+    if STALE_RX_HOURS <= 0:
+        return 0
+
+    from app.database import SessionLocal
+    from app.models import Notification, Prescription
+
+    db = SessionLocal()
+    try:
+        cutoff = datetime.now() - timedelta(hours=STALE_RX_HOURS)
+        stale = (
+            db.query(Prescription)
+            .filter(
+                Prescription.status == "PENDING",
+                Prescription.created_at <= cutoff,
+            )
+            .all()
+        )
+        if not stale:
+            return 0
+
+        sent = 0
+        for rx in stale:
+            already = (
+                db.query(Notification)
+                .filter(Notification.prescription_id == rx.id)
+                .first()
+            )
+            if already:
+                continue
+            pat = rx.patient
+            age_h = int((datetime.now() - rx.created_at).total_seconds() // 3600) \
+                if rx.created_at else STALE_RX_HOURS
+            db.add(Notification(
+                type="rx_stale",
+                title="وصفة معلّقة",
+                message=f"وصفة #{rx.id} للمريض "
+                        f"{pat.full_name if pat else '-'} لم تُصرف منذ "
+                        f"{age_h} ساعة — بانتظار الصرف",
+                patient_id=rx.patient_id,
+                prescription_id=rx.id,
+            ))
+            sent += 1
+        db.commit()
+
+        if sent:
+            logger.info(f"تنبيهات وصفات معلّقة جديدة: {sent}")
+            from app.notifier import notify
+            notify("rx_stale", f"{sent} وصفة معلّقة بانتظار الصرف منذ "
+                               f"{STALE_RX_HOURS} ساعة")
+        return sent
+    finally:
+        db.close()
 
 
 # ===== النسخ الاحتياطي المجدول التلقائي (SQLite فقط) =====

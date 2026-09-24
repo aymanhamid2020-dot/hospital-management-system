@@ -202,6 +202,36 @@ def test_inventory_tracks_pharmacy_operations(client, admin):
     assert mv == []
 
 
+# ================= ملصقات الباركود PDF =================
+def test_inventory_labels_pdf(client, admin):
+    """ملصقات الباركود: مصادقة/صلاحية + PDF + تحقق ids (400/404)."""
+    med = _mk_med(client, admin)
+
+    # بلا توكن => 401 · موظف عادي => 403
+    assert client.get("/inventory/labels").status_code == 401
+    _, _, h_rec = _register(client, prefix="lblrec")
+    assert client.get("/inventory/labels", headers=h_rec).status_code == 403
+
+    # ids فارغة => كل الأدوية (PDF باسم med_labels.pdf)
+    r = client.get("/inventory/labels", headers=admin)
+    assert r.status_code == 200 and r.content[:4] == b"%PDF", r.status_code
+    assert "med_labels.pdf" in r.headers.get("content-disposition", "")
+
+    # دواء واحد
+    r = client.get("/inventory/labels", headers=admin,
+                   params={"ids": str(med["id"])})
+    assert r.status_code == 200 and r.content[:4] == b"%PDF"
+
+    # ids غير رقمية => 400
+    r = client.get("/inventory/labels", headers=admin, params={"ids": "abc"})
+    assert r.status_code == 400 and "ids" in r.json()["detail"]
+
+    # معرّف مجهول => 404
+    r = client.get("/inventory/labels", headers=admin,
+                   params={"ids": "99999999"})
+    assert r.status_code == 404 and "لا يوجد دواء بالمعرف" in r.json()["detail"]
+
+
 # ================= مؤشرات الواجهة =================
 def test_inventory_ui_markers(client):
     ui = client.get("/ui/").text + client.get("/ui/app.js").text
@@ -215,6 +245,11 @@ def test_inventory_ui_markers(client):
     assert "loadInventory()" in ui and "clearInv()" in ui
     # التوريد يمر عبر محور المخزون الجديد
     assert "'/inventory/' + id + '/restock'" in ui
+    # ملصقات الباركود (المخزون + الصيدلية)
+    assert "/inventory/labels" in ui
+    assert "ملصقات الكل" in ui
+    assert "label_${m.code}.pdf" in ui
+    assert "'🏷️ ملصق': '🏷️ Label'" in ui
     # الكاش رُفع إلى v5 (شل مجزّأ: الصفحة + app.css + app.js + manifest + الأيقونة)
     sw = client.get("/ui/sw.js").text
     assert "hms-shell-v5" in sw

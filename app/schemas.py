@@ -379,6 +379,7 @@ class NotificationInDB(ORMModel):
     message: str
     appointment_id: Optional[int] = None
     patient_id: Optional[int] = None
+    prescription_id: Optional[int] = None
     is_read: bool
     created_at: datetime
 

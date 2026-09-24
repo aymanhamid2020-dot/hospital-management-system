@@ -59,6 +59,32 @@ async def get_lab_order(order_id: int, db: Session = Depends(get_db), current_us
     return order
 
 
+@router.get("/{order_id}/pdf", summary="طباعة ورقة نتيجة الطلب PDF")
+async def print_lab_order(
+    order_id: int,
+    lang: str = Query("ar", description="ar | en"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """ورقة نتيجة المختبر/الأشعة — صلاحية العرض مطابقة لعرض الطلب (404)."""
+    if lang not in ("ar", "en"):
+        raise HTTPException(status_code=400, detail="lang يجب أن يكون ar أو en")
+    order = db.query(LabOrder).filter(LabOrder.id == order_id).first()
+    if not order or not _doctor_can_access(db, current_user, order):
+        raise HTTPException(status_code=404, detail="لا يوجد طلب بالمعرف المحدد")
+    from fastapi.responses import Response
+
+    from app.pdf_utils import lab_result_pdf
+
+    filename = f"lab_result_{order.id}{'_en' if lang == 'en' else ''}.pdf"
+    return Response(
+        content=lab_result_pdf(order, lang=lang),
+        media_type="application/pdf",
+        headers={"Content-Disposition":
+                 f'attachment; filename="{filename}"'},
+    )
+
+
 @router.post("/", response_model=LabOrderInDB, summary="طلب تحليل/أشعة جديد")
 async def create_lab_order(
     order: LabOrderCreate,

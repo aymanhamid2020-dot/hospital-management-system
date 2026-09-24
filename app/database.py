@@ -76,6 +76,10 @@ PENDING_COLUMNS = {
         "return_reason": "VARCHAR",
         "returned_by": "VARCHAR",
     },
+    "notifications": {
+        # تنبيه الوصفات المعلّقة: ربط الإشعار بالوصفة لمنع التكرار
+        "prescription_id": "INTEGER",
+    },
 }
 
 # إعادة بناء جدول الفواتير مع مفاتيح FK سليمة (ALTER TABLE لا يدعم REFERENCES في SQLite)
@@ -182,7 +186,7 @@ INDEXES = {
     "invoices": ["patient_id", "status", "appointment_id"],
     "medical_records": ["patient_id", "doctor_id"],
     "attachments": ["patient_id", "record_id"],
-    "notifications": ["is_read", "appointment_id", "patient_id"],
+    "notifications": ["is_read", "appointment_id", "patient_id", "prescription_id"],
     "lab_orders": ["patient_id", "status"],
     "dispenses": ["patient_id", "medication_id", "created_at", "prescription_id"],
     "stock_movements": ["medication_id", "created_at"],

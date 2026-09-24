@@ -241,6 +241,61 @@ def test_lab_order_lifecycle(client, admin):
     assert r.status_code == 200 and r.json()["status"] == "reviewed"
 
 
+def test_lab_order_result_pdf(client, admin):
+    """ورقة نتيجة المختبر PDF: ar/en + فحص lang أولًا + الملكية 404 + 401."""
+    pat = _make_patient(client, admin)
+    doc = _make_doctor(client, admin, f"pdfdoc_{uid()}@test.com")
+    r = client.post("/lab-orders/", headers=admin, json={
+        "patient_id": pat, "doctor_id": doc, "test_type": "lab",
+        "test_name": "تحليل ورقة PDF", "price": 55})
+    assert r.status_code == 200, r.text
+    oid = r.json()["id"]
+
+    # النسختان عربي/إنجليزي
+    r = client.get(f"/lab-orders/{oid}/pdf", headers=admin)
+    assert r.status_code == 200 and r.content[:4] == b"%PDF", r.status_code
+    assert f"lab_result_{oid}.pdf" in r.headers.get("content-disposition", "")
+    r = client.get(f"/lab-orders/{oid}/pdf", headers=admin,
+                   params={"lang": "en"})
+    assert r.status_code == 200 and r.content[:4] == b"%PDF"
+    assert (f"lab_result_{oid}_en.pdf"
+            in r.headers.get("content-disposition", ""))
+
+    # lang غير صالح => 400 أولًا — حتى قبل فحص وجود الطلب
+    r = client.get(f"/lab-orders/{oid}/pdf", headers=admin,
+                   params={"lang": "fr"})
+    assert r.status_code == 400 and "lang" in r.json()["detail"]
+    assert (client.get("/lab-orders/999999/pdf", headers=admin,
+                       params={"lang": "fr"}).status_code == 400)
+
+    # غير موجود + بلا توكن
+    r = client.get("/lab-orders/999999/pdf", headers=admin)
+    assert r.status_code == 404 and "لا يوجد طلب" in r.json()["detail"]
+    assert client.get(f"/lab-orders/{oid}/pdf").status_code == 401
+
+    # طبيب غير مالك للطلب => 404 (مطابق لمنطق عرض الطلب)
+    email = f"otpdf_{uid()}@test.com"
+    _make_doctor(client, admin, email)
+    u = "otpdf_" + uid()
+    client.post("/auth/register", json={
+        "username": u, "email": email, "full_name": "طبيب آخر",
+        "password": "secret123", "role": "doctor"})
+    h_other = login(client, u, "secret123")
+    assert client.get(f"/lab-orders/{oid}",
+                      headers=h_other).status_code == 404
+    assert client.get(f"/lab-orders/{oid}/pdf",
+                      headers=h_other).status_code == 404
+
+
+def test_lab_ui_markers(client):
+    """مؤشرات واجهة المختبر: ورقة النتيجة + فلترة الحالة بالبحث."""
+    ui = client.get("/ui/app.js").text
+    for marker in ("async lab(main)", "function filterLabRows(",
+                   "f-lab-status", 'data-status="${o.status}"',
+                   "/lab-orders/${o.id}/pdf", "ورقة النتيجة"):
+        assert marker in ui, f"مؤشر مفقود في واجهة المختبر: {marker}"
+
+
 def test_lab_order_filters(client, admin):
     pat = _make_patient(client, admin)
     doc = _make_doctor(client, admin, f"qdoc_{uid()}@test.com")

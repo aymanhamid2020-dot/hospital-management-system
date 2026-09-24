@@ -677,9 +677,73 @@ def test_ui_pharmacy_markers():
                    "section=disposals", "async pharmacy(main)",
                    "/prescriptions/${r.id}/pdf", "section=reorder",
                    "f-rx-status", "function filterRxRows(",
-                   "data-rxstatus"):
+                   "data-rxstatus",
+                   # تنبيه الوصفات المعلّقة
+                   "staleRx", 'id="rx-stale"', "function showStaleRx(",
+                   "rx_stale",
+                   # ملصقات الباركود
+                   "/inventory/labels", "ملصقات الكل",
+                   "label_${m.code}.pdf",
+                   # المختبر: ورقة النتيجة + فلترة الحالة
+                   "async lab(main)", "function filterLabRows(",
+                   "f-lab-status", "data-status",
+                   "/lab-orders/${o.id}/pdf", "ورقة النتيجة"):
         assert marker in js, f"مؤشر مفقود في الواجهة: {marker}"
     assert "dispenseMed(" not in js, "الدالة القديمة dispenseMed بقيت حية"
+
+
+# ================= تنبيه الوصفات المعلّقة =================
+def test_stale_prescription_alert(client, admin):
+    """notify_stale_prescriptions: إشعار rx_stale مرة واحدة + التعطيل بالصفر."""
+    from unittest import mock
+
+    from app import tasks
+    from app.database import SessionLocal
+    from app.models import Notification, Prescription
+
+    med = _mk_med(client, admin)
+    pat = _make_patient(client, admin)
+    r = client.post("/prescriptions/", headers=admin, json={
+        "patient_id": pat, "items": [{"medication_id": med["id"], "quantity": 1}]})
+    assert r.status_code == 200, r.text
+    rx_id = r.json()["id"]
+
+    db = SessionLocal()
+    original = None
+    try:
+        row = db.query(Prescription).filter(Prescription.id == rx_id).first()
+        original = row.created_at
+        row.created_at = datetime.now() - timedelta(hours=48)
+        db.commit()
+
+        # التعطيل: STALE_RX_HOURS <= 0 => لا تنبيهات إطلاقًا
+        with mock.patch.object(tasks, "STALE_RX_HOURS", 0):
+            assert tasks.notify_stale_prescriptions() == 0
+
+        # التنبيه الأول يجد الوصفة المعلّقة (48 ساعة > حد 24 ساعة)
+        assert tasks.notify_stale_prescriptions() >= 1
+        notif = (db.query(Notification)
+                 .filter(Notification.prescription_id == rx_id,
+                         Notification.type == "rx_stale")
+                 .all())
+        assert len(notif) == 1, f"عدد تنبيهات rx_stale = {len(notif)}"
+        assert notif[0].title == "وصفة معلّقة"
+        assert "لم تُصرف" in notif[0].message
+
+        # دورة ثانية: ممنوع التكرار (الربط بـ prescription_id)
+        assert tasks.notify_stale_prescriptions() == 0
+    finally:
+        # تنظيف كامل: لا أثر للتنبيه أو التقديم بعد الاختبار
+        db.rollback()
+        (db.query(Notification)
+         .filter(Notification.prescription_id == rx_id,
+                 Notification.type == "rx_stale")
+         .delete(synchronize_session=False))
+        row = db.query(Prescription).filter(Prescription.id == rx_id).first()
+        if row is not None and original is not None:
+            row.created_at = original
+        db.commit()
+        db.close()
 
 
 # ================= طباعة الوصفة PDF =================

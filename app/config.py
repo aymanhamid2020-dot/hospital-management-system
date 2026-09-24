@@ -35,3 +35,7 @@ MAIL_USE_TLS = os.getenv("MAIL_USE_TLS", "true").lower() == "true"
 # مهمة التذكير بالمواعيد (بالدقائق — 0 لتعطيلها)
 REMINDER_INTERVAL_MINUTES = int(os.getenv("REMINDER_INTERVAL_MINUTES", "5"))
 REMINDER_HOURS_BEFORE = int(os.getenv("REMINDER_HOURS_BEFORE", "24"))
+
+# تنبيه الوصفات المعلّقة: وصفة PENDING أقدم من هذه الساعات → إشعار
+# (0 لتعطيل التنبيه) — يعمل ضمن حلقة التذكير نفسها
+STALE_RX_HOURS = int(os.getenv("STALE_RX_HOURS", "24"))

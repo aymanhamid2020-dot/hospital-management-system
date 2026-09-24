@@ -409,5 +409,69 @@ ok("فلتر حالة الوصفات", "f-rx-status" in ui
 ok("زر اقتراحات الطلب CSV", "section=reorder" in ui)
 ok("الكاش v5 كما هو", "hms-shell-v5" in c.get("/ui/sw.js").text)
 
+# ===== 12) ملصقات الباركود + ورقة نتيجة المختبر + تنبيه المعلّقة =====
+r = c.get("/inventory/labels")
+ok("ملصقات بلا توكن => 401", r.status_code == 401, str(r.status_code))
+r = c.get("/inventory/labels", headers=RH)
+ok("ملصقات للموظف => 403", r.status_code == 403, str(r.status_code))
+r = c.get("/inventory/labels", headers=H)
+ok("ملصقات الكل %PDF باسم med_labels.pdf",
+   r.status_code == 200 and r.content[:4] == b"%PDF"
+   and "med_labels.pdf" in r.headers.get("content-disposition", ""),
+   str(r.status_code))
+if m1:
+    r = c.get("/inventory/labels", headers=H, params={"ids": str(m1["id"])})
+    ok("ملصق دواء واحد %PDF", r.status_code == 200
+       and r.content[:4] == b"%PDF", str(r.status_code))
+r = c.get("/inventory/labels", headers=H, params={"ids": "abc"})
+ok("ids غير رقمية => 400", r.status_code == 400
+   and "ids" in r.json().get("detail", ""), r.text[:120])
+r = c.get("/inventory/labels", headers=H, params={"ids": "99999999"})
+ok("معرّف دواء مجهول => 404", r.status_code == 404
+   and "لا يوجد دواء بالمعرف" in r.json().get("detail", ""), r.text[:120])
+
+# ورقة نتيجة المختبر/الأشعة
+lab = None
+if pat:
+    docs = c.get("/doctors/", headers=H)
+    doc_id = (docs.json()[0]["id"]
+              if docs.status_code == 200 and docs.json() else None)
+    payload = {"patient_id": pat["id"], "test_type": "lab",
+               "test_name": "فحص ورقة " + TAG, "price": 10}
+    if doc_id is not None:
+        payload["doctor_id"] = doc_id
+    r = c.post("/lab-orders/", headers=H, json=payload)
+    lab = r.json() if r.status_code == 200 else None
+    ok("طلب مختبر لورقة النتيجة => 200", lab is not None, r.text[:140])
+if lab:
+    r = c.get(f"/lab-orders/{lab['id']}/pdf", headers=H)
+    ok("ورقة النتيجة ar %PDF", r.status_code == 200
+       and r.content[:4] == b"%PDF", str(r.status_code))
+    r = c.get(f"/lab-orders/{lab['id']}/pdf", headers=H,
+              params={"lang": "en"})
+    ok("ورقة النتيجة en %PDF", r.status_code == 200
+       and r.content[:4] == b"%PDF", str(r.status_code))
+    r = c.get(f"/lab-orders/{lab['id']}/pdf", headers=H,
+              params={"lang": "fr"})
+    ok("ورقة النتيجة lang خاطئ => 400", r.status_code == 400,
+       str(r.status_code))
+r = c.get("/lab-orders/999999/pdf", headers=H)
+ok("ورقة النتيجة غير موجودة => 404", r.status_code == 404, str(r.status_code))
+r = c.get("/lab-orders/999999/pdf")
+ok("ورقة النتيجة بلا توكن => 401", r.status_code == 401, str(r.status_code))
+
+# تنبيه الوصفات المعلّقة + الملصقات + المختبر في الواجهة
+ok("بطاقة الوصفات المعلّقة rx-stale", 'id="rx-stale"' in ui
+   and "staleRx" in ui)
+ok("زر عرض المعلّقات showStaleRx()", "function showStaleRx(" in ui)
+ok("أيقونة تنبيه rx_stale", "rx_stale" in ui)
+ok("مسار الملصقات في الواجهة", "/inventory/labels" in ui
+   and "ملصقات الكل" in ui and "label_${m.code}.pdf" in ui)
+ok("فلترة المختبر filterLabRows() بحالة data-status",
+   "function filterLabRows(" in ui and "f-lab-status" in ui
+   and 'data-status="${o.status}"' in ui)
+ok("زر ورقة النتيجة في المختبر", "ورقة النتيجة" in ui
+   and "/lab-orders/${o.id}/pdf" in ui)
+
 print(f"\n== PHARMACY FLOW RESULT: {len(fails) == 0} — failed: {len(fails)} ==")
 raise SystemExit(1 if fails else 0)

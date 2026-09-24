@@ -1157,3 +1157,257 @@ def _patient_statement_en(patient, sales, invoices, totals: dict) -> bytes:
         pdf.set_font("ar", "", 11)
         pdf.multi_cell(0, 7, "No invoices.", align="L")
     return bytes(pdf.output())
+
+
+# ===== ملصقات الباركود (Code 39 مرسومة يدويًا بلا تبعيات) =====
+# جدول مُشتق ومتحقق منه بالكامل: 44 نمطًا × 9 عناصر (بم/فراغ بالتناوب،
+# الفهرس الزوجي عمود) — 1 يعني عنصرًا واسعًا (3 عناصر واسعة لكل حرف).
+_CODE39 = {
+    "0": "000110100", "1": "100100001", "2": "001100001", "3": "101100000",
+    "4": "000110001", "5": "100110000", "6": "001110000", "7": "000100101",
+    "8": "100100100", "9": "001100100",
+    "A": "100001001", "B": "001001001", "C": "101001000", "D": "000011001",
+    "E": "100011000", "F": "001011000", "G": "000001101", "H": "100001100",
+    "I": "001001100", "J": "000011100",
+    "K": "100000011", "L": "001000011", "M": "101000010", "N": "000010011",
+    "O": "100010010", "P": "001010010", "Q": "000000111", "R": "100000110",
+    "S": "001000110", "T": "000010110",
+    "U": "110000001", "V": "011000001", "W": "111000000", "X": "010010001",
+    "Y": "110010000", "Z": "011010000",
+    "-": "010000101", ".": "110000100", " ": "011000100",
+    "$": "010101000", "/": "010100010", "+": "010001010", "%": "000101010",
+    "*": "010010100",   # البداية والنهاية
+}
+
+_CODE39_WIDE = 2.5   # الواسع = 2.5 × الضيق (ضمن نطاق ISO 2–3)
+_CODE39_GAP = 1.0    # فاصل بين الأحرف = وحدة ضيقة واحدة
+_CODE39_QUIET = 10.0  # المنطقة الهادئة = 10 وحدات ضيقة لكل جهة
+
+
+def _code39_text(data) -> str:
+    """تنقية النص لأحرف Code39 فقط (كبير) — الحرف غير المدعوم يُستبدل بـ-."""
+    out = "".join(c for c in str(data or "").upper()
+                  if c in _CODE39 and c != "*")
+    return out or "-"
+
+
+def _code39_ops(data: str) -> list:
+    """تسلسل عناصر الرسم [(is_bar, عرض_بالوحدات)] لرمز مع * في الطرفين."""
+    ops = []
+    for i, ch in enumerate("*" + data + "*"):
+        if i:
+            ops.append((False, _CODE39_GAP))
+        for idx, bit in enumerate(_CODE39[ch]):
+            ops.append((idx % 2 == 0,
+                        _CODE39_WIDE if bit == "1" else 1.0))
+    return ops
+
+
+def _draw_code39(pdf, x, y, max_w: float, height: float, data: str) -> float:
+    """يرسم باركود Code39 موسّطًا داخل عرض أقصى (مم) — يرجع العرض المستخدم."""
+    ops = _code39_ops(data)
+    units = sum(w for _, w in ops) + 2 * _CODE39_QUIET
+    module = max_w / units
+    pdf.set_fill_color(0, 0, 0)
+    cx = x + _CODE39_QUIET * module
+    for is_bar, w in ops:
+        if is_bar:
+            pdf.rect(cx, y, w * module, height, "F")
+        cx += w * module
+    return units * module
+
+
+def _fit(pdf, text, width: float) -> str:
+    """قص النص ليطابق العرض المطلوب (مم) مع علامة قص."""
+    text = str(text or "")
+    if pdf.get_string_width(text) <= width:
+        return text
+    while text and pdf.get_string_width(text + "…") > width:
+        text = text[:-1]
+    return (text or "") + "…"
+
+
+def labels_pdf(meds) -> bytes:
+    """ملصقات باركود (Code39) للأدوية — شبكة A4 من 3×7 ملصقًا لكل صفحة.
+
+    كل ملصق: اسم الدواء + الباركود + نص الرمز مقروءًا + السعر والانتهاء.
+    """
+    if not FONT_REGULAR:
+        raise RuntimeError(
+            "لم يُعثر على خط عربي: ثبّت Arial (ويندوز) أو fonts-dejavu-core "
+            "(لينكس) أو حدّد HMS_FONT_REGULAR"
+        )
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.add_font("ar", "", FONT_REGULAR)
+    pdf.add_font("ar", "B", FONT_BOLD or FONT_REGULAR)
+    pdf.set_auto_page_break(auto=False)
+    pdf.add_page()
+
+    LW, LH = 60.0, 36.0          # مقاس الملصق (مم)
+    X0, Y0, GX, GY = 5.0, 8.0, 5.0, 3.0
+    PER_PAGE = 21                # 3 أعمدة × 7 صفوف
+
+    meds = list(meds or [])
+    if not meds:
+        pdf.set_font("ar", "", 12)
+        pdf.set_text_color(*DARK)
+        pdf.set_xy(X0, Y0)
+        pdf.cell(LW * 3, 10, ar("لا توجد أدوية لطباعة ملصقاتها"),
+                 align="C")
+        return bytes(pdf.output())
+
+    for n, m in enumerate(meds):
+        if n and n % PER_PAGE == 0:
+            pdf.add_page()
+        col, row = n % 3, (n % PER_PAGE) // 3
+        x = X0 + col * (LW + GX)
+        y = Y0 + row * (LH + GY)
+
+        pdf.set_draw_color(200, 200, 200)
+        pdf.rect(x, y, LW, LH)
+        # اسم الدواء
+        pdf.set_font("ar", "B", 9)
+        pdf.set_text_color(*DARK)
+        pdf.set_xy(x + 2, y + 1.5)
+        pdf.cell(LW - 4, 5, ar(_fit(pdf, m.name, LW - 4)), align="C")
+        # الباركود
+        code = _code39_text(m.code)
+        _draw_code39(pdf, x + 2, y + 8.5, LW - 4, 13, code)
+        # نص الرمز مقروءًا
+        pdf.set_font("helvetica", "", 9)
+        pdf.set_text_color(*DARK)
+        pdf.set_xy(x + 2, y + 23)
+        pdf.cell(LW - 4, 4, code, align="C")
+        # السعر وتاريخ الانتهاء
+        pdf.set_font("ar", "", 7)
+        pdf.set_text_color(*GRAY)
+        meta = f"{(m.price or 0):,.2f} ر.س"
+        if m.expiry_date:
+            meta += f" — ينتهي {m.expiry_date:%Y-%m-%d}"
+        pdf.set_xy(x + 2, y + 27.5)
+        pdf.cell(LW - 4, 4, ar(_fit(pdf, meta, LW - 4)), align="C")
+    return bytes(pdf.output())
+
+
+# ===== ورقة نتيجة المختبر/الأشعة (طلب واحد) =====
+_LAB_STATUS_AR = {"pending": "مسجّل", "in_progress": "قيد التنفيذ",
+                  "ready": "جاهزة", "reviewed": "راجَعها الطبيب",
+                  "cancelled": "ملغاة"}
+_LAB_STATUS_EN = {"pending": "Registered", "in_progress": "In progress",
+                  "ready": "Ready", "reviewed": "Reviewed",
+                  "cancelled": "Cancelled"}
+
+
+def lab_result_pdf(order, lang: str = "ar") -> bytes:
+    """ورقة نتيجة تحليل/أشعة للطباعة — البيانات/المريض/الطبيب/النتيجة (ar|en)."""
+    if lang == "en":
+        return _lab_result_en(order)
+
+    key = order.status.value if hasattr(order.status, "value") else str(order.status)
+    ttype = (order.test_type.value if hasattr(order.test_type, "value")
+             else str(order.test_type))
+
+    pdf = ArabicPDF("ورقة نتيجة")
+    pdf.section("بيانات الطلب")
+    pdf.kv_row("رقم الطلب", f"#{order.id}")
+    pdf.kv_row("تاريخ الطلب",
+               f"{order.ordered_at:%Y-%m-%d %H:%M}" if order.ordered_at else "-")
+    pdf.kv_row("النوع", "أشعة" if ttype == "radiology" else "تحليل مختبري")
+    pdf.kv_row("اسم الفحص", order.test_name or "-")
+    pdf.kv_row("الحالة", _LAB_STATUS_AR.get(key, key))
+    pdf.kv_row("السعر", f"{(order.price or 0):,.2f} ر.س")
+
+    pat = order.patient
+    pdf.section("بيانات المريض")
+    pdf.kv_row("الاسم", pat.full_name if pat else "-")
+    pdf.kv_row("رقم الملف", f"#{order.patient_id}")
+    if pat:
+        pdf.kv_row("الجوال", pat.phone or "-")
+        if pat.date_of_birth:
+            pdf.kv_row("تاريخ الميلاد", f"{pat.date_of_birth:%Y-%m-%d}")
+
+    doc = order.doctor
+    pdf.section("الطبيب الطالب")
+    pdf.kv_row("الطبيب", doc.full_name if doc else "-")
+    if doc:
+        pdf.kv_row("التخصص / رقم الترخيص",
+                   f"{doc.specialty or '-'} — {doc.license_number or '-'}")
+
+    pdf.section("النتيجة")
+    if order.result:
+        pdf.set_font("ar", "", 12)
+        pdf.set_text_color(*DARK)
+        pdf.multi_cell(0, 8, ar(order.result), align="C")
+        if order.result_at:
+            pdf.kv_row("تاريخ صدور النتيجة", f"{order.result_at:%Y-%m-%d %H:%M}")
+    else:
+        pdf.set_font("ar", "", 11)
+        pdf.set_text_color(*GRAY)
+        pdf.multi_cell(0, 8, ar("لم تُسجَّل النتيجة بعد."), align="C")
+
+    if order.notes:
+        pdf.section("ملاحظات")
+        pdf.set_font("ar", "", 10)
+        pdf.set_text_color(*DARK)
+        pdf.multi_cell(0, 7, ar(order.notes), align="R")
+
+    pdf.section("التوقيعات")
+    pdf.kv_row("فني المختبر", "____________________")
+    pdf.kv_row("مراجعة الطبيب", "____________________")
+    return bytes(pdf.output())
+
+
+def _lab_result_en(order) -> bytes:
+    """English lab/radiology result sheet for a single order."""
+    key = order.status.value if hasattr(order.status, "value") else str(order.status)
+    ttype = (order.test_type.value if hasattr(order.test_type, "value")
+             else str(order.test_type))
+
+    pdf = ArabicPDF("Lab / Radiology Result", lang="en")
+    pdf.section("Order details")
+    pdf.kv_row("Order #", order.id)
+    pdf.kv_row("Ordered at",
+               f"{order.ordered_at:%Y-%m-%d %H:%M}" if order.ordered_at else "-")
+    pdf.kv_row("Type", "Radiology" if ttype == "radiology" else "Lab test")
+    pdf.kv_row("Test", order.test_name or "-")
+    pdf.kv_row("Status", _LAB_STATUS_EN.get(key, key))
+    pdf.kv_row("Price", f"SAR {(order.price or 0):,.2f}")
+
+    pat = order.patient
+    pdf.section("Patient")
+    pdf.kv_row("Name", pat.full_name if pat else "-")
+    pdf.kv_row("File #", order.patient_id)
+    if pat:
+        pdf.kv_row("Phone", pat.phone or "-")
+        if pat.date_of_birth:
+            pdf.kv_row("Date of birth", f"{pat.date_of_birth:%Y-%m-%d}")
+
+    doc = order.doctor
+    pdf.section("Ordering doctor")
+    pdf.kv_row("Doctor", doc.full_name if doc else "-")
+    if doc:
+        pdf.kv_row("Specialty / license",
+                   f"{doc.specialty or '-'} — {doc.license_number or '-'}")
+
+    pdf.section("Result")
+    if order.result:
+        pdf.set_font("ar", "", 12)
+        pdf.set_text_color(*DARK)
+        pdf.multi_cell(0, 8, ar(order.result), align="C")
+        if order.result_at:
+            pdf.kv_row("Result date", f"{order.result_at:%Y-%m-%d %H:%M}")
+    else:
+        pdf.set_font("ar", "", 11)
+        pdf.set_text_color(*GRAY)
+        pdf.multi_cell(0, 8, ar("No result recorded yet."), align="C")
+
+    if order.notes:
+        pdf.section("Notes")
+        pdf.set_font("ar", "", 10)
+        pdf.set_text_color(*DARK)
+        pdf.multi_cell(0, 7, ar(order.notes), align="L")
+
+    pdf.section("Signatures")
+    pdf.kv_row("Lab technician", "____________________")
+    pdf.kv_row("Reviewed by doctor", "____________________")
+    return bytes(pdf.output())
