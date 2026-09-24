@@ -18,25 +18,28 @@ def ok(name, cond, extra=""):
 
 # ===== 1) الصفحة تُسجّل العامل وكشف التطبيق =====
 ui = c.get("/ui/")
+ui_js = c.get("/ui/app.js")
 ok("الصفحة تُخدَّم على /ui/", ui.status_code == 200)
+ok("ملفات الوجهة المجزّأة app.css/app.js تصل 200",
+   c.get("/ui/app.css").status_code == 200 and ui_js.status_code == 200)
 ok("تسجيل service worker على /ui/sw.js",
-   "serviceWorker.register('/ui/sw.js')" in ui.text)
+   "serviceWorker.register('/ui/sw.js')" in ui_js.text)
 ok("ربط manifest.json", "manifest.json" in ui.text)
 ok("أيقونة التطبيق متاحة", c.get("/ui/icon.svg").status_code == 200)
 
 # ===== 2) ملف العامل + اسم الكاش =====
 sw = c.get("/ui/sw.js")
 ok("sw.js يُخدَّم 200", sw.status_code == 200)
-ok("اسم الكاش hms-shell-v4", "hms-shell-v4" in sw.text)
+ok("اسم الكاش hms-shell-v5", "hms-shell-v5" in sw.text)
 ok("skipWaiting: العامل الجديد يستلم فورًا", "skipWaiting" in sw.text)
 ok("cleanup old caches عند activate", "caches.delete" in sw.text)
 
 # ===== 3) الكاش المسبق: كل هدف يجب أن ينجح 200 وإلا فشل التثبيت offline =====
-# استخراج SHELL = ['/ui/', '/ui/manifest.json', '/ui/icon.svg']
+# استخراج SHELL (الآن خمسة: الصفحة + app.css + app.js + manifest + الأيقونة)
 import re
 m = re.search(r"const SHELL = \[([^\]]+)\]", sw.text)
 targets = re.findall(r"'([^']+)'", m.group(1)) if m else []
-ok("قائمة SHELL موجودة بثلاثة أهداف", len(targets) == 3, str(targets))
+ok("قائمة SHELL بخمسة أهداف", len(targets) == 5, str(targets))
 for t in targets:
     r = c.get(t)
     ok(f"الهدف المسبق {t} ⇒ 200", r.status_code == 200, str(r.status_code))

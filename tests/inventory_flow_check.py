@@ -174,7 +174,7 @@ ok("PDF مخزون %PDF", pdf.status_code == 200 and pdf.content[:4] == b"%PDF",
    str(pdf.status_code))
 
 # ===== 10) مؤشرات الواجهة =====
-ui = c.get("/ui/").text
+ui = c.get("/ui/").text + c.get("/ui/app.js").text
 ok("رابط القائمة inventory", 'data-view="inventory"' in ui)
 ok("عرض inventory في الواجهة", "async inventory(main)" in ui)
 ok("عنوان الشاشة المخزون", "inventory: 'المخزون'" in ui)
@@ -182,7 +182,7 @@ ok("بطاقات الملخص في العرض", "/inventory/summary" in ui)
 ok("دفتر الحركات في العرض", "/inventory/movements" in ui)
 ok("زر الجرد موجود", "function adjustStock(" in ui)
 ok("التوريد عبر /inventory", "'/inventory/' + id + '/restock'" in ui)
-ok("الكاش v4", "hms-shell-v4" in c.get("/ui/sw.js").text)
+ok("الكاش v5", "hms-shell-v5" in c.get("/ui/sw.js").text)
 
 print(f"\n== INVENTORY FLOW RESULT: {len(fails) == 0} — failed: {len(fails)} ==")
 raise SystemExit(1 if fails else 0)

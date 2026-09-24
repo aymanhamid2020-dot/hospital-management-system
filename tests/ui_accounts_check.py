@@ -2,6 +2,9 @@
 import httpx
 
 HTML = open("static/index.html", "rb").read()
+# بعد تجزئة الواجهة: مؤشرات JS/CSS صارت في app.js/app.css — تُفحص مع HTML
+HTML_ALL = (HTML + open("static/app.js", "rb").read()
+            + open("static/app.css", "rb").read())
 NEEDLES = [
     # تقسيم القائمة: مبيعات + حسابات منفصلتان
     'data-view="sales"',
@@ -48,7 +51,7 @@ NEEDLES = [
 print("== static/index.html ==")
 bad = 0
 for n in NEEDLES:
-    ok = n.encode("utf-8") in HTML
+    ok = n.encode("utf-8") in HTML_ALL
     bad += 0 if ok else 1
     print(("  [PASS] " if ok else "  [FAIL] ") + n)
 
@@ -57,18 +60,20 @@ c = httpx.Client(base_url="http://127.0.0.1:8001", timeout=30)
 tok = c.post("/auth/login", json={"username": "admin", "password": "admin123"}).json()
 H = {"Authorization": "Bearer " + tok["access_token"]}
 idx = c.get("/ui/")
+# بعد تجزئة الواجهة: JS صار في /ui/app.js — مؤشرات الدوال تفحص الملفين
+idx_js = c.get("/ui/app.js").content
 checks = [
     ("GET /ui/ يخدم الواجهة", idx.status_code == 200),
     ("الواجهة تحتوي عرض المبيعات",
-     "async sales(main)".encode() in idx.content),
+     "async sales(main)".encode() in idx_js),
     ("الواجهة تحتوي قسم الحسابات",
-     "async accounts(main)".encode() in idx.content),
+     "async accounts(main)".encode() in idx_js),
     ("قائمة منفصلة: مبيعات + حسابات",
      'data-view="sales"'.encode() in idx.content
      and 'data-view="accounts"'.encode() in idx.content),
     ("وظيفة إيصال + كشف حساب",
-     b"function openReceipt(" in idx.content
-     and b"async function showStatement(" in idx.content),
+     b"function openReceipt(" in idx_js
+     and b"async function showStatement(" in idx_js),
     ("ملف CSS/JS محدّث", len(idx.content) == len(HTML)),
     ("/accounts/summary 200", c.get("/accounts/summary", headers=H).status_code == 200),
     ("/accounts/sales 200", c.get("/accounts/sales", headers=H).status_code == 200),
@@ -110,7 +115,7 @@ checks = [
     ("PDF الكشف غير مسجّل ⇒ 401",
      c.get("/accounts/statement/1/pdf").status_code == 401),
     ("زر PDF الكشف في الواجهة",
-     "'⬇️ PDF الكشف'" in c.get("/ui/").text),
+     "'⬇️ PDF الكشف'" in c.get("/ui/").text + c.get("/ui/app.js").text),
 ]
 for name, ok in checks:
     bad += 0 if ok else 1

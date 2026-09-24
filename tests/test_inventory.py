@@ -204,7 +204,7 @@ def test_inventory_tracks_pharmacy_operations(client, admin):
 
 # ================= مؤشرات الواجهة =================
 def test_inventory_ui_markers(client):
-    ui = client.get("/ui/").text
+    ui = client.get("/ui/").text + client.get("/ui/app.js").text
     assert 'data-view="inventory"' in ui
     assert "async inventory(main)" in ui
     assert "inventory: 'المخزون'" in ui
@@ -215,6 +215,7 @@ def test_inventory_ui_markers(client):
     assert "loadInventory()" in ui and "clearInv()" in ui
     # التوريد يمر عبر محور المخزون الجديد
     assert "'/inventory/' + id + '/restock'" in ui
-    # الكاش رُفع إلى v4
+    # الكاش رُفع إلى v5 (شل مجزّأ: الصفحة + app.css + app.js + manifest + الأيقونة)
     sw = client.get("/ui/sw.js").text
-    assert "hms-shell-v4" in sw
+    assert "hms-shell-v5" in sw
+    assert "/ui/app.js" in sw and "/ui/app.css" in sw

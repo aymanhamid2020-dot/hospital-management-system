@@ -44,10 +44,12 @@ def main():
           and r.json().get("service") == "hospital-management-system",
           r.text[:120])
     ui = c.get("/ui/")
+    # بعد تجزئة الواجهة: JS صار في /ui/app.js — المؤشرات تفحص HTML + JS معًا
+    ui_all = ui.text + c.get("/ui/app.js").text
     check("UI served", ui.status_code == 200)
-    check("UI has export button", "export.csv" in ui.text)
-    check("UI has complete-appointment button", "completed')" in ui.text)
-    check("UI has doctor report gate", "isAdmin() || isDoctor()" in ui.text)
+    check("UI has export button", "export.csv" in ui_all)
+    check("UI has complete-appointment button", "completed')" in ui_all)
+    check("UI has doctor report gate", "isAdmin() || isDoctor()" in ui_all)
 
     # ===== 2) المصادقة =====
     check("no token -> 401", c.get("/patients/").status_code == 401)
@@ -183,8 +185,8 @@ def main():
     check("UI has audit nav", 'data-view="audit"' in ui.text)
     check("UI has inventory nav + view",
           'data-view="inventory"' in ui.text
-          and "async inventory(main)" in ui.text
-          and "inventory: 'المخزون'" in ui.text)
+          and "async inventory(main)" in ui_all
+          and "inventory: 'المخزون'" in ui_all)
 
     if patient_id and doctor_id:
         # مختبر: إنشاء → منع جاهزية بلا نتيجة → جاهزة + إشعار
@@ -489,26 +491,28 @@ def main():
     rr = c.get("/accounts/statement/1/pdf")
     check("PDF كشف الحساب بدون توكن ⇒ 401", rr.status_code == 401, str(rr.status_code))
     rr = c.get("/ui/")
+    # بعد التجزئة: JS في /ui/app.js — يُفحص مع HTML
+    rr_all = rr.content + c.get("/ui/app.js").content
     check("واجهة المبيعات والحسابات في /ui",
-          b"async sales(main)" in rr.content
-          and b"async accounts(main)" in rr.content
-          and 'data-view="sales"'.encode() in rr.content
-          and 'data-view="accounts"'.encode() in rr.content)
+          b"async sales(main)" in rr_all
+          and b"async accounts(main)" in rr_all
+          and 'data-view="sales"'.encode() in rr_all
+          and 'data-view="accounts"'.encode() in rr_all)
     check("إيصال + كشف حساب في الواجهة",
-          b"function openReceipt(" in rr.content
-          and b"async function showStatement(" in rr.content)
-    check("نافذة التسديد في /ui", b'id="modal-back"' in rr.content
-          and b"function submitPay(" in rr.content and b"function payAll(" in rr.content)
+          b"function openReceipt(" in rr_all
+          and b"async function showStatement(" in rr_all)
+    check("نافذة التسديد في /ui", b'id="modal-back"' in rr_all
+          and b"function submitPay(" in rr_all and b"function payAll(" in rr_all)
     check("منع كاش الواجهة (no-cache)",
           "no-cache" in (rr.headers.get("cache-control") or ""),
           str(rr.headers.get("cache-control")))
     check("واجهة المخزون في /ui",
-          b"async inventory(main)" in rr.content
-          and b"/inventory/summary" in rr.content
-          and b"function adjustStock(" in rr.content)
+          b"async inventory(main)" in rr_all
+          and b"/inventory/summary" in rr_all
+          and b"function adjustStock(" in rr_all)
     rr = c.get("/ui/sw.js")
-    check("عامل الخدمة network-first + إصدار الكاش v4",
-          b"hms-shell-v4" in rr.content
+    check("عامل الخدمة network-first + إصدار الكاش v5",
+          b"hms-shell-v5" in rr.content
           and "الشبكة أولًا".encode() in rr.content)
     rr = c.get("/")
     check("صفحة الجذر CSS سليم (بدون {{)", b"body { font-family" in rr.content
@@ -516,8 +520,10 @@ def main():
 
     # ===== 15) PWA + واجهة إنجليزية =====
     r = c.get("/ui/")
+    # بعد التجزئة: toggleLang/register/renderCalendar صارت في /ui/app.js
+    r_all = r.text + c.get("/ui/app.js").text
     check("UI i18n toggle + PWA markers", r.status_code == 200
-          and all(s in r.text for s in ("toggleLang", "manifest.json",
+          and all(s in r_all for s in ("toggleLang", "manifest.json",
                                         "serviceWorker.register",
                                         "renderCalendar",
                                         'data-view="users"')),

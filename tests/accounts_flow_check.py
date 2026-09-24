@@ -28,6 +28,13 @@ pat = _pat.json() if _pat.status_code == 200 else {
     "id": next(p["id"] for p in c.get("/patients/", headers=H).json()
                if p["full_name"] == "مريض واجهة حسابات")}
 
+d = None
+if med.get("quantity", 0) < 10:
+    # ذاتي الإصلاح: يصرف 4 في كل تشغيل — يعيد التوريد قبل النفاد
+    rr = c.post(f"/inventory/{med['id']}/restock", headers=H, json={"quantity": 40})
+    if rr.status_code == 200:
+        med = c.get(f"/medications/{med['id']}", headers=H).json()
+
 d = c.post("/dispenses/", headers=H, json={
     "medication_id": med["id"], "patient_id": pat["id"], "quantity": 4}).json()
 did = d["id"]

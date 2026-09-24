@@ -89,35 +89,37 @@ def main():
     # 1) الأمان والواجهة
     check("المسارات محمية بدون توكن (401)", c.get("/patients/").status_code == 401)
     ui = c.get("/ui/")
+    # بعد تجزئة الواجهة: HTML في /ui/ والـ JS في /ui/app.js — المؤشرات تفحص الاثنين
+    ui_all = c.get("/ui/").text + c.get("/ui/app.js").text
     check("الواجهة تُقدَّم (200 + تسجيل الدخول)",
-          ui.status_code == 200 and "تسجيل الدخول" in ui.text)
+          ui.status_code == 200 and "تسجيل الدخول" in ui_all)
     check("الواجهة فيها مسارات المفاقيد الأربع",
-          all(f'data-view="{v}"' in ui.text
+          all(f'data-view="{v}"' in ui_all
               for v in ("lab", "pharmacy", "payroll", "audit")))
     check("القائمة تفصل المبيعات عن الحسابات",
-          'data-view="sales"' in ui.text and 'data-view="accounts"' in ui.text
-          and "async sales(main)" in ui.text
-          and "async accounts(main)" in ui.text)
+          'data-view="sales"' in ui_all and 'data-view="accounts"' in ui_all
+          and "async sales(main)" in ui_all
+          and "async accounts(main)" in ui_all)
     check("قسم المخزون في القائمة والعرض",
-          'data-view="inventory"' in ui.text
-          and "async inventory(main)" in ui.text
-          and "inventory: 'المخزون'" in ui.text
-          and "/inventory/summary" in ui.text
-          and "function adjustStock(" in ui.text)
-    check("الواجهة فيها زر تغيير كلمة المرور", "changePassword" in ui.text)
+          'data-view="inventory"' in ui_all
+          and "async inventory(main)" in ui_all
+          and "inventory: 'المخزون'" in ui_all
+          and "/inventory/summary" in ui_all
+          and "function adjustStock(" in ui_all)
+    check("الواجهة فيها زر تغيير كلمة المرور", "changePassword" in ui_all)
     check("أزرار التقارير PDF وCSV في الواجهة",
-          all(s in ui.text for s in ("/reports/lab/pdf", "/reports/pharmacy/pdf",
+          all(s in ui_all for s in ("/reports/lab/pdf", "/reports/pharmacy/pdf",
                                      "downloadPayroll('pdf')",
                                      "/reports/lab/csv", "/reports/pharmacy/csv",
                                      "downloadPayroll('csv')")))
-    check("واجهة إنجليزية: زر التبديل toggleLang", "toggleLang" in ui.text)
+    check("واجهة إنجليزية: زر التبديل toggleLang", "toggleLang" in ui_all)
     check("واجهة التقويم الشهري (renderCalendar + calNav)",
-          "renderCalendar" in ui.text and "calNav" in ui.text)
+          "renderCalendar" in ui_all and "calNav" in ui_all)
     check("واجهة إدارة المستخدمين والاستعادة",
-          'data-view="users"' in ui.text and "setRole" in ui.text
-          and "restoreBackup" in ui.text)
+          'data-view="users"' in ui_all and "setRole" in ui_all
+          and "restoreBackup" in ui_all)
     check("PWA: manifest + service worker في الصفحة",
-          "manifest.json" in ui.text and "sw.js" in ui.text)
+          "manifest.json" in ui_all and "sw.js" in ui_all)
     check("الوثائق /api/docs (200)", c.get("/api/docs").status_code == 200)
 
     # 2) الدخول (مدير)

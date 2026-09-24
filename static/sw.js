@@ -1,6 +1,6 @@
 /* PWA — قشرة التطبيق + شاشة الطابور للعمل دون اتصال */
-const CACHE = 'hms-shell-v4';
-const SHELL = ['/ui/', '/ui/manifest.json', '/ui/icon.svg'];
+const CACHE = 'hms-shell-v5';
+const SHELL = ['/ui/', '/ui/app.css', '/ui/app.js', '/ui/manifest.json', '/ui/icon.svg'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(

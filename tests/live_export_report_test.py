@@ -34,11 +34,12 @@ def main():
     global PASSED, FAILED
     c = httpx.Client(base_url=BASE, timeout=30.0)
 
-    # الخادم حي
+    # الخادم حي (بعد التجزئة: JS في /ui/app.js يُفحص مع HTML)
+    ui_all = c.get("/ui/").text + c.get("/ui/app.js").text
     check("server up", c.get("/ui/").status_code == 200)
-    check("UI has export/import buttons", "export.csv" in c.get("/ui/").text)
-    check("UI has appointment complete button", "completed')" in c.get("/ui/").text)
-    check("UI report button for doctor", "isAdmin() || isDoctor()" in c.get("/ui/").text)
+    check("UI has export/import buttons", "export.csv" in ui_all)
+    check("UI has appointment complete button", "completed')" in ui_all)
+    check("UI report button for doctor", "isAdmin() || isDoctor()" in ui_all)
 
     admin = login(c, "admin", "admin123")
     check("admin login", admin is not None)
