@@ -1,0 +1,58 @@
+# 🏭 طبقة الإنتاج: PostgreSQL + nginx + عمال متعددون + نسخ احتياطي مجدول
+# الاستخدام (تُركّب فوق الأساسي + تكامل PG):
+#   docker compose -f docker-compose.yml -f docker-compose.pg.yml -f docker-compose.prod.yml up -d --build
+# ما تضيفه:
+#   • app: uvicorn بـ WORKERS عمال (افتراضي 2) + DEBUG=False
+#   • db:  لا يفتح منفذ 5432 على المضيف (اتصال داخلي فقط)
+#   • nginx: وجهة أمامية على 8080 (gzip + حد رفع 10MB)
+#   • backup: pg_dump كل BACKUP_INTERVAL_SECONDS مع احتفاظ BACKUP_RETENTION_DAYS
+services:
+  app:
+    command:
+      [
+        "uvicorn", "main:app",
+        "--host", "0.0.0.0", "--port", "8000",
+        "--workers", "${WORKERS:-2}",
+      ]
+    environment:
+      DEBUG: "False"
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production-please}
+
+  db:
+    # محلي فقط على المضيف — الإنتاج خلف nginx
+    ports: !reset []
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: hospital_nginx
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - app
+    restart: unless-stopped
+
+  # نسخ احتياطي تلقائي مجدول لقاعدة PostgreSQL
+  backup:
+    image: postgres:16-alpine
+    container_name: hospital_backup
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGUSER: hospital
+      PGPASSWORD: hospital_pass
+      PGDATABASE: hospital
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+    volumes:
+      - hospital_backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    command:
+      [
+        "sh", "-c",
+        "while true; do pg_dump | gzip > /backups/pg_$$(date +%Y%m%d_%H%M%S).sql.gz && find /backups -name 'pg_*.sql.gz' -mtime +$$BACKUP_RETENTION_DAYS -delete; sleep $$BACKUP_INTERVAL_SECONDS; done",
+      ]
