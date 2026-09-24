@@ -254,6 +254,18 @@ def main():
                params={"lang": "zz"})
     check("/accounts/statement/999999/print لغة خاطئة", rr.status_code == 400,
           str(rr.status_code))
+    rr = c.get("/accounts/statement/1/pdf", headers=h)
+    check("/accounts/statement/1/pdf ⇒ %PDF",
+          rr.status_code == 200 and rr.content[:4] == b"%PDF", str(rr.status_code))
+    rr = c.get("/accounts/statement/1/pdf", headers=h, params={"lang": "en"})
+    check("/accounts/statement/1/pdf lang=en ⇒ %PDF",
+          rr.status_code == 200 and rr.content[:4] == b"%PDF", str(rr.status_code))
+    rr = c.get("/accounts/statement/1/pdf", headers=h, params={"lang": "zz"})
+    check("/accounts/statement/1/pdf لغة خاطئة ⇒ 400", rr.status_code == 400,
+          str(rr.status_code))
+    rr = c.get("/accounts/statement/1/pdf")
+    check("/accounts/statement/1/pdf بدون توكن ⇒ 401", rr.status_code == 401,
+          str(rr.status_code))
 
     # 8.6) المخزون: الملخّص والحركات وفحوص المدخلات (لا تُغيّر أي بيانات)
     rr = c.get("/inventory/summary", headers=h)

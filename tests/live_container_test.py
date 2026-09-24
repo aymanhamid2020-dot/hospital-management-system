@@ -478,6 +478,16 @@ def main():
     check("كشف الحساب بدون توكن ⇒ 401", rr.status_code == 401, str(rr.status_code))
     rr = c.get("/accounts/statement/999999", headers=h)
     check("كشف حساب مريض غير موجود ⇒ 404", rr.status_code == 404, str(rr.status_code))
+    rr = c.get("/accounts/statement/1/pdf", headers=h)
+    check("PDF كشف الحساب ⇒ %PDF",
+          rr.status_code == 200 and rr.content[:4] == b"%PDF", str(rr.status_code))
+    rr = c.get("/accounts/statement/1/pdf", headers=h, params={"lang": "en"})
+    check("PDF كشف الحساب إنجليزي ⇒ %PDF",
+          rr.status_code == 200 and rr.content[:4] == b"%PDF", str(rr.status_code))
+    rr = c.get("/accounts/statement/1/pdf", headers=h, params={"lang": "zz"})
+    check("PDF كشف الحساب لغة خاطئة ⇒ 400", rr.status_code == 400, str(rr.status_code))
+    rr = c.get("/accounts/statement/1/pdf")
+    check("PDF كشف الحساب بدون توكن ⇒ 401", rr.status_code == 401, str(rr.status_code))
     rr = c.get("/ui/")
     check("واجهة المبيعات والحسابات في /ui",
           b"async sales(main)" in rr.content

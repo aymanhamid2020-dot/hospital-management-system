@@ -525,6 +525,20 @@ def test_accounts_patient_statement(client, admin):
     assert en.status_code == 200 and "Patient statement" in en.text
     assert client.get(f"/accounts/statement/{pid}/print", headers=admin,
                       params={"lang": "de"}).status_code == 400
+    # PDF الكشف: عربي + إنجليزي + أخطاء اللغة والتوكن
+    pdf = client.get(f"/accounts/statement/{pid}/pdf", headers=admin)
+    assert pdf.status_code == 200 and pdf.content[:4] == b"%PDF"
+    assert "patient_statement_" in pdf.headers["content-disposition"]
+    enpdf = client.get(f"/accounts/statement/{pid}/pdf", headers=admin,
+                       params={"lang": "en"})
+    assert enpdf.status_code == 200 and enpdf.content[:4] == b"%PDF"
+    assert "_en.pdf" in enpdf.headers["content-disposition"]
+    assert client.get(f"/accounts/statement/{pid}/pdf", headers=admin,
+                      params={"lang": "de"}).status_code == 400
+    assert client.get(f"/accounts/statement/999999/pdf",
+                      headers=admin).status_code == 404
+    assert client.get(f"/accounts/statement/{pid}/pdf").status_code == 401
+    assert "PDF الكشف" in client.get("/ui/").text
 
 
 def test_accounts_payment_validation(client, admin):

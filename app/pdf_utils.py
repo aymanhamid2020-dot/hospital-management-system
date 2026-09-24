@@ -733,3 +733,136 @@ def _accounts_sales_en(entries, period_label: str) -> bytes:
         pdf.set_font("ar", "", 11)
         pdf.multi_cell(0, 7, "No sales.", align="L")
     return bytes(pdf.output())
+
+
+def patient_statement_pdf(patient, sales, invoices, totals: dict,
+                          lang: str = "ar") -> bytes:
+    """كشف حساب مريض PDF — مبيعات + فواتير + الأرصدة (عربي/إنجليزي)."""
+    if lang == "en":
+        return _patient_statement_en(patient, sales, invoices, totals)
+    from datetime import datetime as _dt
+
+    _st = {"UNPAID": "غير مدفوع", "PARTIAL": "مدفوع جزئيًا", "PAID": "مدفوع"}
+    pdf = ArabicPDF("كشف حساب مريض")
+    pdf.section("بيانات المريض")
+    pdf.kv_row("الاسم", patient.full_name)
+    pdf.kv_row("رقم الملف", f"#{patient.id}")
+    pdf.kv_row("الجوال", patient.phone or "-")
+    pdf.kv_row("تاريخ الإصدار", _dt.now().strftime("%Y-%m-%d %H:%M"))
+
+    pdf.section("الأرصدة (ر.س)")
+    pdf.kv_row("مبيعات الصيدلية", f"{totals['sales_total']:,.2f}")
+    pdf.kv_row("مدفوع من المبيعات", f"{totals['sales_paid']:,.2f}")
+    pdf.kv_row("إجمالي الفواتير", f"{totals['inv_total']:,.2f}")
+    pdf.kv_row("مدفوع من الفواتير", f"{totals['inv_paid']:,.2f}")
+    pdf.kv_row("إجمالي المستحقات", f"{totals['dues']:,.2f}")
+    pdf.kv_row("الرصيد المستحق", f"{totals['outstanding']:,.2f}")
+
+    pdf.section(f"مبيعات الصيدلية ({len(sales)})")
+    if sales:
+        for s in sales[:40]:
+            med = s.medication.name if s.medication else f"#{s.medication_id}"
+            line = (f"• #{s.id} {med} — {s.quantity}×{s.unit_price:,.2f} — "
+                    f"{s.total_price:,.2f} — {_st.get(s.status, s.status)}")
+            pdf.set_font("ar", "", 10)
+            pdf.set_text_color(*DARK)
+            pdf.cell(0, 7, ar(line[:120]), align="R",
+                     new_x="LMARGIN", new_y="NEXT")
+        if len(sales) > 40:
+            pdf.set_font("ar", "", 9)
+            pdf.set_text_color(*GRAY)
+            pdf.cell(0, 7, ar(f"… و{len(sales)-40} عملية أخرى (أُعرضت أول 40)"),
+                     align="R", new_x="LMARGIN", new_y="NEXT")
+    else:
+        pdf.set_font("ar", "", 11)
+        pdf.multi_cell(0, 7, ar("لا توجد مبيعات."), align="R")
+
+    pdf.section(f"الفواتير ({len(invoices)})")
+    if invoices:
+        for i in invoices[:40]:
+            st = i["status"] if isinstance(i, dict) else (
+                i.status.value if hasattr(i.status, "value") else str(i.status))
+            desc = (i["description"] if isinstance(i, dict) else i.description) or "-"
+            total = i["total"] if isinstance(i, dict) else i.total
+            paid = i["paid_amount"] if isinstance(i, dict) else float(i.paid_amount or 0)
+            line = (f"• #{i['id'] if isinstance(i, dict) else i.id} {desc} — "
+                    f"{float(total):,.2f} — مدفوع {float(paid):,.2f} — "
+                    f"{_st.get(st, st)}")
+            pdf.set_font("ar", "", 10)
+            pdf.set_text_color(*DARK)
+            pdf.cell(0, 7, ar(line[:120]), align="R",
+                     new_x="LMARGIN", new_y="NEXT")
+        if len(invoices) > 40:
+            pdf.set_font("ar", "", 9)
+            pdf.set_text_color(*GRAY)
+            pdf.cell(0, 7, ar(f"… و{len(invoices)-40} فاتورة أخرى (أُعرضت أول 40)"),
+                     align="R", new_x="LMARGIN", new_y="NEXT")
+    else:
+        pdf.set_font("ar", "", 11)
+        pdf.multi_cell(0, 7, ar("لا توجد فواتير."), align="R")
+    return bytes(pdf.output())
+
+
+def _patient_statement_en(patient, sales, invoices, totals: dict) -> bytes:
+    """English patient statement PDF: balances + sales + invoices."""
+    from datetime import datetime as _dt
+
+    _st = {"UNPAID": "Unpaid", "PARTIAL": "Partial", "PAID": "Paid"}
+    pdf = ArabicPDF("Patient Statement", lang="en")
+    pdf.section("Patient")
+    pdf.kv_row("Name", patient.full_name)
+    pdf.kv_row("File no.", f"#{patient.id}")
+    pdf.kv_row("Phone", patient.phone or "-")
+    pdf.kv_row("Issued at", _dt.now().strftime("%Y-%m-%d %H:%M"))
+
+    pdf.section("Balances (SAR)")
+    pdf.kv_row("Pharmacy sales", f"{totals['sales_total']:,.2f}")
+    pdf.kv_row("Sales paid", f"{totals['sales_paid']:,.2f}")
+    pdf.kv_row("Invoices total", f"{totals['inv_total']:,.2f}")
+    pdf.kv_row("Invoices paid", f"{totals['inv_paid']:,.2f}")
+    pdf.kv_row("Total dues", f"{totals['dues']:,.2f}")
+    pdf.kv_row("Outstanding", f"{totals['outstanding']:,.2f}")
+
+    pdf.section(f"Pharmacy sales ({len(sales)})")
+    if sales:
+        for s in sales[:40]:
+            med = s.medication.name if s.medication else f"#{s.medication_id}"
+            line = (f"• #{s.id} {med} — {s.quantity}x{s.unit_price:,.2f} — "
+                    f"{s.total_price:,.2f} — {_st.get(s.status, s.status)}")
+            pdf.set_font("ar", "", 10)
+            pdf.set_text_color(*DARK)
+            pdf.cell(0, 7, line[:120], align="L",
+                     new_x="LMARGIN", new_y="NEXT")
+        if len(sales) > 40:
+            pdf.set_font("ar", "", 9)
+            pdf.set_text_color(*GRAY)
+            pdf.cell(0, 7, f"... and {len(sales)-40} more (first 40 shown)",
+                     align="L", new_x="LMARGIN", new_y="NEXT")
+    else:
+        pdf.set_font("ar", "", 11)
+        pdf.multi_cell(0, 7, "No sales.", align="L")
+
+    pdf.section(f"Invoices ({len(invoices)})")
+    if invoices:
+        for i in invoices[:40]:
+            st = i["status"] if isinstance(i, dict) else (
+                i.status.value if hasattr(i.status, "value") else str(i.status))
+            desc = (i["description"] if isinstance(i, dict) else i.description) or "-"
+            total = i["total"] if isinstance(i, dict) else i.total
+            paid = i["paid_amount"] if isinstance(i, dict) else float(i.paid_amount or 0)
+            line = (f"• #{i['id'] if isinstance(i, dict) else i.id} {desc} — "
+                    f"{float(total):,.2f} — paid {float(paid):,.2f} — "
+                    f"{_st.get(st, st)}")
+            pdf.set_font("ar", "", 10)
+            pdf.set_text_color(*DARK)
+            pdf.cell(0, 7, line[:120], align="L",
+                     new_x="LMARGIN", new_y="NEXT")
+        if len(invoices) > 40:
+            pdf.set_font("ar", "", 9)
+            pdf.set_text_color(*GRAY)
+            pdf.cell(0, 7, f"... and {len(invoices)-40} more (first 40 shown)",
+                     align="L", new_x="LMARGIN", new_y="NEXT")
+    else:
+        pdf.set_font("ar", "", 11)
+        pdf.multi_cell(0, 7, "No invoices.", align="L")
+    return bytes(pdf.output())

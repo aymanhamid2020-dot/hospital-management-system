@@ -297,6 +297,7 @@ async function showStatement() {
       <div class="row2" style="margin-top:12px">
         <button class="btn" onclick="openPrint('/accounts/statement/${pid}/print?lang=' + LANG)
           .then(() => toast('تم فتح الكشف للطباعة ✅')).catch(e => toast(e.message, true))">🖨️ طباعة الكشف</button>
+        <button class="btn success" onclick="download('/accounts/statement/${pid}/pdf','patient_statement_${pid}.pdf')">⬇️ PDF الكشف</button>
         <button class="btn ghost" onclick="openPrint('/accounts/statement/${pid}/print?lang=en')
           .then(() => toast('Opened English statement ✅')).catch(e => toast(e.message, true))">🇬🇧 EN</button>
       </div>`;
@@ -348,6 +349,7 @@ const AR2EN = {
   /* كشف حساب مريض */
   'عرض الكشف': 'Show statement',
   'طباعة الكشف': 'Print statement',
+  '⬇️ PDF الكشف': '⬇️ Statement PDF',
   'أدخل رقم المريض أولًا': 'Enter the patient ID first',
   'أدخل رقم المريض لعرض كشف حسابه (مبيعات + فواتير + الرصيد)': 'Enter the patient ID to view their statement (sales + invoices + balance)',
   'مبيعات الصيدلية': 'Pharmacy sales',

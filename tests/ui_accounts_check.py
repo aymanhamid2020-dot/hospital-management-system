@@ -99,6 +99,18 @@ checks = [
     ("لغة خاطئة في الكشف ⇒ 400",
      c.get("/accounts/statement/1/print", headers=H,
            params={"lang": "xx"}).status_code == 400),
+    ("PDF كشف الحساب ⇒ %PDF",
+     c.get("/accounts/statement/1/pdf", headers=H).content[:4] == b"%PDF"),
+    ("PDF كشف الحساب إنجليزي ⇒ %PDF",
+     c.get("/accounts/statement/1/pdf", headers=H,
+           params={"lang": "en"}).content[:4] == b"%PDF"),
+    ("لغة خاطئة في PDF الكشف ⇒ 400",
+     c.get("/accounts/statement/1/pdf", headers=H,
+           params={"lang": "xx"}).status_code == 400),
+    ("PDF الكشف غير مسجّل ⇒ 401",
+     c.get("/accounts/statement/1/pdf").status_code == 401),
+    ("زر PDF الكشف في الواجهة",
+     "'⬇️ PDF الكشف'" in c.get("/ui/").text),
 ]
 for name, ok in checks:
     bad += 0 if ok else 1

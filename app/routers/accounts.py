@@ -302,3 +302,45 @@ async def patient_statement_print(
         "outstanding": round((sales_total - sales_paid) + (inv_total - inv_paid), 2),
     }
     return HTMLResponse(patient_statement_html(p, sales, invoices, totals, lang=lang))
+
+
+@router.get("/statement/{patient_id}/pdf", summary="كشف حساب مريض (PDF)")
+async def patient_statement_pdf(
+    patient_id: int,
+    lang: str = Query("ar", description="لغة الكشف: ar أو en"),
+    db: Session = Depends(get_db),
+    _ = Depends(get_current_user),
+):
+    """كشف حساب المريض بصيغة PDF — ar|en (لغة خاطئة ⇒ 400 · غير موجود ⇒ 404)"""
+    from fastapi.responses import Response
+
+    from app.models import Invoice
+    from app.pdf_utils import patient_statement_pdf as _stmt_pdf
+
+    if lang not in ("ar", "en"):
+        raise HTTPException(status_code=400, detail="lang يجب أن يكون ar أو en")
+    p = db.query(Patient).filter(Patient.id == patient_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="المريض غير موجود")
+
+    sales = (db.query(Dispense).filter(Dispense.patient_id == patient_id)
+             .order_by(Dispense.created_at.desc()).all())
+    invoices = (db.query(Invoice).filter(Invoice.patient_id == patient_id)
+                .order_by(Invoice.created_at.desc()).all())
+    sales_total = round(sum(float(s.total_price or 0) for s in sales), 2)
+    sales_paid = round(sum(float(s.paid_amount or 0) for s in sales), 2)
+    inv_total = round(sum(i.total for i in invoices), 2)
+    inv_paid = round(sum(float(i.paid_amount or 0) for i in invoices), 2)
+    totals = {
+        "sales_total": sales_total, "sales_paid": sales_paid,
+        "inv_total": inv_total, "inv_paid": inv_paid,
+        "dues": round(sales_total + inv_total, 2),
+        "outstanding": round((sales_total - sales_paid) + (inv_total - inv_paid), 2),
+    }
+    return Response(
+        content=_stmt_pdf(p, sales, invoices, totals, lang=lang),
+        media_type="application/pdf",
+        headers={"Content-Disposition":
+                 f'attachment; filename="patient_statement_{patient_id}'
+                 f'{"_en" if lang == "en" else ""}.pdf"'},
+    )
