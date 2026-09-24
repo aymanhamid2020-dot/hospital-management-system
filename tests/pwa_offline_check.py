@@ -1,9 +1,12 @@
 # فحص PWA + الاستعداد للعمل دون اتصال: التسجيل، الكاش المسبق، استراتيجية الطابور، الـ manifest
+# BASE_URL قابل للضبط (مثل بقية السكربتات) — الافتراضي 8001 محليًا، وCI يمرّره على 8000
 import json
+import os
 
 import httpx
 
-c = httpx.Client(base_url="http://127.0.0.1:8001", timeout=30)
+BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:8001")
+c = httpx.Client(base_url=BASE_URL, timeout=30)
 fails = []
 total = 0
 
@@ -35,11 +38,12 @@ ok("skipWaiting: العامل الجديد يستلم فورًا", "skipWaiting"
 ok("cleanup old caches عند activate", "caches.delete" in sw.text)
 
 # ===== 3) الكاش المسبق: كل هدف يجب أن ينجح 200 وإلا فشل التثبيت offline =====
-# استخراج SHELL (الآن خمسة: الصفحة + app.css + app.js + manifest + الأيقونة)
+# استخراج SHELL — يتحقق من تضمّن الخمس الأساسية (يتكيف مع إضافة أهداف جديدة دون كسر الفحص)
 import re
 m = re.search(r"const SHELL = \[([^\]]+)\]", sw.text)
 targets = re.findall(r"'([^']+)'", m.group(1)) if m else []
-ok("قائمة SHELL بخمسة أهداف", len(targets) == 5, str(targets))
+_CORE = {"/ui/", "/ui/app.css", "/ui/app.js", "/ui/manifest.json", "/ui/icon.svg"}
+ok("قائمة SHELL تضمّ الخمس الأساسية", _CORE <= set(targets), str(targets))
 for t in targets:
     r = c.get(t)
     ok(f"الهدف المسبق {t} ⇒ 200", r.status_code == 200, str(r.status_code))

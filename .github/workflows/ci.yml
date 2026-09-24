@@ -37,12 +37,12 @@ jobs:
             curl -sf http://127.0.0.1:8000/health && break
             sleep 1
           done
-      - name: الفحص الموحد (86 فحصًا)
+      - name: الفحص الموحد الحيّ
         run: BASE_URL=http://127.0.0.1:8000 WAIT=60 python tests/stack_check.py
-      - name: فحص PWA/Offline (24 فحصًا)
-        run: python tests/pwa_offline_check.py
-      - name: اختبار حمل خفيف
-        run: python tests/load_test.py
+      - name: فحص PWA/Offline
+        run: BASE_URL=http://127.0.0.1:8000 python tests/pwa_offline_check.py
+      - name: اختبار حمل خفيف (p95 ≤ 800ms)
+        run: BASE_URL=http://127.0.0.1:8000 python tests/load_test.py
 
   docker:
     name: بناء صورة Docker
