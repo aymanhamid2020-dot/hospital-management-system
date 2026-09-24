@@ -1,3 +1,4 @@
+from typing import Optional, List, Literal
 from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
 from typing import Optional, List
 from datetime import datetime
@@ -796,6 +797,147 @@ class PayrollInDB(PayrollBase):
     created_at: datetime
     updated_at: datetime
     staff: StaffBrief
+
+
+
+# ===== المحاسبة المؤسسية =====
+class LedgerAccountCreate(BaseModel):
+    code: str = Field(..., min_length=1, max_length=30)
+    name: str = Field(..., min_length=2, max_length=120)
+    account_type: Literal["asset", "liability", "equity", "revenue", "expense"]
+    parent_code: Optional[str] = Field(None, max_length=30)
+    is_active: bool = True
+
+
+class LedgerAccountOut(ORMModel):
+    id: int
+    code: str
+    name: str
+    account_type: str
+    parent_code: Optional[str] = None
+    is_active: bool
+    created_at: datetime
+
+
+class JournalLineIn(BaseModel):
+    account_code: str
+    debit: float = Field(0, ge=0)
+    credit: float = Field(0, ge=0)
+    description: Optional[str] = None
+
+
+class JournalEntryCreate(BaseModel):
+    entry_date: datetime
+    description: str = Field(..., min_length=2, max_length=300)
+    reference_type: Optional[str] = Field(None, max_length=30)
+    reference_id: Optional[int] = Field(None, gt=0)
+    lines: List[JournalLineIn] = Field(..., min_length=2)
+
+
+class JournalLineOut(BaseModel):
+    id: int
+    account_id: int
+    account_code: str
+    account_name: str
+    debit: float
+    credit: float
+    description: Optional[str] = None
+
+
+class JournalEntryOut(ORMModel):
+    id: int
+    entry_no: str
+    entry_date: datetime
+    description: str
+    reference_type: Optional[str] = None
+    reference_id: Optional[int] = None
+    is_posted: bool
+    created_by: str
+    created_at: datetime
+    lines: List[JournalLineOut]
+
+
+class InvoiceLedgerPaymentCreate(BaseModel):
+    amount: float = Field(..., gt=0)
+    method: Literal["cash", "card", "bank", "insurance"] = "cash"
+    paid_at: datetime
+    reference: Optional[str] = Field(None, max_length=100)
+
+
+class VendorCreate(BaseModel):
+    code: str = Field(..., min_length=1, max_length=30)
+    name: str = Field(..., min_length=2, max_length=150)
+    contact_name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    tax_number: Optional[str] = None
+    opening_balance: float = Field(0, ge=0)
+
+
+class VendorOut(ORMModel):
+    id: int
+    code: str
+    name: str
+    contact_name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    tax_number: Optional[str] = None
+    opening_balance: float
+    is_active: bool
+    created_at: datetime
+
+
+class VendorBillCreate(BaseModel):
+    bill_no: str = Field(..., min_length=2, max_length=40)
+    vendor_id: int
+    bill_date: datetime
+    due_date: Optional[datetime] = None
+    amount: float = Field(..., gt=0)
+    expense_account_code: str = Field("5100", min_length=2, max_length=30)
+
+
+class VendorBillOut(BaseModel):
+    id: int
+    bill_no: str
+    vendor_id: int
+    vendor_name: str
+    bill_date: datetime
+    due_date: Optional[datetime] = None
+    amount: float
+    paid_amount: float
+    outstanding: float
+    status: str
+    expense_account_code: str
+    journal_entry_id: int
+    created_at: datetime
+
+
+class VendorPaymentCreate(BaseModel):
+    amount: float = Field(..., gt=0)
+    paid_at: datetime
+    method: Literal["cash", "card", "bank"] = "bank"
+    reference: Optional[str] = Field(None, max_length=80)
+
+
+class AgingBucket(BaseModel):
+    bucket: str
+    count: int
+    total: float
+    outstanding: float
+
+
+class LedgerSummary(BaseModel):
+    as_of: datetime
+    cash: float
+    accounts_receivable: float
+    inventory: float
+    accounts_payable: float
+    revenue: float
+    expenses: float
+    net_income: float
+    trial_balance_difference: float
+    debtors: List[AgingBucket]
+    creditors: List[AgingBucket]
 
     model_config = ConfigDict(from_attributes=True)
 

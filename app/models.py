@@ -1,5 +1,6 @@
 from sqlalchemy import (
-    Column, Integer, String, DateTime, Float, Boolean, ForeignKey, Enum as SAEnum
+    Column, Integer, String, DateTime, Float, Boolean, ForeignKey,
+    Enum as SAEnum, UniqueConstraint
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -659,3 +660,132 @@ class GeneralStockItem(Base):
     expiry_date = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+# ===== المحاسبة المؤسسية: شجرة الحسابات والقيود المزدوجة =====
+class Account(Base):
+    """حساب في دليل الحسابات المؤسسي."""
+    __tablename__ = "accounts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String, nullable=False, unique=True, index=True)
+    name = Column(String, nullable=False, unique=True)
+    account_type = Column(String, nullable=False)  # asset/liability/equity/revenue/expense
+    parent_code = Column(String, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    lines = relationship("JournalLine", back_populates="account")
+
+
+class JournalEntry(Base):
+    """قيد يومية متوازن؛ كل قيد له سطران أو أكثر على الأقل."""
+    __tablename__ = "journal_entries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    entry_no = Column(String, nullable=False, unique=True, index=True)
+    entry_date = Column(DateTime, nullable=False, index=True)
+    description = Column(String, nullable=False)
+    reference_type = Column(String, nullable=True, index=True)  # invoice/payment/manual/expense
+    reference_id = Column(Integer, nullable=True, index=True)
+    is_posted = Column(Boolean, nullable=False, default=True)
+    created_by = Column(String, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    lines = relationship(
+        "JournalLine", back_populates="entry", cascade="all, delete-orphan", lazy="joined"
+    )
+
+
+class JournalLine(Base):
+    """سطر مدين/دائن ضمن قيد محاسبي."""
+    __tablename__ = "journal_lines"
+
+    id = Column(Integer, primary_key=True, index=True)
+    entry_id = Column(Integer, ForeignKey("journal_entries.id", ondelete="CASCADE"), nullable=False, index=True)
+    account_id = Column(Integer, ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=False, index=True)
+    debit = Column(Float, nullable=False, default=0)
+    credit = Column(Float, nullable=False, default=0)
+    description = Column(String, nullable=True)
+
+    entry = relationship("JournalEntry", back_populates="lines")
+    account = relationship("Account", back_populates="lines")
+
+
+class Vendor(Base):
+    """مورد/دائن مستقل مع رصيد افتتاحي."""
+    __tablename__ = "vendors"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String, nullable=False, unique=True, index=True)
+    name = Column(String, nullable=False, unique=True)
+    contact_name = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
+    email = Column(String, nullable=True)
+    tax_number = Column(String, nullable=True)
+    opening_balance = Column(Float, nullable=False, default=0)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    bills = relationship("VendorBill", back_populates="vendor")
+
+
+class VendorBill(Base):
+    """فاتورة مورد تكوّن دين الموردين في حساب الذمم الدائنة."""
+    __tablename__ = "vendor_bills"
+
+    id = Column(Integer, primary_key=True, index=True)
+    bill_no = Column(String, nullable=False, unique=True, index=True)
+    vendor_id = Column(Integer, ForeignKey("vendors.id", ondelete="RESTRICT"), nullable=False, index=True)
+    bill_date = Column(DateTime, nullable=False, index=True)
+    due_date = Column(DateTime, nullable=True, index=True)
+    amount = Column(Float, nullable=False)
+    paid_amount = Column(Float, nullable=False, default=0)
+    status = Column(String, nullable=False, default="unpaid")  # unpaid/partial/paid
+    expense_account_code = Column(String, nullable=False, default="5100")
+    journal_entry_id = Column(Integer, ForeignKey("journal_entries.id", ondelete="RESTRICT"), nullable=False, unique=True)
+    created_by = Column(String, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    vendor = relationship("Vendor", back_populates="bills")
+    payments = relationship("VendorPayment", back_populates="bill", cascade="all, delete-orphan")
+
+
+class VendorPayment(Base):
+    """دفعة إلى مورد مرتبطة بفاتورة وقيد محاسبي."""
+    __tablename__ = "vendor_payments"
+    __table_args__ = (
+        UniqueConstraint("bill_id", "reference", name="uq_vendor_ledger_payment_reference"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    bill_id = Column(Integer, ForeignKey("vendor_bills.id", ondelete="CASCADE"), nullable=False, index=True)
+    amount = Column(Float, nullable=False)
+    paid_at = Column(DateTime, nullable=False)
+    method = Column(String, nullable=False, default="bank")
+    reference = Column(String, nullable=True)
+    journal_entry_id = Column(Integer, ForeignKey("journal_entries.id", ondelete="RESTRICT"), nullable=False, unique=True)
+    created_by = Column(String, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    bill = relationship("VendorBill", back_populates="payments")
+
+
+class InvoiceLedgerPayment(Base):
+    """دفعة فاتورة مرتبطة بقيد محاسبي مع منع تكرار المرجع."""
+    __tablename__ = "invoice_ledger_payments"
+    __table_args__ = (
+        UniqueConstraint("invoice_id", "reference", name="uq_invoice_ledger_payment_reference"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    invoice_id = Column(Integer, ForeignKey("invoices.id", ondelete="CASCADE"), nullable=False, index=True)
+    amount = Column(Float, nullable=False)
+    method = Column(String, nullable=False, default="cash")
+    paid_at = Column(DateTime, nullable=False)
+    reference = Column(String, nullable=True)
+    journal_entry_id = Column(Integer, ForeignKey("journal_entries.id", ondelete="RESTRICT"), nullable=False, unique=True)
+    created_by = Column(String, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
