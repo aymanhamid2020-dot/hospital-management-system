@@ -236,6 +236,9 @@ from app.routers.payroll import router as payroll_router
 from app.routers.audit import router as audit_router
 from app.routers.accounts import router as accounts_router
 from app.routers.inventory import router as inventory_router
+from app.routers.search import router as search_router
+from app.routers.clinical import router as clinical_router
+from app.routers.patient_portal import router as patient_portal_router
 
 app.include_router(auth_router)
 app.include_router(patients_router)
@@ -260,6 +263,9 @@ app.include_router(payroll_router)
 app.include_router(audit_router)
 app.include_router(accounts_router)
 app.include_router(inventory_router)
+app.include_router(search_router)
+app.include_router(clinical_router)
+app.include_router(patient_portal_router)
 
 
 # ===== سجل التدقيق (يُسجّل كل عملية تعديلية) =====

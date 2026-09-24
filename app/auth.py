@@ -87,6 +87,8 @@ def get_current_user(
         )
     try:
         payload = decode_token(credentials.credentials)
+        if payload.get("scope") not in (None, "employee"):
+            raise ValueError("wrong scope")
         user_id = int(payload["sub"])
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, KeyError, ValueError):
         raise HTTPException(

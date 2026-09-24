@@ -182,7 +182,7 @@ ok("بطاقات الملخص في العرض", "/inventory/summary" in ui)
 ok("دفتر الحركات في العرض", "/inventory/movements" in ui)
 ok("زر الجرد موجود", "function adjustStock(" in ui)
 ok("التوريد عبر /inventory", "'/inventory/' + id + '/restock'" in ui)
-ok("الكاش v5", "hms-shell-v5" in c.get("/ui/sw.js").text)
+ok("الكاش v6", "hms-shell-v6" in c.get("/ui/sw.js").text)
 
 print(f"\n== INVENTORY FLOW RESULT: {len(fails) == 0} — failed: {len(fails)} ==")
 raise SystemExit(1 if fails else 0)

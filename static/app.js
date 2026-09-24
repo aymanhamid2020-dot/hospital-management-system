@@ -865,7 +865,7 @@ function enterApp() {
 }
 
 /* ========== التنقل ========== */
-document.querySelectorAll('.sidebar a').forEach(a => {
+document.querySelectorAll('.sidebar a[data-view]').forEach(a => {
   a.addEventListener('click', e => { e.preventDefault(); navigate(a.dataset.view); });
 });
 
@@ -875,6 +875,7 @@ const TITLES = {
   departments: 'الأقسام', beds: 'الأسرّة', invoices: 'الفواتير',
   staff: 'الموظفون', users: 'المستخدمون', backup: 'النسخ الاحتياطي', notifications: 'الإشعارات',
   lab: 'المختبر والأشعة', pharmacy: 'الصيدلية', inventory: 'المخزون', payroll: 'الرواتب',
+  clinical: 'الرعاية والتشغيل', support: 'الصيانة والتعقيم', governance: 'الجودة والموارد',
   audit: 'سجل التدقيق', sales: 'المبيعات', accounts: 'الحسابات'
 };
 
@@ -902,12 +903,61 @@ async function navigate(view) {
   refreshBell();
 }
 
-/* ========== العروض ========== */
+const OP_GROUPS = {
+  clinical: [['service-requests','مجموعات الرعاية والوحدات','🧑‍⚕️','service_pending'],['nursing-tasks','خطة التمريض','🩺','nursing_pending'],['surgeries','مسرح العمليات','🏥','surgeries_active'],['admissions','التنويم الداخلي','🛏️','admitted']],
+  support: [['blood-bank','بنك الدم','🩸','blood_available'],['maintenance','صيانة الأجهزة','🔧','maintenance_open'],['sterilization','التعقيم','♨️','sterilization_running']],
+  governance: [['safety-events','الجودة ومكافحة العدوى والحوادث','🛡️','safety_open'],['budgets','الميزانيات','📊','budget_total'],['assets','الأصول الثابتة','🏗️',''],['patient-portal-accounts','حسابات بوابة المريض','👤','']]
+};
+const OP_FIELDS = {
+  'service-requests': [['patient_id','المريض','number'],['service_type','نوع الخدمة','select',['care_sets','dental','physiotherapy','emergency','home_health','wellness','nutrition']],['title','العنوان'],['details','التفاصيل'],['priority','الأولوية']],
+  'nursing-tasks': [['patient_id','المريض','number'],['department_id','القسم','number'],['title','المهمة'],['instructions','التعليمات'],['shift','الوردية','select',['day','evening','night']],['priority','الأولوية']],
+  surgeries: [['patient_id','المريض','number'],['surgeon_id','الجراح','number'],['procedure_name','العملية'],['theater','المسرح'],['priority','الأولوية','select',['emergency','urgent','elective']]],
+  admissions: [['patient_id','المريض','number'],['bed_id','السرير','number'],['department_id','القسم','number'],['admission_date','وقت الدخول','datetime'],['diagnosis','التشخيص'],['notes','ملاحظات']],
+  'blood-bank': [['unit_number','رقم الوحدة'],['donor_name','المتبرع'],['blood_group','فصيلة الدم'],['component','المكون','select',['whole_blood','platelets','plasma','red_cells']],['quantity_ml','الكمية مل','number'],['expiry_date','تاريخ الصلاحية','datetime']],
+  maintenance: [['asset_name','الجهاز'],['serial_number','الرقم التسلسلي'],['location','الموقع'],['issue','العطل'],['priority','الأولوية']],
+  sterilization: [['machine_name','الجهاز'],['cycle_type','النوع','select',['autoclave','chemical','low_temperature']],['load_description','الحمولة'],['started_at','وقت البدء','datetime'],['operator_name','المشغل']],
+  'safety-events': [['category','التصنيف','select',['incident','infection','medication','fall','equipment','other']],['severity','الخطورة','select',['low','medium','high','critical']],['title','الحادث'],['description','الوصف'],['location','الموقع']],
+  budgets: [['fiscal_year','السنة','number'],['department','القسم'],['category','البند'],['allocated_amount','المخصص','number'],['spent_amount','المنصرف','number']],
+  assets: [['asset_code','رمز الأصل'],['name','الاسم'],['category','الفئة'],['department','القسم'],['purchase_cost','التكلفة','number'],['salvage_value','القيمة المتبقية','number'],['useful_life_years','العمر','number']],
+  'patient-portal-accounts': [['patient_id','المريض','number'],['username','اسم المستخدم'],['password','كلمة المرور']]
+};
+const OP_STATUS = {
+  'service-requests':['in_progress','completed','cancelled'], 'nursing-tasks':['in_progress','completed','cancelled'], surgeries:['in_progress','completed','cancelled'], admissions:['discharged','transferred'],
+  'blood-bank':['reserved','issued','quarantined','discarded'], maintenance:['in_progress','completed','cancelled'], sterilization:['passed','failed'], 'safety-events':['investigating','resolved','closed'], assets:['maintenance','retired']
+};
+let OP_PATH = '';
+async function renderOps(main, group) {
+  const ov = await api('/clinical/overview'), defs = OP_GROUPS[group].filter(([p]) => p !== 'patient-portal-accounts' || isAdmin());
+  const cards = defs.map(([p,t,i,k]) => `<button class="stat" style="cursor:pointer;border:2px solid ${OP_PATH===p?'#2c7be5':'transparent'}" onclick="selectOps('${p}')"><div class="num">${k ? Number(ov[k] || 0) : '∞'}</div><div class="lbl">${i} ${t}</div></button>`).join('');
+  const [path,title,icon] = defs.find(x => x[0] === OP_PATH) || defs[0]; OP_PATH = path;
+  const rows = await api('/clinical/' + path);
+  const canAdd = (isAdmin() || isDoctor()) && path !== 'patient-portal-accounts' && !(isDoctor() && ['budgets','assets'].includes(path));
+  main.innerHTML = `<div class="stats">${cards}</div><div class="card"><div class="toolbar"><h3 style="margin:0">${icon} ${title}</h3>${canAdd?'<button class="btn success" onclick="opForm()">➕ إضافة</button>':''}<input oninput="filterTable('ops-table',this.value)" placeholder="🔍 بحث…"></div><div style="overflow-x:auto"><table id="ops-table"><thead><tr><th>#</th><th>التفاصيل</th><th>الحالة</th><th>التاريخ</th><th>الإجراء</th></tr></thead><tbody>${rows.map(r => `<tr><td>${r.id}</td><td>${esc(opLabel(r))}</td><td>${pill(r.status || 'نشط')}</td><td>${fmtDate(r.created_at || r.started_at || r.purchase_date || r.admission_date)}</td><td><div class="actions">${canAdd?(OP_STATUS[path] || []).map(s => `<button class="btn sm ghost" onclick="opStatus('${path}',${r.id},'${s}')">${s}</button>`).join(''):'—'}</div></td></tr>`).join('') || `<tr><td colspan="5" class="empty">لا توجد سجلات</td></tr>`}</tbody></table></div></div>`;
+}
+function opLabel(r) { return esc(r.title || r.procedure_name || r.issue || r.load_description || r.unit_number || r.asset_name || r.name || r.username || `${r.department || ''} ${r.category || ''}`); }
+function selectOps(path) { OP_PATH = path; navigate(CURRENT_VIEW); }
+async function opStatus(path,id,status) { try { await api(`/clinical/${path}/status/${id}`,{method:'POST',body:JSON.stringify({status})}); toast('تم تحديث الحالة ✅'); await navigate(CURRENT_VIEW); } catch(e) { toast(e.message,true); } }
+function opForm() {
+  const defs = OP_FIELDS[OP_PATH] || [];
+  const fields = defs.map(([n,l,t,opts]) => `<div class="field"><label>${l}</label>${t==='select'?`<select id="op-${n}">${opts.map(o=>`<option>${o}</option>`).join('')}</select>`:`<input id="op-${n}" type="${t||'text'}" ${t==='number'?'step="any"':''}>`}</div>`).join('');
+  openModal('➕ إضافة سجل', `<div class="form-grid">${fields}</div><div class="row2" style="margin-top:12px"><button class="btn success" onclick="submitOp()">حفظ</button><button class="btn ghost" onclick="closeModal()">إلغاء</button></div>`);
+}
+async function submitOp() {
+  const data = {}; (OP_FIELDS[OP_PATH] || []).forEach(([n,,t]) => { const v=V('op-'+n); if(v!=='' && v!=null) data[n]=t==='number'?Number(v):v; });
+  try { await api('/clinical/'+OP_PATH,{method:'POST',body:JSON.stringify(data)}); closeModal(); toast('تمت الإضافة ✅'); await navigate(CURRENT_VIEW); } catch(e) { toast(e.message,true); }
+}
+
 const VIEWS = {
+
+  /* --- الرعاية والتشغيل --- */
+  clinical(main) { return renderOps(main, 'clinical'); },
+  support(main) { return renderOps(main, 'support'); },
+  governance(main) { return renderOps(main, 'governance'); },
 
   /* --- لوحة التحكم --- */
   async dashboard(main) {
     const s = await api('/dashboard/stats');
+    s.operations = await api('/clinical/overview');
     const statuses = s.appointments_by_status || {};
     const maxVal = Math.max(1, ...Object.values(statuses));
     const stLabels = { pending: 'معلّقة', confirmed: 'مؤكدة', cancelled: 'ملغاة', completed: 'مكتملة' };
@@ -921,6 +971,10 @@ const VIEWS = {
         <div class="stat green"><div class="num">${s.revenue_paid.toLocaleString()}</div><div class="lbl">إيرادات محصّلة (ر.س)</div></div>
         <div class="stat red"><div class="num">${s.revenue_unpaid.toLocaleString()}</div><div class="lbl">مستحقات غير محصّلة</div></div>
         <div class="stat"><div class="num">${s.total_departments}</div><div class="lbl">الأقسام</div></div>
+        <div class="stat amber"><div class="num">${s.operations.nursing_pending || 0}</div><div class="lbl">مهام تمريض مفتوحة</div></div>
+        <div class="stat red"><div class="num">${s.operations.surgeries_active || 0}</div><div class="lbl">عمليات نشطة</div></div>
+        <div class="stat"><div class="num">${s.operations.safety_open || 0}</div><div class="lbl">حوادث تحتاج متابعة</div></div>
+        <div class="stat green"><div class="num">${s.operations.maintenance_open || 0}</div><div class="lbl">أوامر صيانة</div></div>
       </div>
       <div class="card">
         <h3>توزيع المواعيد حسب الحالة</h3>
@@ -2718,6 +2772,88 @@ async function changePassword() {
     toast('تم تغيير كلمة المرور ✅');
   } catch (e) { toast(e.message, true); }
 }
+
+/* ========== بحث سريع Ctrl+K ========== */
+let gsTimer = null, gsItems = [], gsActive = 0;
+
+function openGSearch() {
+  if (!localStorage.getItem('hms_token')) return;
+  const back = document.getElementById('gsearch-back');
+  if (!back) return;
+  back.style.display = 'flex';
+  const inp = document.getElementById('gsearch-input');
+  inp.value = '';
+  document.getElementById('gsearch-results').innerHTML =
+    '<div class="gs-empty">اكتب حرفًا واحدًا على الأقل لبدء البحث…</div>';
+  gsItems = []; gsActive = 0;
+  inp.focus();
+}
+
+function closeGSearch() {
+  const back = document.getElementById('gsearch-back');
+  if (back) back.style.display = 'none';
+}
+
+async function gsRun() {
+  const q = document.getElementById('gsearch-input').value.trim();
+  const box = document.getElementById('gsearch-results');
+  if (!q) {
+    box.innerHTML = '<div class="gs-empty">اكتب حرفًا واحدًا على الأقل لبدء البحث…</div>';
+    gsItems = []; gsActive = 0;
+    return;
+  }
+  try {
+    const r = await api('/search/?q=' + encodeURIComponent(q));
+    gsItems = (r && r.results) || [];
+    gsActive = 0;
+    box.innerHTML = gsItems.length
+      ? gsItems.map((it, i) => `
+        <div class="gs-item${i === 0 ? ' active' : ''}" onclick="gsGo(${i})">
+          <div class="gs-ic">${it.icon}</div>
+          <div class="gs-body">
+            <div class="gs-t">${esc(it.title)}</div>
+            <div class="gs-s">${esc(it.subtitle || '')}</div>
+          </div>
+          <span class="gs-tag">${esc(it.type_label || it.type)}</span>
+        </div>`).join('')
+      : '<div class="gs-empty">لا توجد نتائج لـ «' + esc(q) + '»</div>';
+  } catch (e) {
+    box.innerHTML = '<div class="gs-empty">⚠️ ' + esc(e.message) + '</div>';
+  }
+}
+
+function gsGo(i) {
+  const it = gsItems[i];
+  if (!it) return;
+  closeGSearch();
+  navigate(it.view);
+}
+
+document.addEventListener('keydown', (e) => {
+  const back = document.getElementById('gsearch-back');
+  const open = !!(back && back.style.display !== 'none');
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+    e.preventDefault();
+    if (open) closeGSearch(); else openGSearch();
+    return;
+  }
+  if (!open) return;
+  if (e.key === 'Escape') { closeGSearch(); return; }
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (!gsItems.length) return;
+    gsActive = (gsActive + (e.key === 'ArrowDown' ? 1 : gsItems.length - 1)) % gsItems.length;
+    document.querySelectorAll('#gsearch-results .gs-item').forEach((el, idx) => {
+      el.classList.toggle('active', idx === gsActive);
+      if (idx === gsActive) el.scrollIntoView({ block: 'nearest' });
+    });
+    return;
+  }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    gsGo(gsActive);
+  }
+});
 
 /* ========== بدء التشغيل ========== */
 initLang();

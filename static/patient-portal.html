@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>بوابة المريض</title><link rel="stylesheet" href="/ui/app.css">
+  <style>.portal{max-width:1000px;margin:35px auto;padding:20px}.login{max-width:420px;margin:12vh auto}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}.hide{display:none!important}</style>
+</head>
+<body>
+<section id="login" class="card portal login">
+  <h2>👩‍⚕️ بوابة المريض</h2><p>استخدم حساب المنشأ من إدارة المستشفى.</p>
+  <div class="field"><label>اسم المستخدم</label><input id="username"></div>
+  <div class="field"><label>كلمة المرور</label><input id="password" type="password"></div>
+  <button class="btn success" style="margin-top:14px" onclick="login()">تسجيل الدخول</button><p id="error" style="color:#dc3545"></p>
+</section>
+<section id="dashboard" class="portal hide">
+  <div class="card toolbar"><h2 id="welcome" style="margin:0"></h2><button class="btn ghost" onclick="logout()">خروج</button></div>
+  <div class="grid">
+    <div class="card"><h3>المواعيد</h3><div id="appointments"></div></div>
+    <div class="card"><h3>طلبات المختبر والأشعة</h3><div id="lab"></div></div>
+    <div class="card"><h3>الوصفات</h3><div id="prescriptions"></div></div>
+    <div class="card"><h3>الفواتير</h3><div id="invoices"></div></div>
+    <div class="card"><h3>طلبات الرعاية</h3><div id="services"></div></div>
+    <div class="card"><h3>التنويم</h3><div id="admissions"></div></div>
+  </div>
+</section>
+<script>
+const API=''; let token=localStorage.getItem('patientPortalToken');
+const esc=v=>String(v??'-').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const date=v=>v?new Date(v).toLocaleDateString('ar'):'-';
+async function login(){try{const r=await fetch(API+'/patient-portal/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username.value,password:password.value})});const d=await r.json();if(!r.ok)throw Error(d.detail||'فشل الدخول');token=d.access_token;localStorage.setItem('patientPortalToken',token);await load();}catch(e){error.textContent=e.message}}
+async function load(){if(!token)return;const r=await fetch(API+'/patient-portal/me',{headers:{Authorization:'Bearer '+token}});if(r.status===401){logout();return}const d=await r.json();if(!r.ok){error.textContent=d.detail;return}loginBox.classList.add('hide');dashboard.classList.remove('hide');welcome.textContent='مرحبًا '+d.patient.full_name;appointments.innerHTML=rows(d.appointments,x=>`${esc(x.reason)} — ${date(x.appointment_date)}`);lab.innerHTML=rows(d.lab_orders,x=>`${esc(x.test_name)} — ${esc(x.status)}`);prescriptions.innerHTML=rows(d.prescriptions,x=>`وصفة #${x.id} — ${esc(x.status)}`);invoices.innerHTML=rows(d.invoices,x=>`فاتورة #${x.id} — ${Number(x.total_amount||x.amount||0).toFixed(2)} — ${esc(x.status)}`);services.innerHTML=rows(d.service_requests,x=>`${esc(x.title)} — ${esc(x.status)}`);admissions.innerHTML=rows(d.admissions,x=>`دخول ${date(x.admission_date)} — ${esc(x.status)}`)}
+const rows=(arr,fn)=>arr.length?arr.map(x=>`<div style="padding:8px;border-bottom:1px solid #eee">${fn(x)}</div>`).join(''):'<small>لا توجد سجلات</small>';
+function logout(){localStorage.removeItem('patientPortalToken');token=null;dashboard.classList.add('hide');loginBox.classList.remove('hide')}
+const loginBox=document.getElementById('login'),dashboard=document.getElementById('dashboard');load();
+</script></body></html>

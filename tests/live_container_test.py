@@ -512,7 +512,7 @@ def main():
           and b"function adjustStock(" in rr_all)
     rr = c.get("/ui/sw.js")
     check("عامل الخدمة network-first + إصدار الكاش v5",
-          b"hms-shell-v5" in rr.content
+          b"hms-shell-v6" in rr.content
           and "الشبكة أولًا".encode() in rr.content)
     rr = c.get("/")
     check("صفحة الجذر CSS سليم (بدون {{)", b"body { font-family" in rr.content

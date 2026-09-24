@@ -195,6 +195,15 @@ INDEXES = {
     "payroll": ["staff_id", "period"],
     "audit_logs": ["created_at", "username"],
     "patients": ["national_id"],
+    "service_requests": ["service_type", "patient_id", "status", "created_at"],
+    "nursing_tasks": ["patient_id", "department_id", "status", "due_at"],
+    "surgeries": ["patient_id", "surgeon_id", "status", "scheduled_at"],
+    "admissions": ["patient_id", "bed_id", "status", "admission_date"],
+    "blood_units": ["blood_group", "status", "expiry_date"],
+    "maintenance_orders": ["status", "priority", "scheduled_at"],
+    "sterilization_cycles": ["status", "started_at"],
+    "safety_events": ["category", "status", "created_at"],
+    "budgets": ["fiscal_year", "department"],
 }
 
 

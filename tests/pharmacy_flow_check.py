@@ -240,8 +240,22 @@ if m1 and pat:
        f'{base["units"]} -> {s1["units"]}')
     ok("الإيراد زاد 12.0", round(s1["revenue"] - base["revenue"], 2) == 12.0)
     ok("عدد العمليات زاد 1", s1["dispense_count"] == base["dispense_count"] + 1)
-    ok("الصنف ضمن أكثر الأدوية",
-       any(t["medication_id"] == m1["id"] for t in s1["top_medications"]))
+    # دقة تجميع "أكثر الأدوية": وحدات المتصدِّر = مجموع صفوفه غير المرتجعة.
+    # القائمة تراكمية (أول10 لكل الفترات بكسر تعادل المعرّف الأقدم) فلا يُفرض
+    # على صنف هذا التشغيل حجز رتبة فيها؛ عكس الصرف على الأرقام العامة أعلاه
+    # (وحدات/إيراد/عمليات +2/+12/+1) يثبت أصلًا ظهور الصرف في الإحصاء.
+    top10 = s1["top_medications"]
+    if top10:
+        lead = top10[0]
+        dd = c.get("/dispenses/", headers=H,
+                   params={"medication_id": lead["medication_id"]}).json()
+        lead_units = sum(x["quantity"] or 0 for x in dd
+                         if x.get("returned_at") is None)
+        ok("أرقام أكثر الأدوية مطابقة لصفوف الصرف",
+           lead["units"] == lead_units,
+           f'{lead["units"]} vs {lead_units} (صنف {lead["code"]})')
+    else:
+        ok("أكثر الأدوية غير فارغ بعد الصرف", False)
 r = c.get("/pharmacy/stats", headers=H, params={"from_date": "nope"})
 ok("تاريخ خاطئ => 400", r.status_code == 400, str(r.status_code))
 r = c.get("/pharmacy/stats", headers=H, params={
@@ -407,7 +421,7 @@ ok("زر طباعة الوصفة", "/prescriptions/${r.id}/pdf" in ui)
 ok("فلتر حالة الوصفات", "f-rx-status" in ui
    and "function filterRxRows(" in ui)
 ok("زر اقتراحات الطلب CSV", "section=reorder" in ui)
-ok("الكاش v5 كما هو", "hms-shell-v5" in c.get("/ui/sw.js").text)
+ok("الكاش v6 كما هو", "hms-shell-v6" in c.get("/ui/sw.js").text)
 
 # ===== 12) ملصقات الباركود + ورقة نتيجة المختبر + تنبيه المعلّقة =====
 r = c.get("/inventory/labels")

@@ -30,7 +30,7 @@ ok("أيقونة التطبيق متاحة", c.get("/ui/icon.svg").status_code =
 # ===== 2) ملف العامل + اسم الكاش =====
 sw = c.get("/ui/sw.js")
 ok("sw.js يُخدَّم 200", sw.status_code == 200)
-ok("اسم الكاش hms-shell-v5", "hms-shell-v5" in sw.text)
+ok("اسم الكاش hms-shell-v6", "hms-shell-v6" in sw.text)
 ok("skipWaiting: العامل الجديد يستلم فورًا", "skipWaiting" in sw.text)
 ok("cleanup old caches عند activate", "caches.delete" in sw.text)
 

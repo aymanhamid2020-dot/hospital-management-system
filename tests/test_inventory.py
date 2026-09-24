@@ -250,7 +250,7 @@ def test_inventory_ui_markers(client):
     assert "ملصقات الكل" in ui
     assert "label_${m.code}.pdf" in ui
     assert "'🏷️ ملصق': '🏷️ Label'" in ui
-    # الكاش رُفع إلى v5 (شل مجزّأ: الصفحة + app.css + app.js + manifest + الأيقونة)
+    # الكاش رُفع إلى v6 (شل مجزّأ: الصفحة + app.css + app.js + manifest + الأيقونة)
     sw = client.get("/ui/sw.js").text
-    assert "hms-shell-v5" in sw
+    assert "hms-shell-v6" in sw
     assert "/ui/app.js" in sw and "/ui/app.css" in sw

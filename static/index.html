@@ -38,7 +38,10 @@
       <a href="#" data-view="lab">🔬 المختبر</a>
       <a href="#" data-view="pharmacy">💊 الصيدلية</a>
       <a href="#" data-view="inventory">📦 المخزون</a>
-      <a href="#" data-view="records">📋 السجلات الطبية</a>
+      <a href="#" data-view="clinical">🏥 الرعاية والتشغيل</a>
+      <a href="#" data-view="support">🛠️ الصيانة والتعقيم</a>
+      <a href="#" data-view="governance">🛡️ الجودة والموارد</a>
+      <a href="/ui/patient-portal.html" target="_blank">👩‍⚕️ بوابة المريض</a>
       <a href="#" data-view="attachments">📎 المرفقات</a>
       <a href="#" data-view="departments">🏢 الأقسام</a>
       <a href="#" data-view="beds">🛏️ الأسرّة</a>
@@ -57,6 +60,7 @@
       <header class="topbar">
         <h2 id="page-title">لوحة التحكم</h2>
         <div class="userbox">
+          <button class="btn ghost sm" onclick="openGSearch()" title="بحث سريع (Ctrl+K)">🔍 Ctrl+K</button>
           <button class="btn ghost sm" id="bell" onclick="navigate('notifications')" title="الإشعارات">🔔 <span id="bell-count">0</span></button>
           <span id="ub-name"></span>
           <span class="role-badge" id="ub-role"></span>
@@ -67,6 +71,16 @@
       </header>
       <main id="main"></main>
     </div>
+  </div>
+</div>
+
+<!-- ===== بحث سريع Ctrl+K ===== -->
+<div id="gsearch-back" onclick="if(event.target===this)closeGSearch()">
+  <div id="gsearch-box">
+    <input id="gsearch-input" autocomplete="off"
+           placeholder="ابحث عن مريض أو دواء أو فاتورة أو موعد أو وصفة… (Esc للإغلاق)"
+           oninput="clearTimeout(gsTimer); gsTimer = setTimeout(gsRun, 250)">
+    <div id="gsearch-results"></div>
   </div>
 </div>
 

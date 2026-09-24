@@ -445,3 +445,217 @@ class PrescriptionItem(Base):
     def remaining(self) -> int:
         """المتبقي من البند بعد الصرف — يُستخدم في واجهة الوصفة."""
         return max(0, (self.quantity or 0) - (self.dispensed_quantity or 0))
+
+
+# ===== محاور الرعاية والتشغيل المتقدم =====
+# الحالات كنصوص لتسهيل الترحيل بين SQLite وPostgreSQL دون قيود ENUM جديدة.
+
+
+class ServiceRequest(Base):
+    """طلب موحد لمجموعات الرعاية والأسنان والعلاج الطبيعي والطوارئ المنزلية والعافية والغذاء."""
+    __tablename__ = "service_requests"
+    id = Column(Integer, primary_key=True, index=True)
+    service_type = Column(String, nullable=False, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, index=True)
+    title = Column(String, nullable=False)
+    details = Column(String, nullable=True)
+    priority = Column(String, nullable=False, default="normal")
+    status = Column(String, nullable=False, default="pending")
+    scheduled_at = Column(DateTime, nullable=True)
+    assigned_to = Column(String, nullable=True)
+    result = Column(String, nullable=True)
+    created_by = Column(String, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    patient = relationship("Patient")
+
+
+class NursingTask(Base):
+    """مهمة تمريض مرتبطة بالمريض والقسم ووردية العمل."""
+    __tablename__ = "nursing_tasks"
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, index=True)
+    department_id = Column(Integer, ForeignKey("departments.id", ondelete="SET NULL"), nullable=True)
+    title = Column(String, nullable=False)
+    instructions = Column(String, nullable=True)
+    shift = Column(String, nullable=False, default="day")
+    priority = Column(String, nullable=False, default="normal")
+    status = Column(String, nullable=False, default="pending")
+    assigned_to = Column(String, nullable=True)
+    due_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    created_by = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    patient = relationship("Patient")
+    department = relationship("Department")
+
+
+class Surgery(Base):
+    """حجز عملية ودورة تشغيلها في مسرح العمليات."""
+    __tablename__ = "surgeries"
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, index=True)
+    surgeon_id = Column(Integer, ForeignKey("doctors.id", ondelete="SET NULL"), nullable=True)
+    procedure_name = Column(String, nullable=False)
+    theater = Column(String, nullable=True)
+    priority = Column(String, nullable=False, default="elective")
+    status = Column(String, nullable=False, default="scheduled")
+    scheduled_at = Column(DateTime, nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    pre_op_notes = Column(String, nullable=True)
+    post_op_notes = Column(String, nullable=True)
+    created_by = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    patient = relationship("Patient")
+    surgeon = relationship("Doctor")
+
+
+class Admission(Base):
+    """دورة تنويم داخلي مرتبطة بالمريض والسرير."""
+    __tablename__ = "admissions"
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, index=True)
+    bed_id = Column(Integer, ForeignKey("beds.id", ondelete="SET NULL"), nullable=True)
+    department_id = Column(Integer, ForeignKey("departments.id", ondelete="SET NULL"), nullable=True)
+    admission_date = Column(DateTime, nullable=False)
+    discharge_date = Column(DateTime, nullable=True)
+    status = Column(String, nullable=False, default="admitted")
+    diagnosis = Column(String, nullable=True)
+    notes = Column(String, nullable=True)
+    created_by = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    patient = relationship("Patient")
+    bed = relationship("Bed")
+    department = relationship("Department")
+
+
+class BloodUnit(Base):
+    """وحدة دم مع الصلاحية وحالة الاستخدام."""
+    __tablename__ = "blood_units"
+    id = Column(Integer, primary_key=True, index=True)
+    unit_number = Column(String, nullable=False, unique=True)
+    donor_name = Column(String, nullable=False)
+    blood_group = Column(String, nullable=False, index=True)
+    component = Column(String, nullable=False, default="whole_blood")
+    quantity_ml = Column(Integer, nullable=False, default=450)
+    status = Column(String, nullable=False, default="available")
+    expiry_date = Column(DateTime, nullable=True, index=True)
+    recipient_patient_id = Column(Integer, ForeignKey("patients.id", ondelete="SET NULL"), nullable=True)
+    notes = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    recipient = relationship("Patient")
+
+
+class MaintenanceOrder(Base):
+    """أمر صيانة جهاز مع الأولوية والتكلفة ودورة الإصلاح."""
+    __tablename__ = "maintenance_orders"
+    id = Column(Integer, primary_key=True, index=True)
+    asset_name = Column(String, nullable=False)
+    serial_number = Column(String, nullable=True)
+    location = Column(String, nullable=True)
+    issue = Column(String, nullable=False)
+    priority = Column(String, nullable=False, default="normal")
+    status = Column(String, nullable=False, default="open")
+    technician = Column(String, nullable=True)
+    scheduled_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    cost = Column(Float, nullable=False, default=0)
+    notes = Column(String, nullable=True)
+    created_by = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+
+class SterilizationCycle(Base):
+    """دورة تعقيم مع نتيجة فحص الإفراج."""
+    __tablename__ = "sterilization_cycles"
+    id = Column(Integer, primary_key=True, index=True)
+    machine_name = Column(String, nullable=False)
+    cycle_type = Column(String, nullable=False, default="autoclave")
+    load_description = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="running")
+    started_at = Column(DateTime, nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+    result = Column(String, nullable=True)
+    operator_name = Column(String, nullable=True)
+    created_by = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class SafetyEvent(Base):
+    """حادث سلامة أو مكافحة عدوى مع المتابعة."""
+    __tablename__ = "safety_events"
+    id = Column(Integer, primary_key=True, index=True)
+    category = Column(String, nullable=False, default="incident")
+    severity = Column(String, nullable=False, default="low")
+    title = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    location = Column(String, nullable=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="SET NULL"), nullable=True)
+    status = Column(String, nullable=False, default="open")
+    preventive_action = Column(String, nullable=True)
+    reported_by = Column(String, nullable=True)
+    assigned_to = Column(String, nullable=True)
+    occurred_at = Column(DateTime, nullable=True)
+    resolved_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class Budget(Base):
+    """ميزانية سنوية أو حسب القسم مع المخطط والمنصرف."""
+    __tablename__ = "budgets"
+    id = Column(Integer, primary_key=True, index=True)
+    fiscal_year = Column(Integer, nullable=False, index=True)
+    department = Column(String, nullable=False)
+    category = Column(String, nullable=False)
+    allocated_amount = Column(Float, nullable=False, default=0)
+    spent_amount = Column(Float, nullable=False, default=0)
+    notes = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class FixedAsset(Base):
+    """أصل ثابت مع التكلفة وحالة التشغيل."""
+    __tablename__ = "fixed_assets"
+    id = Column(Integer, primary_key=True, index=True)
+    asset_code = Column(String, nullable=False, unique=True)
+    name = Column(String, nullable=False)
+    category = Column(String, nullable=False)
+    department = Column(String, nullable=True)
+    purchase_date = Column(DateTime, nullable=True)
+    purchase_cost = Column(Float, nullable=False, default=0)
+    salvage_value = Column(Float, nullable=False, default=0)
+    useful_life_years = Column(Integer, nullable=False, default=5)
+    status = Column(String, nullable=False, default="active")
+    location = Column(String, nullable=True)
+    notes = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class PatientPortalAccount(Base):
+    """حساب بوابة مريض مرتبط بسجل واحد فقط."""
+    __tablename__ = "patient_portal_accounts"
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, unique=True)
+    username = Column(String, nullable=False, unique=True)
+    hashed_password = Column(String, nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    last_login_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+class GeneralStockItem(Base):
+    """مخزون عام للمستلزمات الطبية وغير الدوائية مع حد إعادة الطلب."""
+    __tablename__ = "general_stock_items"
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String, nullable=False, unique=True)
+    name = Column(String, nullable=False)
+    category = Column(String, nullable=False, default="medical_supplies")
+    warehouse = Column(String, nullable=False, default="main")
+    quantity = Column(Integer, nullable=False, default=0)
+    min_quantity = Column(Integer, nullable=False, default=0)
+    unit = Column(String, nullable=False, default="قطعة")
+    unit_cost = Column(Float, nullable=False, default=0)
+    expiry_date = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
