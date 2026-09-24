@@ -5,6 +5,8 @@
 """
 import uuid
 
+import pytest
+
 
 def _suffix() -> str:
     return uuid.uuid4().hex[:8]
@@ -130,3 +132,97 @@ def test_advanced_clinical_and_patient_portal_flow(client, admin):
         "password": "WrongPassword123!",
     })
     assert bad_login.status_code == 401
+
+
+@pytest.mark.parametrize("service_type", [
+    "care_sets", "dental", "physiotherapy", "emergency",
+    "home_health", "wellness", "nutrition",
+])
+def test_all_service_request_types_flow(client, admin, service_type):
+    suffix = _suffix()
+    patient_id = _make_patient(client, admin)
+    response = client.post("/clinical/service-requests", headers=admin, json={
+        "service_type": service_type,
+        "patient_id": patient_id,
+        "title": f"طلب {service_type} {suffix}",
+        "priority": "normal",
+    })
+    assert response.status_code == 200, response.text
+    item_id = response.json()["id"]
+    assert response.json()["service_type"] == service_type
+
+    completed = client.post(
+        f"/clinical/service-requests/status/{item_id}",
+        headers=admin,
+        json={"status": "completed"},
+    )
+    assert completed.status_code == 200, completed.text
+    assert completed.json()["status"] == "completed"
+    assert completed.json()["completed_at"] is not None
+
+
+def test_support_and_governance_resources_flow(client, admin):
+    suffix = _suffix()
+    patient_id = _make_patient(client, admin)
+    department = client.post("/departments/", headers=admin, json={
+        "name": f"قسم الدعم {suffix}",
+    })
+    assert department.status_code == 200, department.text
+    department_id = department.json()["id"]
+
+    resources = [
+        ("nursing-tasks", {
+            "patient_id": patient_id, "department_id": department_id,
+            "title": f"مهمة تمريض {suffix}", "shift": "night",
+        }, "completed"),
+        ("surgeries", {
+            "patient_id": patient_id,
+            "procedure_name": f"عملية {suffix}", "priority": "elective",
+        }, "completed"),
+        ("blood-bank", {
+            "unit_number": f"BU-{suffix}", "donor_name": "متبرع تكاملي",
+            "blood_group": "O+", "expiry_date": "2028-01-01T00:00:00",
+        }, "issued"),
+        ("maintenance", {
+            "asset_name": f"جهاز {suffix}", "issue": "فحص دوري",
+            "priority": "high",
+        }, "completed"),
+        ("sterilization", {
+            "machine_name": f"Autoclave {suffix}", "load_description": "حزمة أدوات",
+            "started_at": "2026-01-15T08:00:00",
+        }, "passed"),
+        ("safety-events", {
+            "category": "incident", "severity": "low",
+            "title": f"حادثة اختبار {suffix}", "patient_id": patient_id,
+        }, "resolved"),
+        ("budgets", {
+            "fiscal_year": 2026, "department": "الدعم",
+            "category": "صيانة", "allocated_amount": 5000,
+        }, None),
+        ("assets", {
+            "asset_code": f"AST-{suffix}", "name": f"أصل {suffix}",
+            "category": "medical_equipment", "purchase_cost": 12000,
+        }, "active"),
+    ]
+
+    for path, payload, terminal_status in resources:
+        created = client.post(f"/clinical/{path}", headers=admin, json=payload)
+        assert created.status_code == 200, (path, created.text)
+
+        # الميزانيات سجل مستقل بلا حالة تشغيلية.
+        if terminal_status is None:
+            assert created.json()["allocated_amount"] == payload["allocated_amount"]
+            continue
+
+        # الأصول لا تحتاج تغيير حالة لاختبار الإنشاء، والحالة الافتراضية active.
+        if terminal_status == "active":
+            assert created.json()["status"] == "active"
+            continue
+
+        item_id = created.json()["id"]
+        changed = client.post(
+            f"/clinical/{path}/status/{item_id}", headers=admin,
+            json={"status": terminal_status},
+        )
+        assert changed.status_code == 200, (path, changed.text)
+        assert changed.json()["status"] == terminal_status
