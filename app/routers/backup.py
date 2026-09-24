@@ -1,5 +1,4 @@
 import os
-import shutil
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -31,7 +30,18 @@ async def create_backup(_: User = Depends(require_admin)):
     os.makedirs(BACKUP_DIR, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     dest = os.path.join(BACKUP_DIR, f"hospital_{timestamp}.db")
-    shutil.copy2(src, dest)
+    # نسخ متسق عبر sqlite backup API — shutil.copy مع WAL يلتقط ملفًا
+    # غير متسق (الم transactions في hospital.db-wal) فيرفضه quick_check عند الاستعادة
+    import sqlite3
+    src_con = sqlite3.connect(src, timeout=10)
+    try:
+        dest_con = sqlite3.connect(dest)
+        try:
+            src_con.backup(dest_con)
+        finally:
+            dest_con.close()
+    finally:
+        src_con.close()
 
     size_kb = round(os.path.getsize(dest) / 1024, 2)
     return {
