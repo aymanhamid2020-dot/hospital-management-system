@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🛡️ جولة صلابة النسخ الاحتياطي | نظام إدارة المستشفيات</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", Tahoma, Arial, sans-serif; background: #f4f6fa; color: #1e293b; line-height: 1.85; }
+  header.hero { background: linear-gradient(135deg, #0f766e, #2c7be5); color: #fff; padding: 42px 20px; text-align: center; }
+  header.hero h1 { font-size: 30px; margin-bottom: 8px; }
+  header.hero p { opacity: .92; font-size: 16px; }
+  nav.toc { background: #fff; border-bottom: 1px solid #e2e8f0; padding: 12px 16px; text-align: center; position: sticky; top: 0; z-index: 50; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+  nav.toc a { display: inline-block; margin: 4px 7px; padding: 6px 14px; border-radius: 20px; background: #eef4ff; color: #2c7be5; text-decoration: none; font-size: 14px; font-weight: 600; }
+  nav.toc a:hover { background: #2c7be5; color: #fff; }
+  main { max-width: 1100px; margin: 30px auto 0; padding: 0 18px 50px; }
+  section.step { background: #fff; border-radius: 14px; box-shadow: 0 4px 16px rgba(0,0,0,.06); padding: 28px 30px; margin-bottom: 34px; }
+  h2 { font-size: 23px; margin-bottom: 12px; color: #0f172a; }
+  h2 .n { display: inline-block; background: #0f766e; color: #fff; width: 40px; height: 40px; border-radius: 50%; text-align: center; line-height: 40px; font-size: 18px; margin-left: 10px; vertical-align: middle; }
+  h3 { font-size: 17px; margin: 18px 0 8px; color: #0f766e; }
+  p, li { margin-bottom: 9px; font-size: 16px; }
+  ul, ol { padding-right: 24px; margin-bottom: 8px; }
+  img.shot { width: 100%; border: 1px solid #dbe3f0; border-radius: 10px; margin-top: 14px; box-shadow: 0 8px 22px rgba(0,0,0,.12); display: block; }
+  .cap { text-align: center; color: #64748b; font-size: 14px; margin-top: 8px; }
+  .badge { display: inline-block; padding: 2px 11px; border-radius: 13px; font-size: 13px; font-weight: 600; margin: 0 3px 6px 0; }
+  .b-ui   { background: #fef9c3; color: #a16207; }
+  .b-api  { background: #dcfce7; color: #15803d; }
+  .b-task { background: #e0f2fe; color: #0369a1; }
+  code { background: #f1f5f9; padding: 2px 7px; border-radius: 6px; font-size: 14px; direction: ltr; display: inline-block; unicode-bidi: embed; }
+  .note { background: #fff7ed; border-right: 4px solid #f97316; padding: 12px 16px; border-radius: 8px; margin-top: 14px; font-size: 15px; }
+  .tip  { background: #f0fdf4; border-right: 4px solid #22c55e; padding: 12px 16px; border-radius: 8px; margin-top: 14px; font-size: 15px; }
+  table.roles { width: 100%; border-collapse: collapse; margin: 10px 0 4px; }
+  table.roles th, table.roles td { border: 1px solid #e2e8f0; padding: 8px 12px; text-align: right; font-size: 15px; }
+  table.roles th { background: #f8fafc; font-weight: 700; }
+  footer { text-align: center; padding: 30px 16px 40px; color: #64748b; font-size: 14px; }
+  footer a { color: #2c7be5; text-decoration: none; font-weight: 600; margin: 0 8px; }
+  @media (max-width: 700px) { section.step { padding: 18px 16px; } header.hero h1 { font-size: 23px; } }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <h1>🛡️ جولة صلابة النسخ الاحتياطي</h1>
+  <p>ست لقطات حيّة — من تسجيل الدخول إلى فحص السلامة 🩺 والتنظيف حسب السياسة 🧹 ولوحة المراقبة 📊 (الاحتفاظ بآخر 7 من كل نوع)</p>
+</header>
+
+<nav class="toc">
+  <a href="#s1">1️⃣ الدخول</a>
+  <a href="#s2">2️⃣ شاشة النسخ 💾</a>
+  <a href="#s3">3️⃣ فحص السلامة 🩺</a>
+  <a href="#s4">4️⃣ إنشاء نسخة</a>
+  <a href="#s5">5️⃣ التنظيف 🧹</a>
+  <a href="#s6">6️⃣ المراقبة 📊</a>
+</nav>
+
+<main>
+
+  <!-- ============ 1 ============ -->
+  <section class="step" id="s1">
+    <h2><span class="n">1</span> البداية: تسجيل الدخول 🔐</h2>
+    <p>افتح <code>/ui</code> في نافذة خاصّة (Incognito) لترى شاشة الدخول مباشرة. شاشة النسخ
+       الاحتياطي <b>للمدير فقط</b> — أي دور آخر يرى «🔒 هذه الصفحة متاحة للمدير فقط»، وبدون
+       توكن <b>401</b> لكل النهايات.</p>
+    <table class="roles">
+      <tr><th>الدور</th><th>اسم المستخدم</th><th>كلمة المرور</th><th>النسخ الاحتياطي</th></tr>
+      <tr><td>👨‍💼 مدير</td><td><code>admin</code></td><td><code>admin123</code></td><td>✅ كامل (إنشاء/فحص/تنظيف/استعادة)</td></tr>
+      <tr><td>🩺 طبيب</td><td><code>drsara</code></td><td><code>sara12345</code></td><td>🔒 مرفوض 403</td></tr>
+      <tr><td>🧑‍💼 موظف استقبال</td><td><code>reception1</code></td><td><code>rec12345</code></td><td>🔒 مرفوض 403</td></tr>
+    </table>
+    <img class="shot" src="screenshots/backup-tour/01-login.png" alt="شاشة تسجيل الدخول">
+    <div class="cap">شاشة الدخول — نافذة خاصّة ببروفايل نظيف تمامًا</div>
+  </section>
+
+  <!-- ============ 2 ============ -->
+  <section class="step" id="s2">
+    <h2><span class="n">2</span> شاشة النسخ الاحتياطي 💾</h2>
+    <span class="badge b-api">GET /backup</span><span class="badge b-api">GET /backup/status</span><span class="badge b-ui">واجهة</span>
+    <p>الشريط الجانبي ← <b>💾 النسخ الاحتياطي</b>. أعلى الشاشة ثلاثة أزرار، وتحتها
+       <b>سطر حالة حيّ</b> يقرأ <code>/backup/status</code> لحظيًا:</p>
+    <ul>
+      <li>📁 <b>العدد والحجم</b>: كم ملفًا موجود وحجمه الإجمالي بالميغابايت.</li>
+      <li>🗂️ <b>سياسة الاحتفاظ</b>: «آخر 7 من كل نوع» — يُحدَّد من بيئة التشغيل
+          (<code>BACKUP_KEEP_*</code>).</li>
+      <li>💽 <b>المساحة الحرّة</b> على القرص قبل أن تفاجأك بامتلاء الأسطر.</li>
+    </ul>
+    <h3>الجدول:</h3>
+    <ul>
+      <li>اسمه وحجمه وتاريخ إنشائه بدقة — أحدث النسخ أولًا.</li>
+      <li>لكل صف: <b>⬇️ تنزيل</b> فوري · <b>♻️ استعادة</b> (تظهر فقط للملفات القابلة
+          للاستعادة — ملفات قاعدة البيانات الحالية).</li>
+    </ul>
+    <img class="shot" src="screenshots/backup-tour/02-backup.png" alt="شاشة النسخ الاحتياطي">
+    <div class="cap">شاشة النسخ — الأزرار الثلاثة + سطر الحالة «14 ملف (10.65 م.ب) · الاحتفاظ بآخر 7 من كل نوع · حرّ 245013.4 م.ب»</div>
+    <div class="tip">💡 الواجهة تُظهر الاتجاه الطبيعي: الأحدث أعلى الجدول، وملفات
+      <code>hospital_*</code> (نسخ يدوية/دورية) و<code>auto_*</code> (تلقائية كل 24 ساعة)
+      معاً في قائمة واحدة.</div>
+  </section>
+
+  <!-- ============ 3 ============ -->
+  <section class="step" id="s3">
+    <h2><span class="n">3</span> 🩺 فحص السلامة — تأكّد قبل أن تحتاجها</h2>
+    <span class="badge b-api">GET /backup/verify</span><span class="badge b-ui">واجهة</span>
+    <p>زر <b>«🩺 فحص السلامة»</b> يستدعي <code>/backup/verify?limit=20</code>: يقرأ كل ملف
+       و<b>يتحقق من سلامته دون أي كتابة</b> — العناوين وعدد المستخدمين داخل قاعدة النسخ —
+       ثم يعيد قائمة <code>ok</code> و<code>bad</code>.</p>
+    <h3>النتيجة تظهر في لقطة واحدة:</h3>
+    <ul>
+      <li>كل النسخ سليمة ← توست أخضر <b>«🩺 سليمات 14/14 نسخة ✅»</b>.</li>
+      <li>أي تالفة ← توست أحمر يسمّيها بالاسم: <b>«⚠️ 1 من 14 تالفة: الملف_الفاشل.db»</b>
+          لتعرف بالضبط أيها يجب إعادة إنشائه.</li>
+    </ul>
+    <p>وللدقّة العميقة: <code>?deep=integrity</code> يفحص بنية الملف كاملًا (أبطأ وأشمل) —
+       والفحص الافتراضي سريع يكفي للاستخدام اليومي. <code>?deep=bad</code> يعيد فحص
+       الملفات المشبوهة فقط.</p>
+    <img class="shot" src="screenshots/backup-tour/03-verify.png" alt="فحص السلامة يعرض 14/14 سليمة">
+    <div class="cap">فحص السلامة — توست «🩺 سليمات 14/14 نسخة ✅» أسفل اليسار والقائمة محدَّثة</div>
+    <div class="note">🔎 في اللقطة: أُجري الفحص على أحدث 20 ملفًا — والنتيجة 14/14 سليمة.
+      الفحص قراءة فقط: لا يلمس البيانات ولا يحتاج توقّف الخادم.</div>
+  </section>
+
+  <!-- ============ 4 ============ -->
+  <section class="step" id="s4">
+    <h2><span class="n">4</span> 💾 إنشاء نسخة الآن</h2>
+    <span class="badge b-api">POST /backup</span><span class="badge b-ui">واجهة</span>
+    <p>زر <b>«💾 إنشاء نسخة احتياطية الآن»</b> — نسخة كاملة لقاعدة البيانات باسم
+       <code>hospital_YYYYMMDD_HHMMSS.db</code> تظهر في أعلى الجدول فورًا.</p>
+    <h3>ما يحدث خلف الكواليس:</h3>
+    <ul>
+      <li>النسخ يتمّ في <b>معاملة واحدة آمنة</b> (SQLite backup API) — لا نسخة ناقصة
+          أثناء الكتابة.</li>
+      <li><b>التقليم التلقائي بعدها مباشرة</b>: قبل إظهار النجاح يُستدعى
+          <code>prune_backups()</code> — فلا يتراكم شيء حتى لو نسيت زر التنظيف.</li>
+      <li>التوست يذكر اسم الملف وحجمه، والجدول ينعكس عليه مباشرة.</li>
+    </ul>
+    <img class="shot" src="screenshots/backup-tour/04-create.png" alt="إنشاء نسخة جديدة">
+    <div class="cap">بعد النقر — نسخة جديدة <code>hospital_20260924_224103.db</code> (984KB) في رأس القائمة مع توست النجاح</div>
+    <div class="tip">💡 جرّبها من Swagger مباشرة: <code>POST /backup</code> بتوكن المدير —
+      نفس النتيجة تمامًا كما في الواجهة.</div>
+  </section>
+
+  <!-- ============ 5 ============ -->
+  <section class="step" id="s5">
+    <h2><span class="n">5</span> 🧹 التنظيف حسب السياسة</h2>
+    <span class="badge b-api">POST /backup/prune</span><span class="badge b-ui">واجهة</span>
+    <p>زر <b>«🧹 تنظيف النسخ حسب السياسة»</b> يستدعي <code>POST /backup/prune</code> —
+       القاعدة بسيطة وقاطعة:</p>
+    <ul>
+      <li>يُبقي <b>آخر 7</b> من <code>hospital_*</code> و<b>آخر 7</b> من <code>auto_*</code>.</li>
+      <li>لا يلمس أي ملف خارج النوعين مهما كان عمره.</li>
+      <li>التوست يبلّغ بالصراحة: <b>«🧹 حُذف N نسخة زائدة (الاحتفاظ بآخر 7 لكل نوع) ✅»</b> —
+          ولو لا شيء يُحذف يقلّص قلبك: «حُذف 0».</li>
+    </ul>
+    <p>وإلى جانب الزر: التقليم يجري <b>تلقائيًا بعد كل إنشاء</b> — أي أن السياسة مطبّقة
+       دائمًا حتى لو لم تفتح الشاشة أسبوعًا. (parameter <code>?keep=</code> يسمح بتجاوز
+       العدد مؤقتًا).</p>
+    <img class="shot" src="screenshots/backup-tour/05-prune.png" alt="التنظيف حسب السياسة">
+    <div class="cap">التنظيف — «حُذف 0 نسخة زائدة» لأن المكدّس ملتزم بالسياسة أصلًا (14 ملفًا = 7 + 7)</div>
+    <div class="note">🔎 قبل هذه المرحلة كان مجلد <code>app/backups</code> يحوي <b>170 ملفًا</b>
+      متراكمة من الاختبارات — شغّلت السياسة تنظّفه إلى <b>14</b> في مرّة واحدة، ومنع التراكم
+      من جديد منذ ذلك الحين.</div>
+  </section>
+
+  <!-- ============ 6 ============ -->
+  <section class="step" id="s6">
+    <h2><span class="n">6</span> 📊 لوحة المراقبة — النسخ من بعيد</h2>
+    <span class="badge b-api">GET /monitor</span><span class="badge b-task">مهمة خلفية</span>
+    <p>صفحة <code>/monitor</code> (داكنة، بلا دخول) لحظة نظرتك الأولى على النظام كل صباح:
+       بطاقة <b>النسخ الاحتياطي</b> فيها:</p>
+    <ul>
+      <li>⏰ <b>«كل 24 ساعة»</b> — وتوقّع النسخة التلقائية القادمة (مهمة خلفية).</li>
+      <li>🗂️ سياسة الاحتفاظ بآخر 7 من كل نوع + <b>العدد والحجم الآن</b> (14 ملف · 10.83 م.ب).</li>
+      <li>وبجوارها بقية المؤشرات: قاعدة البيانات مصقولة ✅ · تذكير المواعيد · حالة النظام.</li>
+    </ul>
+    <img class="shot" src="screenshots/backup-tour/06-monitor.png" alt="لوحة المراقبة ببطاقة النسخ الاحتياطي">
+    <div class="cap">لوحة المراقبة — بطاقة النسخ (أعلى الوسط) تتحدّث مع كل استعلام من <code>/status</code></div>
+    <div class="note">🔔 بطاقة النسخ تعرض ما يقوله <code>/status</code> فعليًا: عدّ الملفات
+      وإجمالي الميجابايت — أي تغيّر في المجلد (بأي وسيلة) ينعكس على اللوحة فورًا.</div>
+  </section>
+
+  <section class="step">
+    <h2>🎓 انتهى؟ الخطوة التالية</h2>
+    <ul>
+      <li>📘 <a href="user-guide.html">دليل المستخدم الكامل</a> — كل الشاشات والأدوار (وPDF: <a href="user-guide.pdf">user-guide.pdf</a>).</li>
+      <li>🎓 <a href="pharmacy-tour.html">جولة الصيدلية والمختبر</a> — الجولة التفاعلية السابقة (6 شاشات).</li>
+      <li>🧪 للفحص الآلي: <code>pytest</code> (182 اختبارًا — منها 13 لصلابة النسخ
+          <code>test_backup_hardening.py</code>) · <code>stack_check.py</code> (83 فحصًا على
+          قاعدة نظيفة) · <code>load_test.py</code> (p95 ≤ 800ms) — والكل يجري الآن على
+          <b>GitHub Actions</b> عند كل دفع (أول جولة خضراء كاملة: run #10).</li>
+      <li>🐙 المستودع: <a href="https://github.com/aymanhamid2020-dot/hospital-management-system">github.com/aymanhamid2020-dot/hospital-management-system</a>.</li>
+    </ul>
+  </section>
+
+</main>
+
+<footer>
+  نظام إدارة المستشفيات والعيادات — FastAPI · SQLite/Postgres · Docker · PWA<br>
+  <a href="user-guide.html">📘 دليل المستخدم</a>
+  <a href="pharmacy-tour.html">🎓 جولة الصيدلية</a>
+  <a href="https://github.com/aymanhamid2020-dot/hospital-management-system">🐙 GitHub</a>
+  <a href="../#ه-المميزات">🏠 README</a>
+</footer>
+
+</body>
+</html>

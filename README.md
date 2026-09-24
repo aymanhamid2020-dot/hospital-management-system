@@ -1,5 +1,7 @@
 # نظام إدارة المستشفيات والعيادات 🏥
 
+[![CI](https://github.com/aymanhamid2020-dot/hospital-management-system/actions/workflows/ci.yml/badge.svg)](https://github.com/aymanhamid2020-dot/hospital-management-system/actions/workflows/ci.yml)
+
 نظام متكامل مبني باستخدام **FastAPI** لإدارة المستشفيات والعيادات الطبية.
 
 ## لقطات سريعة
@@ -13,6 +15,8 @@
 | ![دخول](docs/screenshots/login.png) | ![ترحيب](docs/screenshots/welcome.png) |
 
 🎓 **جولة تفاعلية باللقطات الحيّة** — [docs/pharmacy-tour.html](docs/pharmacy-tour.html): 6 شاشات حقيقية من الدخول إلى تنبيه الوصفات المعلّقة ⏳ وملصقات الباركود 🏷️ وورقة نتيجة المختبر 🖨️
+
+🛡️ **جولة صلابة النسخ الاحتياطي** — [docs/backup-tour.html](docs/backup-tour.html): 6 شاشات من الدخول إلى فحص السلامة 🩺 والتنظيف حسب السياسة 🧹 وبطاقة المراقبة 📊
 
 ## المميزات
 
@@ -247,6 +251,7 @@ curl -X POST http://127.0.0.1:8000/auth/login ^
 | http://127.0.0.1:8000/health | فحص حالة النظام |
 | [docs/user-guide.pdf](docs/user-guide.pdf) | 📘 **دليل المستخدم النهائي** (PDF عربي شامل) |
 | [docs/pharmacy-tour.html](docs/pharmacy-tour.html) | 🎓 **جولة تفاعلية باللقطات الحيّة** (الصيدلية/الملصقات/المختبر) |
+| [docs/backup-tour.html](docs/backup-tour.html) | 🛡️ **جولة صلابة النسخ الاحتياطي** (فحص 🩺 · إنشاء 💾 · تنظيف 🧹 · مراقبة 📊) |
 
 ## بنية المشروع
 
