@@ -8,6 +8,12 @@ body { font-family: sans-serif; max-width: 900px; margin: 40px auto; padding: 20
 h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }
 h2 { color: #2980b9; margin-top: 30px; }
 .tag { display: inline-block; background: #3498db; color: #fff; padding: 3px 10px; border-radius: 12px; font-size: 12px; margin-left: 8px; }
+.tag.ok { background: #27ae60; }
+.shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 18px; margin-top: 18px; }
+figure { margin: 0; background: #fff; border: 1px solid #dfe6ee; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 14px rgba(0,0,0,.06); }
+figure img { width: 100%; display: block; }
+figcaption { font-size: 13px; padding: 10px 12px; color: #556; }
+ul.fix { line-height: 1.9; }
 </style>
 </head>
 <body>
@@ -24,7 +30,27 @@ h2 { color: #2980b9; margin-top: 30px; }
 <p><code>GET /{id}/license.pdf</code> — مستند إلكتروني للطباعة.</p>
 <h2>6. ترقية CI 🚀</h2>
 <p>مصفوفة Python 3.12/3.13 + أرشفة artifacts.</p>
-<h3>المؤشرات النهائية</h3>
+<h3>المؤشرات (الدورة الأولى)</h3>
 <p>pytest ✅ | stack 86/0 | PWA 26/0 | حمل p95 ≤110ms ✅ | Docker ✅</p>
+
+<h2>7. اختبارات E2E 🎭 <span class="tag ok">Playwright 10/10</span></h2>
+<p>ستة اختبارات متصفح آلية على <code>http://127.0.0.1:8001</code>: تسجيل الدخول 📝 · التقرير المقارن PDF 📄 · تصدير CSV ⬇️ · بطاقة الترخيص 🪪 · جدول النوبات 🗓️ (يُحفظ دون تغيير البيانات) · الوضع الداكن 🌙.</p>
+
+<div class="shots">
+  <figure><img src="screenshots/doctors-e2e/01-doctors-dark.png" alt="قائمة الأطباء بالوضع الداكن"><figcaption>١ — قائمة الأطباء بالوضع الداكن (يتبع تفضيل النظام)</figcaption></figure>
+  <figure><img src="screenshots/doctors-e2e/02-compare.png" alt="نافذة التقرير المقارن"><figcaption>٢ — نافذة التقرير المقارن لجميع الأطباء 📊</figcaption></figure>
+  <figure><img src="screenshots/doctors-e2e/03-schedule.png" alt="جدول النوبات الأسبوعية"><figcaption>٣ — جدول النوبات الأسبوعي (سبعة أيام) 🗓️</figcaption></figure>
+  <figure><img src="screenshots/doctors-e2e/04-report.png" alt="تقرير الأداء الشهري"><figcaption>٤ — تقرير أداء الطبيب الشهري 📈</figcaption></figure>
+</div>
+
+<h2>8. إصلاحات الجودة 🔧 <span class="tag ok">الدورة الثانية</span></h2>
+<ul class="fix">
+  <li><b>الثيم:</b> تفضيل النظام لم يعد يلغي اختيار المستخدم الصريح — الاختيار يبقى بعد إعادة التحميل.</li>
+  <li><b>التنقل:</b> جدولة عرض الشاشات المتتالية — لوحة التحكم البطيئة كانت تكتب محتواها فوق شاشة الأطباء المفتوحة بعدها.</li>
+  <li><b>مسار التقرير:</b> <code>/doctors/performance/report.pdf</code> لم يكن مسجّلًا في الخادم الحيّ (404) → أُعيد تشغيل الخادم فرجع 200 بمستند <code>%PDF</code>.</li>
+</ul>
+
+<h3>المؤشرات (الدورة الثانية)</h3>
+<p>pytest 198/0 ✅ | E2E 10/10 🎭 | stack 83/0 | PWA 26/0 | حمل 200/200 — p95 = 93ms ✅ | Docker ✅</p>
 </body>
 </html>

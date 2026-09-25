@@ -264,6 +264,8 @@ hosptal/
 ├── main.py                  # نقطة دخول + admin + static /ui
 ├── requirements.txt         # الاعتماديات
 ├── pytest.ini               # إعدادات الاختبارات
+├── package.json             # 🎭 اعتمادات Playwright + سكربتات E2E
+├── playwright.config.js     # 🎭 إعداد E2E (testDir · baseURL 8001 · chromium)
 ├── .env.example             # نموذج إعدادات البيئة
 ├── desktop.py               # 🖥️ نسخة سطح المكتب (خادم محلي + فتح المتصفح)
 ├── build_desktop.bat        # 🖥️ بناء HospitalMS.exe عبر PyInstaller
@@ -277,6 +279,10 @@ hosptal/
 │   └── icon.svg             # 📱 أيقونة النظام
 ├── tests/
 │   ├── conftest.py          # 🧪 قاعدة بيانات اختبار منفصلة
+│   ├── e2e/
+│   │   ├── helpers.ts       # 🎭 دخول + ترويسة API + أول طبيب (مشترك)
+│   │   ├── doctors.spec.ts  # 🎭 6 اختبارات E2E: دخول · PDF · CSV · نوبات · ثيم
+│   │   └── screenshots.spec.ts # 📸 4 لقطات رسمية → docs/screenshots/doctors-e2e/
 │   ├── test_api.py          # 🧪 19 اختبارًا آليًا
 │   ├── test_notifications.py # 🔔 إشعارات + بريد + تذكير (8)
 │   ├── test_billing.py      # 💳 فواتير/دفع/ملف PDF (6)
@@ -455,7 +461,7 @@ python seed_demo.py      # 5 أقسام، 6 أطباء (demo_doc1..6/demo12345)�
 
 ### الاختبارات
 ```bash
-python -m pytest                        # 194 اختبارًا آليًا
+python -m pytest                        # 198 اختبارًا آليًا
 python tests/stack_check.py             # 86 فحصًا — BASE_URL / WAIT
 python tests/live_container_test.py     # الفحص الحي داخل الحاوية (137 فحصًا — LIVE_BASE)
 python tests/ui_accounts_check.py       # فحص قسمي المبيعات والحسابات (64 فحصًا — يحتاج خادمًا على 8001)
@@ -472,6 +478,20 @@ USERS=10 REQUESTS=20 python tests/load_test.py
 BASE_URL=http://SERVER:8000 USERS=20 REQUESTS=30 python tests/load_test.py
 USERS=50 REQUESTS=50 python tests/load_test.py    # حمل أثقل: 2500 طلب — p95 ≤ 700ms
 ```
+
+### اختبارات E2E (Playwright)
+```bash
+npm install                     # تثبيت @playwright/test (مرة واحدة)
+npx playwright install chromium # تثبيت المتصفح (مرة واحدة)
+
+# الخادم يجب أن يعمل: uvicorn main:app --host 127.0.0.1 --port 8001
+npm run test:e2e                # 10 اختبارات E2E لقسم الأطباء (دخول · PDF · CSV · نوبات · ثيم)
+npm run screenshots             # 📸 تجديد لقطات docs/screenshots/doctors-e2e/ (4 صور)
+```
+- `playwright.config.js` — الإعداد: `testDir=tests/e2e` · `baseURL=http://127.0.0.1:8001` · chromium · لقطات وأثر عند الفشل.
+- `tests/e2e/doctors.spec.ts` — الدخول، التقرير المقارن PDF، تصدير CSV، بطاقة الترخيص، جدول النوبات (يُحفظ دون تغيير البيانات)، الوضع الداكن.
+- `tests/e2e/screenshots.spec.ts` — اللقطات الرسمية الأربع في `docs/screenshots/doctors-e2e/`.
+- الحسابات تُضبط بمتغيرات `HMS_USER` / `HMS_PASS` (افتراضي: `admin` / `admin123`).
 
 ### التشغيل بـ Docker
 ```bash

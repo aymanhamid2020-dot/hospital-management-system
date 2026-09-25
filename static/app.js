@@ -97,7 +97,9 @@ let LANG = localStorage.getItem('hms_lang') || 'ar';
 
 /* ===== الوضع الداكن 🌙 ===== */
 let THEME = localStorage.getItem('hms_theme') || 'light';
-if (THEME === 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+/* التعرّف على تفضيل النظام عند أول زيارة فقط — اختيار المستخدم الصريح يبقى متفوقًا */
+if (!localStorage.getItem('hms_theme')
+    && window.matchMedia('(prefers-color-scheme: dark)').matches) {
   THEME = 'dark';
 }
 
@@ -917,7 +919,17 @@ async function refreshBell() {
   } catch (e) { /* تجاهل */ }
 }
 
-async function navigate(view) {
+/* التنقل بين الشاشات — يُجدول واحدًا تلو الآخر حتى لا تكتب شاشة أبطأ محتواها فوق الأحدث */
+let NAV_CHAIN = Promise.resolve();
+
+function navigate(view) {
+  const step = () => renderView(view);
+  const run = NAV_CHAIN.then(step, step);
+  NAV_CHAIN = run.catch(() => {});
+  return run;
+}
+
+async function renderView(view) {
   CURRENT_VIEW = view;
   document.querySelectorAll('.sidebar a').forEach(a => a.classList.toggle('active', a.dataset.view === view));
   document.getElementById('page-title').textContent = tr(TITLES[view] || '');

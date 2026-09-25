@@ -40,6 +40,11 @@ outbox/
 # مخرجات البناء (tar صورة Docker + EXE)
 dist/
 build/
+
+# اعتمادات واختبارات E2E (Playwright)
+node_modules/
+test-results/
+playwright-report/
 *.spec
 # سكربت PyInstaller مطلوب لبناء EXE بعد الـ clone — يبقى متتبَّعًا
 !HospitalMS.spec

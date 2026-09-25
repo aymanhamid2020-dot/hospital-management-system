@@ -1,0 +1,14 @@
+{
+  "name": "hospital-management-system",
+  "version": "1.0.0",
+  "private": true,
+  "description": "نظام إدارة المستشفيات — اختبارات E2E بـ Playwright",
+  "scripts": {
+    "test:e2e": "playwright test --config=playwright.config.js",
+    "test:e2e:headed": "playwright test --config=playwright.config.js --headed",
+    "screenshots": "playwright test --config=playwright.config.js tests/e2e/screenshots.spec.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
+  }
+}
