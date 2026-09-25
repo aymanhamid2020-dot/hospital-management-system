@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, Integer, String, DateTime, Float, Boolean, Time, ForeignKey,
-    Enum as SAEnum, UniqueConstraint
+    Enum as SAEnum, Index, UniqueConstraint
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -805,7 +805,7 @@ class DoctorSchedule(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     __table_args__ = (
-        UniqueConstraint("doctor_id", "day_of_week", name="uq_schedule_doctor_day"),
+        Index("ix_schedule_doctor_day", "doctor_id", "day_of_week"),
     )
 
 

@@ -427,17 +427,15 @@ def test_doctor_schedule(client, admin):
     assert r.status_code == 200 and len(r.json()) == 1
     assert r.json()[0]["day_of_week"] == 3
 
-    # يوم مكرر ⇒ 400
-    dup = [entries[1], {"day_of_week": 3, "start_time": "17:00", "end_time": "18:00"}]
+    # نوبتان متداخلتان في نفس اليوم ⇒ 400
+    dup = [entries[1], {"day_of_week": 3, "start_time": "12:00", "end_time": "15:00"}]
     r = client.put(url, headers=admin, json={"entries": dup})
-    assert r.status_code == 400 and "مكرر" in r.json()["detail"]
+    assert r.status_code == 400 and "متداخلتان" in r.json()["detail"]
 
     # نهاية قبل البداية ⇒ 400
     r = client.put(url, headers=admin, json={"entries": [
         {"day_of_week": 1, "start_time": "15:00", "end_time": "09:00"}]})
     assert r.status_code == 400 and "النهاية" in r.json()["detail"]
-
-    # نموذج نوبة واحدة لكل يوم (قيد فريد) — تكرار اليوم مرفوض أعلاه
 
     # يوم خارج 0..6 ⇒ 422 (تحقّق السكيما)
     r = client.put(url, headers=admin, json={"entries": [
@@ -458,3 +456,37 @@ def test_doctor_schedule(client, admin):
     assert client.put("/doctors/999999/schedule", headers=admin,
                       json={"entries": []}).status_code == 404
     assert client.get(url).status_code == 401
+
+
+# ===== حجز خارج النوبة =====
+def test_appointment_outside_schedule(client, admin):
+    """حجز في يوم بدون نوبات أو خارج النوبة → 400"""
+    from datetime import datetime
+    doc = _mk_doctor(client, admin)
+    doct0 = doc["id"]
+    pat = _mk_patient(client, admin)
+    d0 = (datetime(2031, 7, 5)).date()
+    r = client.post("/appointments/", headers=admin, json={
+        "patient_id": pat, "doctor_id": doct0,
+        "appointment_date": d0.isoformat() + "T10:00:00",
+        "reason": "اختبار", "status": "pending"})
+    assert r.status_code == 200
+    client.put(f"/doctors/{doct0}/schedule", headers=admin, json={
+        "entries": [{"day_of_week": 1, "start_time": "09:00", "end_time": "13:00"}]})
+    d_sat = (datetime(2031, 7, 5)).date()
+    r = client.post("/appointments/", headers=admin, json={
+        "patient_id": pat, "doctor_id": doct0,
+        "appointment_date": d_sat.isoformat() + "T10:00:00",
+        "reason": "اختبار", "status": "pending"})
+    assert r.status_code == 400 and "لا يعمل في يوم" in r.json()["detail"]
+    d_sun = (datetime(2031, 7, 6)).date()
+    r = client.post("/appointments/", headers=admin, json={
+        "patient_id": pat, "doctor_id": doct0,
+        "appointment_date": d_sun.isoformat() + "T14:00:00",
+        "reason": "اختبار", "status": "pending"})
+    assert r.status_code == 400 and "خارج نوبات" in r.json()["detail"]
+    r = client.post("/appointments/", headers=admin, json={
+        "patient_id": pat, "doctor_id": doct0,
+        "appointment_date": d_sun.isoformat() + "T10:00:00",
+        "reason": "اختبار", "status": "pending"})
+    assert r.status_code == 200

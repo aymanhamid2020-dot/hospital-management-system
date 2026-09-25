@@ -3,11 +3,38 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from app.database import get_db
-from app.models import Appointment, Patient, Doctor, User, AppointmentStatus
+from app.models import Appointment, Patient, Doctor, User, AppointmentStatus, DoctorSchedule
 from app.schemas import AppointmentCreate, AppointmentUpdate, AppointmentInDB
 from app.auth import get_current_user, require_admin, get_user_role
 
 router = APIRouter(prefix="/appointments", tags=["Appointments"])
+
+_DAYS = ["السبت", "الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة"]
+
+
+def _check_appointment_in_schedule(db, doctor_id: int, dt) -> str:
+    """التحقق من أن التاريخ ضمن نوبات الطبيب. يُرجع فارغة إذا كان مقبولاً.
+    إذا لم تُحدَّد نوبات لهذا الطبيب → لا يوجد قيد."""
+    from datetime import datetime
+    sched = (db.query(DoctorSchedule)
+             .filter(DoctorSchedule.doctor_id == doctor_id,
+                     DoctorSchedule.is_active == True)
+             .all())
+    if not sched:
+        return ""  # لا نوبات → لا قيد
+    _py_to_hms = {5: 0, 6: 1, 0: 2, 1: 3, 2: 4, 3: 5, 4: 6}
+    hms_dow = _py_to_hms.get(dt.weekday())
+    if hms_dow is None:
+        return "تاريخ غير صالح"
+    day_rows = [s for s in sched if s.day_of_week == hms_dow]
+    if not day_rows:
+        return (f"الطبيب لا يعمل في يوم {_DAYS[hms_dow]} — "
+                f"يُرجى حجز موعد في يوم عمل")
+    at = dt.time() if isinstance(dt, datetime) else dt
+    for s in day_rows:
+        if at < s.end_time and at > s.start_time:
+            return ""  # مقبول
+    return (f"الموعد خارج نوبات العمل المحددة ليوم {_DAYS[hms_dow]}")
 
 
 @router.get("/", response_model=List[AppointmentInDB], summary="عرض قائمة المواعيد")
@@ -150,6 +177,11 @@ async def create_appointment(
             detail="لا يوجد طبيب بالمعرف المحدد"
         )
     
+    # التحقق من أن الموعد ضمن نوبات الطبيب
+    _sch_msg = _check_appointment_in_schedule(db, appointment.doctor_id, appointment.appointment_date)
+    if _sch_msg:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_sch_msg)
+    
     # التحقق من توفر الطبيب في التاريخ المطلوب
     existing_appointment = db.query(Appointment).filter(
         Appointment.doctor_id == appointment.doctor_id,
@@ -211,8 +243,13 @@ async def update_appointment(
             detail="لا يوجد موعد بالمعرف المحدد"
         )
     
-    # التحقق من توفر الطبيب (استبعاد الموعد الحالي) - فقط عند تغيير التاريخ أو الطبيب
+    # التحقق من أن الموعد ضمن نوبات الطبيب
     new_date = appointment.appointment_date or db_appointment.appointment_date
+    _sch_msg = _check_appointment_in_schedule(db, db_appointment.doctor_id, new_date)
+    if _sch_msg:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_sch_msg)
+    
+    # التحقق من توفر الطبيب (استبعاد الموعد الحالي) - فقط عند تغيير التاريخ أو الطبيب
     existing_appointment = db.query(Appointment).filter(
         Appointment.appointment_date == new_date,
         Appointment.id != appointment_id,

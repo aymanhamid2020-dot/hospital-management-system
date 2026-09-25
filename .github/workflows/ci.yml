@@ -1,4 +1,4 @@
-# 🔁 CI: pytest + الفحص الموحد + بناء صورة Docker عند كل push/PR
+# 🔁 CI: pytest + الفحص الموحد + بناء صورة Docker + أرشفة النتائج عند كل push/PR
 name: CI
 
 on:
@@ -8,16 +8,29 @@ on:
 
 jobs:
   pytest:
-    name: pytest
+    name: pytest (${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: pip
       - run: pip install -r requirements.txt
-      - run: python -m pytest tests/ -q
+      - run: python -m pytest tests/ -q --tb=short
+      - name: أرشفة سجلات pytest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results-${{ matrix.python-version }}
+          path: |
+            test-results/
+            **/junit-*.xml
+          retention-days: 7
 
   stack-check:
     name: الفحص الموحد الحيّ
@@ -43,6 +56,15 @@ jobs:
         run: BASE_URL=http://127.0.0.1:8000 python tests/pwa_offline_check.py
       - name: اختبار حمل خفيف (p95 ≤ 700ms)
         run: BASE_URL=http://127.0.0.1:8000 python tests/load_test.py
+      - name: أرشفة نتائج الفحص الموحد
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stack-check-results
+          path: |
+            test-results/
+            **/junit-*.xml
+          retention-days: 7
 
   docker:
     name: بناء صورة Docker
@@ -51,3 +73,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: docker build -t hms-hospital:ci .
+      - name: أرشفة الصورة
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp/*.tar
+          retention-days: 3

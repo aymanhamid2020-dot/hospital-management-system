@@ -97,6 +97,9 @@ let LANG = localStorage.getItem('hms_lang') || 'ar';
 
 /* ===== الوضع الداكن 🌙 ===== */
 let THEME = localStorage.getItem('hms_theme') || 'light';
+if (THEME === 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+  THEME = 'dark';
+}
 
 function applyTheme() {
   document.documentElement.dataset.theme = THEME;

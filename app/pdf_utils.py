@@ -1454,3 +1454,15 @@ def doctor_license_pdf(doctor) -> bytes:
     pdf.kv_row("تصدر بتاريخ", datetime.now().strftime("%Y-%m-%d"))
     pdf.kv_row("المصدر", "نظام إدارة المستشفيات — مستند مولّد إلكترونيًا")
     return bytes(pdf.output())
+
+
+
+def doctor_report_compare_pdf(rows, month: str) -> bytes:
+    """تقرير أداء جميع الأطباء — تقرير مقارن عربي (A4)."""
+    pdf = ArabicPDF(f"تقرير الأداء المقارن — {month}")
+    pdf.section("الترتيب حسب نسبة الإتمام")
+    for i, r in enumerate(rows, 1):
+        pdf.kv_row(f"#{i} {r.full_name}",
+                    f"إجمالي {r.total} · مكتملة {r.completed} · "
+                    f"{r.completion_rate * 100:.1f}%")
+    return bytes(pdf.output())

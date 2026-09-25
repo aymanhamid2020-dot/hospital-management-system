@@ -223,6 +223,36 @@ async def export_all_performance_csv(
     )
 
 
+@router.get("/performance/report.pdf", summary="تقرير الأداء المقارن PDF")
+async def all_doctors_performance_pdf(
+    month: Optional[str] = Query(None, description="الشهر YYYY-MM (افتراضي: الشهر الحالي)"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """تقرير أداء جميع الأطباء كمستند PDF عربي"""
+    from fastapi.responses import Response
+    from app.pdf_utils import doctor_report_compare_pdf
+
+    month, start, end = _month_bounds(month)
+    doctors = db.query(Doctor).order_by(Doctor.full_name.asc()).all()
+    rows = []
+    for d in doctors:
+        perf = _performance_for(db, d.id, month, start, end)
+        rows.append(DoctorPerformanceRow(
+            **perf.model_dump(),
+            full_name=d.full_name, specialty=d.specialty,
+            is_available=d.is_available,
+            department=d.department.name if d.department else None,
+        ))
+    rows.sort(key=lambda r: (-r.completion_rate, -r.total, r.full_name))
+    return Response(
+        content=doctor_report_compare_pdf(rows, month),
+        media_type="application/pdf",
+        headers={"Content-Disposition":
+                 f"attachment; filename=doctors_performance_{month}.pdf"},
+    )
+
+
 @router.get("/{doctor_id}", response_model=DoctorWithStats, summary="عرض طبيب معين مع إحصاءاته")
 async def get_doctor(doctor_id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
     """طبيب واحد + عدّاد مواعيده وسجلاته ومرضاه الفريد"""
@@ -467,19 +497,25 @@ async def put_doctor_schedule(doctor_id: int, body: DoctorScheduleUpdate,
     _require_admin_or_self(current_user, doctor, "تعديل نوبات هذا الطبيب")
 
     entries = body.entries
-    seen = set()
     for e in entries:
-        if e.day_of_week in seen:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"يوم مكرر في الجدول: {_DAYS[e.day_of_week]}",
-            )
-        seen.add(e.day_of_week)
         if e.end_time <= e.start_time:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="وقت النهاية يجب أن يكون بعد وقت البداية",
             )
+
+    # فحص التداخل داخل اليوم نفسه (نوبتان أو أكثر)
+    by_day = {}
+    for e in entries:
+        by_day.setdefault(e.day_of_week, []).append(e)
+    for day, day_entries in by_day.items():
+        ordered = sorted(day_entries, key=lambda x: x.start_time)
+        for prev, nxt in zip(ordered, ordered[1:]):
+            if nxt.start_time < prev.end_time:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"نوبتان متداخلتان في يوم {_DAYS[day]}",
+                )
 
     db.query(DoctorSchedule).filter(
         DoctorSchedule.doctor_id == doctor_id).delete(synchronize_session=False)
