@@ -294,6 +294,9 @@ def main():
                 gender=gender, phone=f"053200000{i}",
                 email=f"patient{i}{DEMO_DOMAIN}", address=addr,
                 blood_type=blood,
+                # مرضى يحملون تحذيرًا حتى يعمل فلتر «⚠️ من له تحذير» في القائمة
+                allergies="بنسلين" if i in (1, 7) else None,
+                medical_warnings="سكري من النوع الثاني · ارتفاع ضغط الدم" if i == 6 else None,
             )
             db.add(p)
             patients.append(p)

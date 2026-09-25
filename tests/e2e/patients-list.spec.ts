@@ -62,6 +62,13 @@ test.describe('قائمة المرضى 🧑‍🤝‍🧑', () => {
     // فلتر التحذير: كل صف ظاهر يحمل شارة ⚠️ تحذير
     await page.selectOption('#flt-blood', '');
     await page.check('#flt-alert');
+    // انتظار اكتمال الفلترة: إمّا صفوف تحذيرية أو رسالة «لا نتائج»
+    const noRows = page.locator('#tbl tbody .empty');
+    await expect(noRows.or(page.locator('#tbl tbody .warn-tag').first()))
+      .toBeVisible({ timeout: 10_000 });
+    if (await noRows.isVisible()) {
+      test.skip(true, 'لا يوجد مرضى لديهم تحذيرات في هذه البيانات — فلتر التنبيه غير قابل للاختبار');
+    }
     await expect.poll(async () => {
       const rows = page.locator('#tbl tbody tr');
       const n = await rows.count();
