@@ -13,7 +13,7 @@ module.exports = defineConfig({
   workers: 1,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : [['list']],
   use: {
-    baseURL: 'http://127.0.0.1:8001',
+    baseURL: process.env.BASE_URL || 'http://127.0.0.1:8001',
     locale: 'ar-EG',
     timezoneId: 'Africa/Cairo',
     trace: 'retain-on-failure',

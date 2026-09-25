@@ -313,7 +313,7 @@ hosptal/
 ├── docker-compose.pg.yml    # 🐳 طبقة تكامل PostgreSQL
 ├── docker-compose.prod.yml  # 🏭 إنتاج: nginx + عمال متعددون + pg_dump مجدول
 ├── nginx/default.conf       # 🌐 وسيط أمامي (gzip + حد رفع 10MB)
-├── .github/workflows/ci.yml # 🔁 CI: pytest + فحص حيّ + بناء صورة
+├── .github/workflows/ci.yml # 🔁 CI: pytest + فحص حيّ + E2E + بناء صورة
 ├── docs/                    # 📘 دليل المستخدم (PDF/HTML) + لقطات الشاشة
 ├── backups/                 # 💾 النسخ الاحتياطية (تُنشأ تلقائيًا)
 ├── uploads/                 # 📎 الملفات المرفوعة
@@ -492,6 +492,8 @@ npm run screenshots             # 📸 تجديد لقطات docs/screenshots/do
 - `tests/e2e/doctors.spec.ts` — الدخول، التقرير المقارن PDF، تصدير CSV، بطاقة الترخيص، جدول النوبات (يُحفظ دون تغيير البيانات)، الوضع الداكن.
 - `tests/e2e/screenshots.spec.ts` — اللقطات الرسمية الأربع في `docs/screenshots/doctors-e2e/`.
 - الحسابات تُضبط بمتغيرات `HMS_USER` / `HMS_PASS` (افتراضي: `admin` / `admin123`).
+- الخادم يُضبط بـ `BASE_URL` (افتراضي: `http://127.0.0.1:8001`).
+- **في CI**: وظيفة `e2e` تبني البيانات التجريبية (`seed_demo.py`) ثم تُشغّل المجموعة كاملة على Chromium وتؤرشف النتائج واللقطات.
 
 ### التشغيل بـ Docker
 ```bash
