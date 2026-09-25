@@ -38,6 +38,15 @@ jobs:
     needs: pytest
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: فحص صياغة JavaScript للواجهة (node --check)
+        run: |
+          for f in static/*.js; do
+            echo "── node --check $f"
+            node --check "$f"
+          done
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
