@@ -37,6 +37,7 @@ def list_patients(
     blood_type: Optional[str] = Query(None, description="فلترة حسب مجموعة الدم"),
     alert: Optional[str] = Query(None, description="has = من له حساسية أو تحذير طبي"),
     sort: Optional[str] = Query("created", description="created | name | age"),
+    dir: Optional[str] = Query(None, description="asc | desc (افتراضي: created تنازليًا)"),
     limit: int = Query(0, ge=0, le=500, description="0 = بلا حد (الكل)"),
     offset: int = Query(0, ge=0),
     response: Response = None,
@@ -68,12 +69,23 @@ def list_patients(
 
     total = q.count()
 
+    # الاتجاه: يُقرأ من ?dir إن أُرسل، وإلا الافتراضي الأنسب لكل حقل
+    ascending = (dir or "").lower() == "asc"
+    descending = (dir or "").lower() == "desc"
     if sort == "name":
-        q = q.order_by(Patient.full_name.asc())
+        col, dflt_desc = Patient.full_name, False
     elif sort == "age":
-        q = q.order_by(Patient.date_of_birth.asc(), Patient.id.asc())
+        col, dflt_desc = Patient.date_of_birth, False
     else:
-        q = q.order_by(Patient.created_at.desc(), Patient.id.desc())
+        col, dflt_desc = Patient.created_at, True
+    if ascending:
+        q = q.order_by(col.asc(), Patient.id.asc())
+    elif descending:
+        q = q.order_by(col.desc(), Patient.id.desc())
+    elif dflt_desc:
+        q = q.order_by(col.desc(), Patient.id.desc())
+    else:
+        q = q.order_by(col.asc(), Patient.id.asc())
 
     rows = q.offset(offset).limit(limit).all() if limit else q.all()
     if response is not None:
@@ -390,18 +402,8 @@ async def create_patient(patient: PatientCreate, db = Depends(get_db), _ = Depen
                 detail="هذه الهوية الوطنية مسجلة لpatient آخر"
             )
 
-    db_patient = Patient(
-        full_name=patient.full_name,
-        date_of_birth=patient.date_of_birth,
-        gender=patient.gender,
-        phone=patient.phone,
-        email=patient.email,
-        address=patient.address,
-        blood_type=patient.blood_type,
-        national_id=patient.national_id,
-        insurer=patient.insurer,
-        policy_number=patient.policy_number,
-    )
+    # كل حقول النموذج تُمرَّر كما هي (كانت تُكتب يدويًا ⇒ تُسقط الحقول الجديدة)
+    db_patient = Patient(**patient.model_dump())
     db.add(db_patient)
     db.commit()
     db.refresh(db_patient)

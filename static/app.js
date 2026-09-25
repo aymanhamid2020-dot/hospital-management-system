@@ -857,6 +857,94 @@ async function statementPdf() {
 /* تسديد دفعة لعملية بيع — نافذة منبثقة (مبلغ + طريقة + معاينة المتبقي) */
 let ACC_ROWS = [];
 
+/* ══════════ قائمة المرضى: حالة العرض (بحث/فلاتر/ترقيم/ترتيب) ══════════
+   الحالة تعيش خارج VIEWS كي تبقى محفوظة عند إعادة رسم الشاشة، والبحث
+   يُرسل إلى الخادم (كان قبلها يطابق نص الصف كله ⇒ نتائج مضلّلة). */
+const PAGE_SIZE = 25;
+let PAT_LIST = { search: '', blood: '', alert: false, sort: 'created', sortDir: 'desc', page: 0, total: 0 };
+let patSearchTimer = null;
+
+function getPatientListState() { return { ...PAT_LIST }; }
+function setPatientListState(patch) { Object.assign(PAT_LIST, patch); }
+
+/* إعادة رسم شاشة المرضى فقط (تبقى الفلاتر) — بلا إعادة تحميل الصفحة كلها */
+function reloadPatients() { if (CURRENT_VIEW === 'patients') renderView('patients'); }
+
+function searchPatients(value) {
+  setPatientListState({ search: value, page: 0 });
+  clearTimeout(patSearchTimer);
+  patSearchTimer = setTimeout(reloadPatients, 300);   /* مؤقّت ⇒ طلب واحد بعد التوقف */
+}
+
+function filterPatients() {
+  setPatientListState({
+    blood: (document.getElementById('flt-blood') || {}).value || '',
+    alert: (document.getElementById('flt-alert') || {}).checked || false,
+    page: 0,
+  });
+  reloadPatients();
+}
+
+function resetPatients() {
+  setPatientListState({ search: '', blood: '', alert: false, page: 0 });
+  reloadPatients();
+}
+
+function gotoPatientPage(n) {
+  const st = getPatientListState();
+  const pages = Math.max(1, Math.ceil((st.total || 0) / PAGE_SIZE));
+  setPatientListState({ page: Math.max(0, Math.min(n, pages - 1)) });
+  reloadPatients();
+}
+
+function sortPatients(key) {
+  const st = getPatientListState();
+  const same = st.sort === key;
+  // created ينزل تنازليًا افتراضيًا (الأحدث أولًا)، والاسم/العمر تصاعديًا
+  const descFirst = key === 'created';
+  setPatientListState({
+    sort: key,
+    sortDir: same ? (st.sortDir === 'asc' ? 'desc' : 'asc') : (descFirst ? 'desc' : 'asc'),
+    page: 0,
+  });
+  reloadPatients();
+}
+
+/* نموذج الإضافة — يشمل حقول الملف الشخصي والتأمين والتاريخ الطبي
+   حتى لا تُكتب نفس البيانات مرتين (مرة عند الإضافة ومرة في الملف). */
+function patientAddForm() {
+  return `<details class="addbox"><summary>➕ إضافة مريض جديد</summary>
+    <div class="form-grid">
+      <div class="field"><label>الاسم الكامل *</label><input id="f-name"></div>
+      <div class="field"><label>تاريخ الميلاد *</label><input id="f-dob" type="date"></div>
+      <div class="field"><label>النوع *</label><select id="f-gender"><option>ذكر</option><option>أنثى</option></select></div>
+      <div class="field"><label>الجنسية</label><input id="f-nat2" placeholder="اختياري"></div>
+      <div class="field"><label>حالة التدخين</label><select id="f-smoke">
+        <option value="">—</option><option>غير مدخّن</option><option>مدخّن</option>
+        <option>مقلّح سابقًا</option></select></div>
+      <div class="field"><label>مجموعة الدم</label><select id="f-blood"><option value="">—</option>
+        <option>O+</option><option>O-</option><option>A+</option><option>A-</option>
+        <option>B+</option><option>B-</option><option>AB+</option><option>AB-</option></select></div>
+      <div class="field"><label>الهاتف *</label><input id="f-phone"></div>
+      <div class="field"><label>البريد الإلكتروني *</label><input id="f-email" type="email"></div>
+      <div class="field"><label>العنوان</label><input id="f-addr"></div>
+      <div class="field"><label>الهوية الوطنية</label><input id="f-nat" placeholder="رقم الهوية/الإقامة"></div>
+      <div class="field"><label>جهة الطوارئ</label><input id="f-emg" placeholder="اسم شخص للطوارئ"></div>
+      <div class="field"><label>هاتف الطوارئ</label><input id="f-emgph"></div>
+      <div class="field"><label>شركة التأمين</label><input id="f-ins" placeholder="اختياري"></div>
+      <div class="field"><label>رقم وثيقة التأمين</label><input id="f-pol"></div>
+      <div class="field"><label>درجة التغطية</label><select id="f-grade">
+        <option value="">—</option><option>ذهبية</option><option>فضية</option>
+        <option>برونزية</option><option>أساسية</option></select></div>
+      <div class="field"><label>نسبة التحمل %</label><input id="f-copay" type="number" min="0" max="100" step="1"></div>
+      <div class="field wide"><label>الحساسية</label><input id="f-allergy" placeholder="أدوية/أطعمة"></div>
+      <div class="field wide"><label>تحذيرات طبية</label><input id="f-warn" placeholder="مريض سكر، سيولة في الدم…"></div>
+    </div>
+    <button class="btn success" style="margin-top:12px" onclick="addPatient()">حفظ المريض</button>
+    <p class="muted">ما لا تملأه هنا يمكن إضافته لاحقًا من 🗂️ ملف المريض.</p>
+  </details>`;
+}
+
 /* ══════════ شاشة ملف المريض: الأقسام الستة ══════════
    نقطة واحدة GET /patients/{id}/chart تجمع كل الأقسام، والتبويبات تُرسم
    من الذاكرة (CHART) بلا طلبات إضافية — تبديل التبويب فوري. */
@@ -2884,48 +2972,106 @@ async function deleteStaffDoc(id) {
       </div>`;
   },
 
-  /* --- المرضى --- */
+  /* --- المرضى: بحث على الخادم + فلاتر + ترقيم + أعمدة محسوبة --- */
   async patients(main) {
-    const rows = await api('/patients/');
-    const form = isAdmin() || !isDoctor() ? `
-      <details class="addbox"><summary>➕ إضافة مريض جديد</summary>
-      <div class="form-grid">
-        <div class="field"><label>الاسم الكامل *</label><input id="f-name"></div>
-        <div class="field"><label>تاريخ الميلاد *</label><input id="f-dob" type="date"></div>
-        <div class="field"><label>النوع *</label><select id="f-gender"><option>ذكر</option><option>أنثى</option></select></div>
-        <div class="field"><label>الهاتف *</label><input id="f-phone"></div>
-        <div class="field"><label>البريد الإلكتروني *</label><input id="f-email" type="email"></div>
-        <div class="field"><label>العنوان</label><input id="f-addr"></div>
-        <div class="field"><label>مجموعة الدم</label><select id="f-blood"><option value="">—</option><option>O+</option><option>O-</option><option>A+</option><option>A-</option><option>B+</option><option>B-</option><option>AB+</option><option>AB-</option></select></div>
-        <div class="field"><label>الهوية الوطنية</label><input id="f-nat" placeholder="رقم الهوية/الإقامة"></div>
-        <div class="field"><label>شركة التأمين</label><input id="f-ins" placeholder="اختياري"></div>
-        <div class="field"><label>رقم وثيقة التأمين</label><input id="f-pol"></div>
-      </div>
-      <button class="btn success" style="margin-top:12px" onclick="addPatient()">حفظ المريض</button>
-      </details>` : '';
+    const st = getPatientListState();
+    const qs = new URLSearchParams();
+    if (st.search) qs.set('search', st.search);
+    if (st.blood) qs.set('blood_type', st.blood);
+    if (st.alert) qs.set('alert', 'has');
+    if (st.sort) {
+      qs.set('sort', st.sort);
+      qs.set('dir', st.sortDir);      /* بلا الاتجاه كان السهم يكذب على المستخدم */
+    }
+    qs.set('limit', String(PAGE_SIZE));
+    qs.set('offset', String(st.page * PAGE_SIZE));
+
+    let rows = [], total = st.total;
+    try {
+      const res = await fetch(API + '/patients/?' + qs.toString(), {
+        headers: { 'Authorization': 'Bearer ' + TOKEN } });
+      if (!res.ok) throw new Error('تعذّر تحميل القائمة');
+      rows = await res.json();
+      total = Number(res.headers.get('X-Total-Count') || rows.length);
+    } catch (e) { main.innerHTML = `<div class="empty" style="color:#dc3545">⚠️ ${esc(e.message)}</div>`; return; }
+
+    setPatientListState({ total });
+    const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    const from = total ? st.page * PAGE_SIZE + 1 : 0;
+    const to = Math.min(total, (st.page + 1) * PAGE_SIZE);
+    const th = (key, label, extra = '') =>
+      `<th class="${extra}" onclick="sortPatients('${key}')" title="اضغط للترتيب">${label}${
+        st.sort === key ? (st.sortDir === 'asc' ? ' ▲' : ' ▼') : ''}</th>`;
+    const canAdd = isAdmin() || !isDoctor();
+    const opt = (v, l, sel) => `<option value="${v}" ${sel ? 'selected' : ''}>${l}</option>`;
+
     main.innerHTML = `
       <div class="card">
-        <h3>المرضى (${rows.length})</h3>
+        <h3>المرضى <span class="count-badge">${total}</span></h3>
         <div class="toolbar">
-          <input id="q" placeholder="🔍 بحث بالاسم أو الهاتف أو الهوية…" oninput="filterTable('tbl', this.value)">
+          <input id="q" placeholder="🔍 بحث بالاسم/الهاتف/الهوية/البريد…" value="${esc(st.search)}"
+                 oninput="searchPatients(this.value)">
+          <select id="flt-blood" onchange="filterPatients()">
+            ${opt('', 'كل فصائل الدم', !st.blood)}
+            ${['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-']
+              .map(b => opt(b, b, st.blood === b)).join('')}
+          </select>
+          <label class="chk"><input type="checkbox" id="flt-alert" ${st.alert ? 'checked' : ''}
+                 onchange="filterPatients()"> ⚠️ من له تحذير</label>
+          ${st.search || st.blood || st.alert
+            ? `<button class="btn ghost sm" onclick="resetPatients()">✖️ مسح الفلاتر</button>` : ''}
+          <span style="flex:1"></span>
           <button class="btn ghost" onclick="download('/patients/export.csv','patients.csv')">⬆️ تصدير CSV</button>
-          ${form ? `<label class="btn ghost" style="cursor:pointer;margin:0">⬇️ استيراد CSV<input type="file" accept=".csv,text/csv" style="display:none" onchange="importPatients(this)"></label>` : ''}
+          ${canAdd ? `<label class="btn ghost" style="cursor:pointer;margin:0">⬇️ استيراد CSV
+            <input type="file" accept=".csv,text/csv" style="display:none" onchange="importPatients(this)"></label>` : ''}
         </div>
-        ${form}
+        ${canAdd ? patientAddForm() : ''}
         <div style="overflow-x:auto"><table id="tbl">
-          <thead><tr><th>#</th><th>الاسم</th><th>النوع</th><th>الهاتف</th><th>البريد</th><th>الدم</th><th>الهوية</th><th>أُضيف</th><th></th></tr></thead>
-          <tbody>${rows.map(p => `<tr>
-            <td>${p.id}</td><td><strong>${esc(p.full_name)}</strong></td><td>${esc(p.gender)}</td>
-            <td>${esc(p.phone)}</td><td>${esc(p.email)}</td><td>${esc(p.blood_type || '-')}</td>
-            <td>${esc(p.national_id || '-')}${p.insurer ? `<br><small>🏢 ${esc(p.insurer)}</small>` : ''}</td>
-            <td>${fmtDate(p.created_at)}</td>
-            <td class="actions">
+          <thead><tr>
+            <th>#</th>
+            ${th('name', 'المريض')}
+            <th>العمر</th>
+            <th>الهاتف</th>
+            <th>الدم</th>
+            <th>التأمين</th>
+            <th>آخر زيارة</th>
+            <th>الموعد القادم</th>
+            <th title="يُحسب من الفواتير وصرف الصيدلية — الترتيب به غير مدعوم">المتبقي</th>
+            <th></th>
+          </tr></thead>
+          <tbody>${rows.map(p => `<tr class="clickable" onclick="openPatientChart(${p.id})">
+            <td>${p.id}</td>
+            <td><strong>${esc(p.full_name)}</strong>
+              ${p.has_alerts ? '<br><small class="warn-tag" title="حساسية أو تحذير طبي">⚠️ تحذير</small>' : ''}
+              ${p.nationality ? `<br><small>${esc(p.nationality)}</small>` : ''}</td>
+            <td>${p.age != null ? p.age + ' سنة' : '—'}</td>
+            <td>${esc(p.phone)}</td>
+            <td>${esc(p.blood_type || '—')}</td>
+            <td>${p.insurer ? esc(p.insurer) +
+              (p.insurance_grade ? `<br><small>${esc(p.insurance_grade)}${
+                p.insurance_copay != null ? ' · تحمّل ' + p.insurance_copay + '%' : ''}</small>` : '')
+              : '—'}</td>
+            <td>${p.last_visit ? fmtDate(p.last_visit) : '—'}</td>
+            <td>${p.upcoming ? `<span class="pill confirmed">${fmtDate(p.upcoming)}</span>` : '—'}</td>
+            <td>${p.outstanding > 0
+              ? `<b style="color:#dc3545">${p.outstanding.toLocaleString()}</b>` : '—'}</td>
+            <td class="actions" onclick="event.stopPropagation()">
               <button class="btn sm primary" onclick="openPatientChart(${p.id})">🗂️ الملف</button>
-              <button class="btn sm ghost" onclick="download('/patients/${p.id}/pdf','patient_${p.id}_file.pdf')">📄 الملف PDF</button>
               ${isAdmin() ? `<button class="btn sm danger" onclick="del('patients',${p.id},'patients')">حذف</button>` : ''}
             </td>
-          </tr>`).join('') || '<tr><td colspan="9" class="empty">لا يوجد مرضى</td></tr>'}</tbody>
+          </tr>`).join('') || `<tr><td colspan="11" class="empty">${
+            (st.search || st.blood || st.alert) ? 'لا نتائج مطابقة للفلاتر' : 'لا يوجد مرضى'}</td></tr>`}</tbody>
         </table></div>
+        <div class="pager">
+          <span>عرض ${from}–${to} من ${total}</span>
+          <div class="actions">
+            <button class="btn sm ghost" ${st.page === 0 ? 'disabled' : ''}
+              onclick="gotoPatientPage(${st.page - 1})">◀ السابق</button>
+            <span class="pill">${st.page + 1} / ${pages}</span>
+            <button class="btn sm ghost" ${st.page >= pages - 1 ? 'disabled' : ''}
+              onclick="gotoPatientPage(${st.page + 1})">التالي ▶</button>
+          </div>
+        </div>
       </div>`;
   },
 
@@ -3517,7 +3663,16 @@ function addPatient() {
     blood_type: V('f-blood') || null,
     national_id: V('f-nat') || null,
     insurer: V('f-ins') || null,
-    policy_number: V('f-pol') || null
+    policy_number: V('f-pol') || null,
+    // حقول الملف الشخصي/الإداري والتأمين والتحذيرات
+    nationality: V('f-nat2') || null,
+    smoking_status: V('f-smoke') || null,
+    emergency_contact_name: V('f-emg') || null,
+    emergency_contact_phone: V('f-emgph') || null,
+    insurance_grade: V('f-grade') || null,
+    insurance_copay: V('f-copay') ? Number(V('f-copay')) : null,
+    allergies: V('f-allergy') || null,
+    medical_warnings: V('f-warn') || null
   }, 'patients');
 }
 
