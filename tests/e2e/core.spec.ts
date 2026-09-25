@@ -16,14 +16,18 @@ test.describe('الشاشات الأساسية 🧭', () => {
     await login(page);
     await openView(page, 'patients');
 
-    const rows = page.locator('#tbl tbody tr');
-    expect(await rows.count()).toBeGreaterThan(0);
+    // صف رسالة «لا نتائج» لا صف بيانات
+    const dataRows = page.locator('#tbl tbody tr:not(:has(.empty))');
+    expect(await dataRows.count()).toBeGreaterThan(0);
 
-    // بحث بلا نتائج يخفي كل الصفوف، والحذف يعيدها
+    // بحث بلا نتائج يعرض رسالة الفلاتر (وليس جدولًا فارغًا)، والحذف يعيد الصفوف
     await page.fill('#q', 'نص غير موجود-xyz');
-    await expect(page.locator('#tbl tbody tr:visible')).toHaveCount(0);
+    await expect(page.locator('#tbl tbody .empty'))
+      .toHaveText('لا نتائج مطابقة للفلاتر');
+    await expect(dataRows).toHaveCount(0);
     await page.fill('#q', '');
-    expect(await page.locator('#tbl tbody tr:visible').count()).toBeGreaterThan(0);
+    await expect.poll(async () =>
+      (await dataRows.count()), { timeout: 10_000 }).toBeGreaterThan(0);
     await expectNoUiError(page);
   });
 
