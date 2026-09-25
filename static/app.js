@@ -1540,6 +1540,57 @@ document.querySelectorAll('.sidebar a[data-view]').forEach(a => {
   a.addEventListener('click', e => { e.preventDefault(); navigate(a.dataset.view); });
 });
 
+/* ===== شاشة «المختبر والأشعة»: قسمان أساسيان (LIS / RIS) + قسم مشترك،
+   ولكل قسم أقسامه الداخلية — بالنمط نفسه الذي تُبنى عليه شاشتا «المرضى»
+   و«المحاسبة» (شريط تبويب ثم أزرار أقسام). */
+let LAB_TAB = 'lis';
+let LAB_SUB = 'orders';
+const LAB_TABS = [
+  ['lis', '🧪 المختبر (LIS)'],
+  ['ris', '🩻 الأشعة (RIS)'],
+  ['shared', '📊 المشترك والتقارير'],
+];
+const LAB_SUBS = {
+  lis: [
+    ['orders', 'طلبات التحاليل', '📋'],
+    ['samples', 'سحب وإدارة العينات', '🧫'],
+    ['results', 'إدخال النتائج', '📥'],
+    ['verify', 'اعتماد التقارير', '✍️'],
+    ['catalog', 'دليل الفحوصات', '📖'],
+  ],
+  ris: [
+    ['orders', 'طلبات الأشعة', '📋'],
+    ['schedule', 'جدولة الأجهزة والغرف', '🗓️'],
+    ['pacs', 'صور الأشعة (PACS)', '🖼️'],
+    ['report', 'التقارير التشخيصية', '📝'],
+  ],
+  shared: [
+    ['delivery', 'تسليم النتائج', '📤'],
+    ['inventory', 'المخزون والمستهلكات', '🧪'],
+    ['analytics', 'التقارير والإحصائيات', '📊'],
+  ],
+};
+/* بيانات الشاشة المشتركة بين أقسامها (تعبّأ في VIEWS.lab) */
+let LAB_DATA = { orders: [], tests: [], patients: [], doctors: [] };
+const LAB_ST = {
+  pending: 'مسجّل', in_progress: 'قيد التنفيذ',
+  ready: 'جاهزة', reviewed: 'مراجَعة', cancelled: 'ملغاة',
+};
+const LAB_SAMPLE_ST = {
+  none: 'بلا عيّنة', collected: 'مسحوبة', received: 'مستلَمة', rejected: 'مرفوضة',
+};
+const LAB_MODALITY = {
+  XRAY: 'أشعة سينية', CT: 'مقطعية', MRI: 'رنين مغناطيسي', ULTRASOUND: 'سونار',
+};
+
+/* تبديل قسم الشاشة ثم أقسامه الداخلية */
+function setLabTab(group) {
+  LAB_TAB = group;
+  LAB_SUB = LAB_SUBS[group][0][0];
+  return renderView('lab');
+}
+function setLabSub(sub) { LAB_SUB = sub; return renderView('lab'); }
+
 const TITLES = {
   dashboard: 'لوحة التحكم', patients: 'المرضى', doctors: 'الأطباء',
   appointments: 'المواعيد', records: 'السجلات الطبية', attachments: 'المرفقات',
@@ -2149,57 +2200,24 @@ const VIEWS = {
 
   /* --- المختبر والأشعة --- */
   async lab(main) {
-    const [rows, patients, doctors] = await Promise.all([
-      api('/lab-orders/'), api('/patients/'), api('/doctors/')]);
-    const stLabels = { pending: 'مسجّل', in_progress: 'قيد التنفيذ',
-                       ready: 'جاهزة', reviewed: 'مراجَعة', cancelled: 'ملغاة' };
-    main.innerHTML = `
-      <div class="card">
-        <div class="toolbar"><h3 style="margin:0">طلبات المختبر والأشعة (${rows.length})</h3>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-          ${isAdmin() || isDoctor() ? `<button class="btn ghost" onclick="download('/reports/lab/pdf','lab_report.pdf')">📄 تقرير المختبر PDF</button>` : ''}
-          ${isAdmin() || isDoctor() ? `<button class="btn ghost" onclick="download('/reports/lab/csv','lab_orders.csv')">⬇️ CSV</button>` : ''}
-          </div>
-        </div>
-        <details class="addbox"><summary>➕ طلب تحليل/أشعة جديد</summary>
-        <div class="form-grid">
-          <div class="field"><label>المريض *</label><select id="f-pat">
-            ${patients.map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join('')}</select></div>
-          <div class="field"><label>الطبيب</label><select id="f-doc"><option value="">—</option>
-            ${doctors.map(d => `<option value="${d.id}">${esc(d.full_name)}</option>`).join('')}</select></div>
-          <div class="field"><label>النوع</label><select id="f-type">
-            <option value="lab">تحليل مختبري</option><option value="radiology">أشعة</option></select></div>
-          <div class="field"><label>اسم التحليل *</label><input id="f-test" placeholder="مثال: CBC — صورة أشعة صدر"></div>
-          <div class="field"><label>السعر (ر.س)</label><input id="f-price" type="number" step="0.01" min="0"></div>
-          <div class="field"><label>ملاحظات</label><input id="f-lnotes"></div>
-        </div>
-        <button class="btn success" style="margin-top:12px" onclick="addLabOrder()">حفظ الطلب</button>
-        </details>
-        <div class="toolbar"><input id="f-lab-q" placeholder="🔍 بحث…" oninput="filterLabRows()">
-          <select id="f-lab-status" onchange="filterLabRows()">
-            ${[['', 'كل الحالات'], ...Object.entries(stLabels)]
-              .map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}
-          </select></div>
-        <div style="overflow-x:auto"><table id="tbl">
-          <thead><tr><th>#</th><th>التاريخ</th><th>المريض</th><th>الطبيب</th><th>النوع</th><th>التحليل</th><th>الحالة</th><th>النتيجة</th><th></th></tr></thead>
-          <tbody>${rows.map(o => `<tr data-status="${o.status}">
-            <td>${o.id}</td><td>${fmtDate(o.ordered_at)}</td>
-            <td>${esc(o.patient.full_name)}</td><td>${esc(o.doctor ? o.doctor.full_name : '-')}</td>
-            <td>${o.test_type === 'radiology' ? 'أشعة 🔬' : 'تحليل 🧪'}</td>
-            <td><strong>${esc(o.test_name)}</strong>${o.price ? `<br><small>${o.price.toLocaleString()} ر.س</small>` : ''}</td>
-            <td><span class="pill ${o.status}">${stLabels[o.status] || o.status}</span></td>
-            <td>${o.result ? esc(o.result) : '—'}</td>
-            <td class="actions">
-              <button class="btn sm ghost" onclick="download('/lab-orders/${o.id}/pdf','lab_result_${o.id}.pdf')">🖨️ ورقة النتيجة</button>
-              ${o.status === 'pending' ? `<button class="btn sm ghost" onclick="setLabStatus(${o.id},'in_progress')">▶ بدء</button>` : ''}
-              ${o.status === 'in_progress' ? `<button class="btn sm success" onclick="setLabResult(${o.id})">📥 النتيجة</button>` : ''}
-              ${o.status === 'ready' && (isAdmin() || isDoctor()) ? `<button class="btn sm success" onclick="setLabStatus(${o.id},'reviewed')">🔎 مراجعة</button>` : ''}
-              ${o.status !== 'cancelled' && o.status !== 'reviewed' ? `<button class="btn sm danger" onclick="setLabStatus(${o.id},'cancelled')">إلغاء</button>` : ''}
-              ${isAdmin() ? `<button class="btn sm danger" onclick="del('lab-orders',${o.id},'lab')">حذف</button>` : ''}
-            </td>
-          </tr>`).join('') || '<tr><td colspan="9" class="empty">لا توجد طلبات — أنشئ أول طلب</td></tr>'}</tbody>
-        </table></div>
-      </div>`;
+    const [orders, tests, patients, doctors] = await Promise.all([
+      api('/lab-orders/'), api('/lab-tests/'), api('/patients/'), api('/doctors/')]);
+    LAB_DATA = { orders, tests, patients, doctors };
+    const subs = LAB_SUBS[LAB_TAB];
+    if (!subs.some(s => s[0] === LAB_SUB)) LAB_SUB = subs[0][0];
+    const tabbar = `<div class="tabbar" role="tablist">${LAB_TABS.map(([k, l]) =>
+      `<button type="button" role="tab" aria-selected="${k === LAB_TAB}"
+        class="tab${k === LAB_TAB ? ' active' : ''}" data-tab="${k}"
+        onclick="setLabTab('${k}')">${l}</button>`).join('')}</div>`;
+    const subbar = `<div class="tabbar" role="tablist">${subs.map(([k, l, i]) =>
+      `<button type="button" role="tab" aria-selected="${k === LAB_SUB}"
+        class="tab${k === LAB_SUB ? ' active' : ''}" data-sub="${k}"
+        onclick="setLabSub('${k}')">${i} ${l}</button>`).join('')}</div>`;
+    main.innerHTML = tabbar + subbar +
+      `<div id="lab-body"><div class="empty">جارٍ التحميل…</div></div>`;
+    const html = await labBodyHTML(LAB_TAB + '/' + LAB_SUB);
+    const body = document.getElementById('lab-body');
+    if (body) body.innerHTML = html;
   },
 
   /* --- الصيدلية --- */
@@ -3998,6 +4016,108 @@ function addStaff() {
 }
 
 /* ========== عمليات المحاور الجديدة ========== */
+/* ======== أقسام شاشة «المختبر والأشعة» ======== */
+
+let LAB_PACS_ORDER = 0;      /* الطلب المختار في تبويب صور الأشعة (PACS) */
+let LAB_RIS_ORDER = 0;       /* الطلب المختار في تبويب التقارير التشخيصية */
+
+const labPill = o => `<span class="pill ${o.status}">${LAB_ST[o.status] || o.status}</span>`;
+
+/* علامة النتيجة مقابل النطاق الطبيعي: حرجة / خارج النطاق / طبيعية */
+function labFlagPill(o) {
+  if (o.critical) return '<span class="pill cancelled">🔴 حرجة</span>';
+  if (o.abnormal) return '<span class="pill in_progress">🟠 خارج النطاق</span>';
+  if (o.result) return '<span class="pill reviewed">🟢 طبيعية</span>';
+  return '—';
+}
+
+/* النطاق الطبيعي: يعمل للطلب ولأي سجل في دليل الفحوصات */
+function labRange(o) {
+  if (o.ref_min == null && o.ref_max == null) return '—';
+  const lo = o.ref_min == null ? '…' : o.ref_min;
+  const hi = o.ref_max == null ? '…' : o.ref_max;
+  return `${lo} – ${hi}${o.unit ? ' ' + esc(o.unit) : ''}`;
+}
+
+function labSamplePill(s) {
+  const cls = s === 'received' ? 'reviewed' : s === 'rejected' ? 'cancelled'
+    : s === 'collected' ? 'in_progress' : 'pending';
+  return `<span class="pill ${cls}">${LAB_SAMPLE_ST[s] || s}</span>`;
+}
+
+/* التنقل بين أقسام الشاشة نفسها (بلا إعادة جلب للبيانات من السيرفر) */
+function labGo(sub) { return setLabSub(sub); }
+
+/* ---------- نموذج طلب جديد (مشترك بين LIS وRIS) ---------- */
+function labOrderFormHTML(type) {
+  const { tests, patients, doctors } = LAB_DATA;
+  const rad = type === 'radiology';
+  const radField = rad ? '' : 'style="display:none"';
+  return `
+  <details class="addbox"><summary>➕ ${rad ? 'طلب فحص أشعة جديد' : 'طلب تحليل مختبري جديد'}</summary>
+    <div class="form-grid">
+      <div class="field"><label>المريض *</label><select id="f-pat">
+        ${patients.map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join('')}</select></div>
+      <div class="field"><label>الطبيب</label><select id="f-doc"><option value="">—</option>
+        ${doctors.map(d => `<option value="${d.id}">${esc(d.full_name)}</option>`).join('')}</select></div>
+      <div class="field"><label>النوع</label><select id="f-type" onchange="labTypeChanged()">
+        <option value="lab" ${rad ? '' : 'selected'}>تحليل مختبري</option>
+        <option value="radiology" ${rad ? 'selected' : ''}>أشعة</option></select></div>
+      <div class="field"><label>فحص من الدليل</label><select id="f-cat" onchange="labCatChanged()">
+        <option value="">— إدخال يدوي</option>
+        ${tests.map(t => `<option value="${t.id}" data-category="${t.category}" data-name="${esc(t.name)}"
+          data-price="${t.price || 0}" data-spec="${esc(t.specimen_type || '')}"
+          data-unit="${esc(t.unit || '')}" data-refmin="${t.ref_min == null ? '' : t.ref_min}"
+          data-refmax="${t.ref_max == null ? '' : t.ref_max}"
+          ${t.category !== type ? 'disabled' : ''}>${t.category === 'radiology' ? '🩻' : '🧪'} ${esc(t.code)} — ${esc(t.name)}</option>`).join('')}
+      </select></div>
+      <div class="field"><label>اسم الفحص *</label><input id="f-test" placeholder="مثال: CBC"></div>
+      <div class="field"><label>السعر (ر.س)</label><input id="f-price" type="number" step="0.01" min="0"></div>
+      <div class="field"><label>الأولوية</label><select id="f-prio">
+        <option value="routine">روتيني</option><option value="stat">عاجل (STAT)</option></select></div>
+      <div class="field lab-rad-field" ${radField}><label>جهاز الأشعة</label><select id="f-modality">
+        ${Object.entries(LAB_MODALITY).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></div>
+      <div class="field lab-rad-field" ${radField}><label>الغرفة</label>
+        <input id="f-room" placeholder="غرفة أشعة 1"></div>
+      <div class="field lab-rad-field" ${radField}><label>موعد الفحص</label>
+        <input id="f-sched" type="datetime-local"></div>
+      <div class="field"><label>ملاحظات</label><input id="f-lnotes"></div>
+    </div>
+    <button class="btn success" style="margin-top:12px" onclick="addLabOrder()">حفظ الطلب</button>
+  </details>`;
+}
+
+/* تغيير النوع: يُظهر/يخفي حقول الأشعة ويفرغ اختيار الدليل غير المتوافق */
+function labTypeChanged(keepCat) {
+  const type = V('f-type') || 'lab';
+  document.querySelectorAll('.lab-rad-field').forEach(el => {
+    el.style.display = type === 'radiology' ? '' : 'none';
+  });
+  document.querySelectorAll('#f-cat option[data-category]').forEach(op => {
+    op.disabled = op.dataset.category !== type;
+  });
+  if (!keepCat) {
+    const cat = document.getElementById('f-cat');
+    if (cat) cat.value = '';
+  }
+}
+
+/* اختيار فحص من الدليل يملأ اسمه وسعره (وينقل النوع إلى فئة الفحص) */
+function labCatChanged() {
+  const sel = document.getElementById('f-cat');
+  if (!sel) return;
+  const op = sel.selectedOptions[0];
+  if (!op || !op.value) return;
+  if (op.dataset.category && op.dataset.category !== V('f-type')) {
+    const type = document.getElementById('f-type');
+    if (type) type.value = op.dataset.category;
+    labTypeChanged(true);
+  }
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+  set('f-test', op.dataset.name || '');
+  set('f-price', op.dataset.price || '');
+}
+
 function addLabOrder() {
   if (!V('f-test')) return toast('اسم التحليل مطلوب', true);
   const body = {
@@ -4006,8 +4126,725 @@ function addLabOrder() {
   };
   if (V('f-doc')) body.doctor_id = Number(V('f-doc'));
   if (V('f-lnotes')) body.notes = V('f-lnotes');
+  if (V('f-cat')) body.lab_test_id = Number(V('f-cat'));      /* وراثة السعر والنطاق والعيّنة */
+  if (V('f-prio')) body.priority = V('f-prio');
+  if (body.test_type === 'radiology') {
+    if (V('f-modality')) body.modality = V('f-modality');
+    if (V('f-room')) body.room = V('f-room');
+    if (V('f-sched')) body.scheduled_at = V('f-sched');
+  }
   post('/lab-orders/', body, 'lab');
 }
+
+/* ---------- دورة العيّنة: سحب / استلام / رفض / ملصق باركود ---------- */
+async function collectSample(id) {
+  const specimen = prompt('نوع العيّنة (مثال: دم، بول، مسحة):', 'دم');
+  if (specimen === null || !specimen.trim()) return;
+  try {
+    await api('/lab-orders/' + id + '/collect', {
+      method: 'POST', body: JSON.stringify({ specimen_type: specimen.trim() }) });
+    toast('سُحبت العيّنة ووُلِّد باركودها 🧫');
+    await navigate('lab');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function receiveSample(id) {
+  try {
+    await api('/lab-orders/' + id + '/receive', {
+      method: 'POST', body: JSON.stringify({ accepted: true }) });
+    toast('تم استلام العيّنة في المختبر ✅');
+    await navigate('lab');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function rejectSample(id) {
+  const reason = prompt('سبب رفض العيّنة (إلزامي):');
+  if (reason === null || !reason.trim()) return toast('سبب الرفض مطلوب', true);
+  try {
+    await api('/lab-orders/' + id + '/receive', {
+      method: 'POST', body: JSON.stringify({ accepted: false, reason: reason.trim() }) });
+    toast('رُفضت العيّنة وسُجّل سببها في الملاحظات ⚠️');
+    await navigate('lab');
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ---------- إدخال النتيجة مع حساب النطاق تلقائيًا ---------- */
+function enterLabResult(id) {
+  const o = LAB_DATA.orders.find(x => x.id === id);
+  if (!o) return;
+  openModal(`📥 إدخال النتيجة — طلب #${id}`, `
+    <div class="kv"><span>المريض</span><b>${esc(o.patient.full_name)}</b></div>
+    <div class="kv"><span>الفحص</span><b>${esc(o.test_name)}</b></div>
+    <div class="kv"><span>نوع العيّنة</span><b>${esc(o.specimen_type || '—')}</b></div>
+    <div class="field"><label>القيمة أو وصف النتيجة *</label>
+      <input id="m-result" value="${esc(o.result || '')}" placeholder="مثال: 12.5 أو طبيعي"></div>
+    <div class="field"><label>القيمة الرقمية (للمقارنة بالنطاق الطبيعي)</label>
+      <input id="m-value" type="number" step="any" placeholder="اتركها فارغة لغير الرقمية"></div>
+    <div class="form-grid">
+      <div class="field"><label>الوحدة</label><input id="m-unit" value="${esc(o.unit || '')}"></div>
+      <div class="field"><label>النطاق الأدنى</label>
+        <input id="m-refmin" type="number" step="any" value="${o.ref_min == null ? '' : o.ref_min}"></div>
+      <div class="field"><label>النطاق الأعلى</label>
+        <input id="m-refmax" type="number" step="any" value="${o.ref_max == null ? '' : o.ref_max}"></div>
+      <div class="field"><label>القيمة الحرجة</label><select id="m-crit">
+        <option value="">تُحسب تلقائيًا</option><option value="true">تعليم يدوي كحرجة</option></select></div>
+    </div>
+    <p class="muted">تُحسب علامتا «خارج النطاق» و«حرجة» تلقائيًا من مقارنة القيمة بالنطاق الطبيعي.</p>
+    <div class="actions" style="margin-top:10px">
+      <button class="btn success" onclick="saveLabResult(${id})">حفظ النتيجة</button>
+      <button class="btn ghost" onclick="closeModal()">إلغاء</button></div>`, true);
+}
+
+async function saveLabResult(id) {
+  if (!V('m-result')) return toast('أدخل قيمة النتيجة', true);
+  const body = { result: V('m-result') };
+  if (V('m-value') !== '' && V('m-value') != null) body.value = Number(V('m-value'));
+  if (V('m-unit')) body.unit = V('m-unit');
+  if (V('m-refmin') !== '' && V('m-refmin') != null) body.ref_min = Number(V('m-refmin'));
+  if (V('m-refmax') !== '' && V('m-refmax') != null) body.ref_max = Number(V('m-refmax'));
+  if (V('m-crit') === 'true') body.critical = true;
+  try {
+    const j = await api('/lab-orders/' + id + '/result', {
+      method: 'POST', body: JSON.stringify(body) });
+    closeModal();
+    const msg = j.critical ? '⚠️ النتيجة قيمة حرجة خارج النطاق'
+      : j.abnormal ? '🟠 النتيجة خارج النطاق الطبيعي'
+      : 'تم حفظ النتيجة ✅';
+    toast(msg, !!j.critical);
+    await navigate('lab');
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ---------- الاعتماد والتوقيع الإلكتروني ---------- */
+async function verifyOrder(id) {
+  const note = prompt('ملاحظة الاعتماد (اختياري):');
+  if (note === null) return;
+  try {
+    await api('/lab-orders/' + id + '/verify', {
+      method: 'POST', body: JSON.stringify({ note: note.trim() || null }) });
+    toast('تم الاعتماد والتوقيع الإلكتروني ✍️');
+    await navigate('lab');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function setLabPriority(id, priority) {
+  try {
+    await api('/lab-orders/' + id, { method: 'PUT', body: JSON.stringify({ priority }) });
+    toast('تم تعديل الأولوية ✅');
+    await navigate('lab');
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ---------- دليل الفحوصات ---------- */
+function saveLabTest() {
+  if (!V('ct-code') || !V('ct-name')) return toast('الرمز والاسم مطلوبان', true);
+  post('/lab-tests/', {
+    code: V('ct-code'), name: V('ct-name'), category: V('ct-category') || 'lab',
+    price: V('ct-price') ? Number(V('ct-price')) : 0,
+    fasting_hours: V('ct-fasting') ? Number(V('ct-fasting')) : 0,
+    tube_type: V('ct-tube') || null, specimen_type: V('ct-spec') || null,
+    unit: V('ct-unit') || null,
+    ref_min: V('ct-refmin') === '' || V('ct-refmin') == null ? null : Number(V('ct-refmin')),
+    ref_max: V('ct-refmax') === '' || V('ct-refmax') == null ? null : Number(V('ct-refmax')),
+    active: true,
+  }, 'lab');
+}
+
+function editLabTest(id) {
+  const t = LAB_DATA.tests.find(x => x.id === id);
+  if (!t) return;
+  openModal('✏️ تعديل الفحص: ' + t.code, `
+    <div class="form-grid">
+      <div class="field"><label>الرمز *</label><input id="m-code" value="${esc(t.code)}"></div>
+      <div class="field"><label>الاسم *</label><input id="m-name" value="${esc(t.name)}"></div>
+      <div class="field"><label>التصنيف</label><select id="m-category">
+        <option value="lab" ${t.category === 'lab' ? 'selected' : ''}>تحاليل</option>
+        <option value="radiology" ${t.category === 'radiology' ? 'selected' : ''}>أشعة</option></select></div>
+      <div class="field"><label>السعر (ر.س)</label>
+        <input id="m-price" type="number" step="0.01" value="${t.price || 0}"></div>
+      <div class="field"><label>ساعات الصيام</label>
+        <input id="m-fasting" type="number" min="0" value="${t.fasting_hours || 0}"></div>
+      <div class="field"><label>نوع الأنبوب</label><input id="m-tube" value="${esc(t.tube_type || '')}"></div>
+      <div class="field"><label>نوع العينة</label><input id="m-spec" value="${esc(t.specimen_type || '')}"></div>
+      <div class="field"><label>وحدة القياس</label><input id="m-unit" value="${esc(t.unit || '')}"></div>
+      <div class="field"><label>النطاق الأدنى</label>
+        <input id="m-refmin" type="number" step="any" value="${t.ref_min == null ? '' : t.ref_min}"></div>
+      <div class="field"><label>النطاق الأعلى</label>
+        <input id="m-refmax" type="number" step="any" value="${t.ref_max == null ? '' : t.ref_max}"></div>
+    </div>
+    <div class="actions" style="margin-top:10px">
+      <button class="btn success" onclick="updateLabTest(${id})">حفظ التعديلات</button>
+      <button class="btn ghost" onclick="closeModal()">إلغاء</button></div>`, true);
+}
+
+async function updateLabTest(id) {
+  if (!V('m-code') || !V('m-name')) return toast('الرمز والاسم مطلوبان', true);
+  try {
+    await api('/lab-tests/' + id, { method: 'PUT', body: JSON.stringify({
+      code: V('m-code'), name: V('m-name'), category: V('m-category'),
+      price: Number(V('m-price') || 0), fasting_hours: Number(V('m-fasting') || 0),
+      tube_type: V('m-tube') || null, specimen_type: V('m-spec') || null,
+      unit: V('m-unit') || null,
+      ref_min: V('m-refmin') === '' || V('m-refmin') == null ? null : Number(V('m-refmin')),
+      ref_max: V('m-refmax') === '' || V('m-refmax') == null ? null : Number(V('m-refmax')),
+    }) });
+    closeModal();
+    toast('تم تحديث الفحص ✅');
+    await navigate('lab');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function toggleLabTest(id) {
+  const t = LAB_DATA.tests.find(x => x.id === id);
+  if (!t) return;
+  try {
+    await api('/lab-tests/' + id, { method: 'PUT', body: JSON.stringify({ active: !t.active }) });
+    toast(t.active ? 'أُوقف الفحص عن الظهور في نماذج الطلب' : 'فُعّل الفحص ✅');
+    await navigate('lab');
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ---------- جدولة أجهزة الأشعة ---------- */
+function scheduleOrder(id) {
+  const o = LAB_DATA.orders.find(x => x.id === id);
+  if (!o) return;
+  const opts = Object.entries(LAB_MODALITY).map(([v, l]) =>
+    `<option value="${v}" ${o.modality === v ? 'selected' : ''}>${l}</option>`).join('');
+  const when = o.scheduled_at ? String(o.scheduled_at).slice(0, 16) : '';
+  openModal('🗓️ جدولة فحص الأشعة #' + id, `
+    <div class="kv"><span>المريض</span><b>${esc(o.patient.full_name)}</b></div>
+    <div class="kv"><span>الفحص</span><b>${esc(o.test_name)}</b></div>
+    <div class="field"><label>جهاز الأشعة</label><select id="m-mod">${opts}</select></div>
+    <div class="field"><label>الغرفة</label><input id="m-room" value="${esc(o.room || '')}"
+      placeholder="غرفة أشعة 1"></div>
+    <div class="field"><label>موعد الفحص</label>
+      <input id="m-sched" type="datetime-local" value="${when}"></div>
+    <div class="field"><label>الأولوية</label><select id="m-prio">
+      <option value="routine" ${o.priority !== 'stat' ? 'selected' : ''}>روتيني</option>
+      <option value="stat" ${o.priority === 'stat' ? 'selected' : ''}>عاجل (STAT)</option></select></div>
+    <div class="actions" style="margin-top:10px">
+      <button class="btn success" onclick="saveSchedule(${id})">حفظ الجدولة</button>
+      <button class="btn ghost" onclick="closeModal()">إلغاء</button></div>`, true);
+}
+
+async function saveSchedule(id) {
+  try {
+    await api('/lab-orders/' + id, { method: 'PUT', body: JSON.stringify({
+      modality: V('m-mod'), room: V('m-room') || null,
+      scheduled_at: V('m-sched') || null, priority: V('m-prio') }) });
+    closeModal();
+    toast('تم تحديث جدولة الفحص ✅');
+    await navigate('lab');
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ---------- صور الأشعة (PACS): عرض ورفع عبر أرشيف المرفقات ---------- */
+function setPacsOrder(id) { LAB_PACS_ORDER = Number(id); return renderView('lab'); }
+
+async function uploadPacsFile(patientId) {
+  const input = document.getElementById('pacs-file');
+  const file = input && input.files[0];
+  if (!file) return toast('اختر ملف الصورة أو DICOM أولًا', true);
+  const form = new FormData();
+  form.append('patient_id', String(patientId));
+  form.append('file', file);
+  try {
+    await api('/attachments/', { method: 'POST', body: form });
+    toast('رُفعت الصورة إلى أرشيف الأشعة ✅');
+    await navigate('lab');
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ---------- التقارير التشخيصية (RIS) ---------- */
+function setRisOrder(id) { LAB_RIS_ORDER = Number(id); return renderView('lab'); }
+
+const RAD_TEMPLATES = [
+  ['صدر طبيعي', 'الرئتان بحالتين طبيعيتين، لا توجد تثقيحات أو انصباب. الزوايا الحدبية سالبة. القلب ضمن الحدود الطبيعية والقصبة الهوائية متوسطة.'],
+  ['بطن عادي', 'لا توجد تضخم في الأحشاء أو انصباب حر أو حصوات ظاهرة. غازات معوية ضمن الحدود الطبيعية.'],
+  ['خامة قطنية', 'المسافات بين الفقرات محفوظة، لا توجد آفات تخرمية بارزة أو انزلاق قطني.'],
+  ['سونار بطن', 'كبد وطحال ضمن الحدود الطبيعية، لا توجد انصباب أو كتلة بؤرية واضحة.'],
+];
+function radTemplate(text) {
+  const el = document.getElementById('m-report');
+  if (el) el.value = (el.value ? el.value + '\n' : '') + text;
+}
+
+async function saveRadReport(id) {
+  const el = document.getElementById('m-report');
+  if (!el || !el.value.trim()) return toast('اكتب التقرير التشخيصي أولًا', true);
+  try {
+    await api('/lab-orders/' + id, { method: 'PUT', body: JSON.stringify({ report: el.value.trim() }) });
+    toast('تم حفظ التقرير التشخيصي ✅');
+    await navigate('lab');
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ---------- قنوات التسليم ---------- */
+function deliveryChannel(ch) {
+  toast(`قناة «${ch}» غير مفعّلة بعد — تُربط ببوابة الرسائل في المرحلة القادمة`, true);
+}
+
+/* ---------- بناء محتوى القسم النشط ---------- */
+async function labBodyHTML(key) {
+  const fn = LAB_VIEWS[key];
+  return fn ? await fn() : '<div class="empty">هذا القسم قيد الإعداد</div>';
+}
+
+
+/* ===== محتوى أقسام شاشة المختبر والأشعة (كل قسم دالة تُرجع HTML) ===== */
+const LAB_VIEWS = {
+
+  /* ——— 🧪 LIS: طلبات التحاليل ——— */
+  'lis/orders'() {
+    const rows = LAB_DATA.orders.filter(o => o.test_type === 'lab');
+    return `
+    <div class="card">
+      <div class="toolbar"><h3 style="margin:0">طلبات التحاليل (${rows.length})</h3>
+        <div class="actions">
+          <button class="btn ghost" onclick="download('/reports/lab/pdf','lab_report.pdf')">📄 تقرير المختبر PDF</button>
+          <button class="btn ghost" onclick="download('/reports/lab/csv','lab_orders.csv')">⬇️ CSV</button>
+        </div></div>
+      ${labOrderFormHTML('lab')}
+      <div class="toolbar"><input id="f-lab-q" placeholder="🔍 بحث…" oninput="filterLabRows()">
+        <select id="f-lab-status" onchange="filterLabRows()">
+          ${[['', 'كل الحالات'], ...Object.entries(LAB_ST)]
+            .map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}
+        </select></div>
+      <div style="overflow-x:auto"><table id="tbl">
+        <thead><tr><th>#</th><th>التاريخ</th><th>المريض</th><th>الطبيب</th><th>الفحص</th>
+          <th>الأولوية</th><th>الحالة</th><th>النتيجة</th><th></th></tr></thead>
+        <tbody>${rows.map(o => `<tr data-status="${o.status}">
+          <td>${o.id}</td><td>${fmtDate(o.ordered_at)}</td>
+          <td>${esc(o.patient.full_name)}</td>
+          <td>${esc(o.doctor ? o.doctor.full_name : '-')}</td>
+          <td><strong>${esc(o.test_name)}</strong>${o.price ? `<br><small>${o.price.toLocaleString()} ر.س</small>` : ''}
+            ${o.lab_test_id ? `<br><small>📖 من الدليل #${o.lab_test_id}</small>` : ''}</td>
+          <td>${o.priority === 'stat'
+            ? '<span class="pill cancelled">عاجل STAT</span>'
+            : '<span class="pill pending">روتيني</span>'}</td>
+          <td>${labPill(o)}<br>${labSamplePill(o.sample_status)}</td>
+          <td>${o.result ? esc(o.result) : '—'} ${labFlagPill(o)}</td>
+          <td class="actions">
+            <button class="btn sm ghost" onclick="download('/lab-orders/${o.id}/pdf','lab_result_${o.id}.pdf')">🖨️ PDF</button>
+            ${o.sample_status === 'none' || o.sample_status === 'rejected'
+              ? `<button class="btn sm ghost" onclick="collectSample(${o.id})">🧫 سحب العيّنة</button>` : ''}
+            ${o.status === 'in_progress' && o.sample_status === 'received'
+              ? `<button class="btn sm success" onclick="enterLabResult(${o.id})">📥 النتيجة</button>` : ''}
+            ${o.status !== 'cancelled' && o.status !== 'reviewed'
+              ? `<button class="btn sm danger" onclick="setLabStatus(${o.id},'cancelled')">إلغاء</button>` : ''}
+            ${isAdmin() ? `<button class="btn sm danger" onclick="del('lab-orders',${o.id},'lab')">حذف</button>` : ''}
+          </td></tr>`).join('') || emptyRow(9, 'لا توجد طلبات — أنشئ أول طلب')}</tbody>
+      </table></div>
+    </div>`;
+  },
+
+  /* ——— 🧪 LIS: سحب وإدارة العينات والباركود ——— */
+  'lis/samples'() {
+    const rows = LAB_DATA.orders.filter(o => o.test_type === 'lab');
+    return `
+    <div class="card">
+      <div class="toolbar"><h3 style="margin:0">سحب العينات والباركود (${rows.length})</h3></div>
+      <div class="toolbar">
+        <input id="f-sample-q" placeholder="🔍 بحث بالاسم أو الباركود…" oninput="filterLabSampleRows()">
+        <select id="f-sample-status" onchange="filterLabSampleRows()">
+          ${[['', 'كل حالات العيّنة'], ...Object.entries(LAB_SAMPLE_ST)]
+            .map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}
+        </select></div>
+      <div style="overflow-x:auto"><table id="tbl">
+        <thead><tr><th>#</th><th>المريض</th><th>الفحص</th><th>نوع العيّنة</th><th>الباركود</th>
+          <th>الحالة</th><th>السحب/الاستلام</th><th></th></tr></thead>
+        <tbody>${rows.map(o => `<tr data-status="${o.sample_status}" data-sample="${o.sample_status}">
+          <td>${o.id}</td>
+          <td>${esc(o.patient.full_name)}</td>
+          <td>${esc(o.test_name)}</td>
+          <td>${esc(o.specimen_type || '—')}</td>
+          <td>${o.barcode ? `<code>${o.barcode}</code>` : '—'}</td>
+          <td>${labSamplePill(o.sample_status)}</td>
+          <td><small>${o.collected_by ? '🧫 ' + esc(o.collected_by) + '<br>' + fmtDate(o.collected_at) : '—'}
+            ${o.received_at ? '<br>📦 ' + fmtDate(o.received_at) : ''}</small></td>
+          <td class="actions">
+            ${o.sample_status === 'none' || o.sample_status === 'rejected'
+              ? `<button class="btn sm success" onclick="collectSample(${o.id})">🧫 سحب العيّنة</button>` : ''}
+            ${o.sample_status === 'collected'
+              ? `<button class="btn sm success" onclick="receiveSample(${o.id})">📦 استلام</button>
+                 <button class="btn sm danger" onclick="rejectSample(${o.id})">❌ رفض</button>` : ''}
+            ${o.barcode
+              ? `<button class="btn sm ghost" onclick="download('/lab-orders/${o.id}/label?copies=3','sample_label_${o.id}.pdf')">🖨️ ملصقات</button>` : ''}
+          </td></tr>`).join('') || emptyRow(8, 'لا توجد طلبات تحاليل')}</tbody>
+      </table></div>
+      <p class="muted" style="margin-top:8px">🧫 يُولّد سحب العيّنة باركود ثابتًا للطلب (Code39) وينقله إلى «قيد التنفيذ»؛
+        الاستلام يفتح باب إدخال النتيجة، والرفض يسجّل السبب في ملاحظات الطلب.</p>
+    </div>`;
+  },
+
+  /* ——— 🧪 LIS: إدخال النتائج ونطاقاتها ——— */
+  'lis/results'() {
+    const rows = LAB_DATA.orders.filter(o => o.test_type === 'lab' &&
+      (o.sample_status === 'received' || o.result));
+    return `
+    <div class="card">
+      <div class="toolbar"><h3 style="margin:0">إدخال النتائج والنطاقات الطبيعية (${rows.length})</h3></div>
+      <div style="overflow-x:auto"><table id="tbl">
+        <thead><tr><th>#</th><th>المريض</th><th>الفحص</th><th>النطاق الطبيعي</th>
+          <th>النتيجة</th><th>العلامات</th><th>الحالة</th><th></th></tr></thead>
+        <tbody>${rows.map(o => `<tr data-status="${o.status}">
+          <td>${o.id}</td><td>${esc(o.patient.full_name)}</td>
+          <td>${esc(o.test_name)}</td>
+          <td>${labRange(o)}</td>
+          <td>${o.result ? esc(o.result) + (o.unit ? ` <small>${esc(o.unit)}</small>` : '') : '—'}</td>
+          <td>${labFlagPill(o)}</td>
+          <td>${labPill(o)}</td>
+          <td class="actions">
+            ${o.sample_status === 'received' && o.status !== 'reviewed' && o.status !== 'cancelled'
+              ? `<button class="btn sm success" onclick="enterLabResult(${o.id})">${o.result ? '✏️ تعديل النتيجة' : '📥 إدخال النتيجة'}</button>` : ''}
+            ${o.status === 'ready' && (isAdmin() || isDoctor())
+              ? `<button class="btn sm ghost" onclick="verifyOrder(${o.id})">✍️ اعتماد</button>` : ''}
+            <button class="btn sm ghost" onclick="download('/lab-orders/${o.id}/pdf','lab_result_${o.id}.pdf')">🖨️ PDF</button>
+          </td></tr>`).join('') || emptyRow(8, 'لا توجد عينات مستلَمة بانتظار النتائج')}</tbody>
+      </table></div>
+      <p class="muted" style="margin-top:8px">تُحسب علامتا «خارج النطاق» و«القيمة الحرجة» تلقائيًا من مقارنة القيمة
+        بالنطاق الطبيعي الموروث من دليل الفحوصات، وتظهر في إشعار منفصل عند الحرجة.</p>
+    </div>`;
+  },
+
+  /* ——— 🧪 LIS: الاعتماد والتوقيع الإلكتروني ——— */
+  'lis/verify'() {
+    const rows = LAB_DATA.orders.filter(o => (o.result || o.report) &&
+      o.status !== 'cancelled');
+    const can = isAdmin() || isDoctor();
+    return `
+    <div class="card">
+      <div class="toolbar"><h3 style="margin:0">✍️ اعتماد التقارير والتوقيع الإلكتروني (${rows.length})</h3></div>
+      <div style="overflow-x:auto"><table id="tbl">
+        <thead><tr><th>#</th><th>المريض</th><th>الفحص</th><th>النتيجة/التقرير</th>
+          <th>الحالة</th><th>التوقيع</th><th></th></tr></thead>
+        <tbody>${rows.map(o => `<tr data-status="${o.status}">
+          <td>${o.id}</td><td>${esc(o.patient.full_name)}</td>
+          <td>${esc(o.test_name)}</td>
+          <td>${o.result ? esc(o.result) : esc(o.report || '—')}</td>
+          <td>${labPill(o)}</td>
+          <td>${o.verified_by
+            ? `<small>✍️ ${esc(o.verified_by)}<br>${fmtDate(o.verified_at)}</small>`
+            : '<span class="pill pending">بلا توقيع</span>'}</td>
+          <td class="actions">
+            ${can && o.status === 'ready'
+              ? `<button class="btn sm success" onclick="verifyOrder(${o.id})">✍️ اعتماد وتوقيع</button>` : ''}
+            <button class="btn sm ghost" onclick="download('/lab-orders/${o.id}/pdf','lab_result_${o.id}.pdf')">🖨️ ورقة النتيجة</button>
+          </td></tr>`).join('') || emptyRow(7, 'لا توجد نتائج بانتظار الاعتماد')}</tbody>
+      </table></div>
+      <p class="muted" style="margin-top:8px">الاعتماد متاح للمدير أو الطبيب فقط، ويحوّل الحالة إلى «مراجَعة»
+        مع تسجيل اسم المُعتمد ووقته — ولا يمكن تعديل النتيجة بعده.</p>
+    </div>`;
+  },
+
+  /* ——— 🧪 LIS: دليل الفحوصات ——— */
+  'lis/catalog'() {
+    const { tests } = LAB_DATA;
+    const admin = isAdmin();
+    const addForm = admin ? `
+      <details class="addbox"><summary>➕ إضافة فحص إلى الدليل</summary>
+        <div class="form-grid">
+          <div class="field"><label>الرمز *</label><input id="ct-code" placeholder="CBC-01"></div>
+          <div class="field"><label>الاسم *</label><input id="ct-name" placeholder="صورة الدم الكاملة"></div>
+          <div class="field"><label>التصنيف</label><select id="ct-category">
+            <option value="lab">تحاليل مختبرية</option><option value="radiology">فحص أشعة</option></select></div>
+          <div class="field"><label>السعر (ر.س)</label><input id="ct-price" type="number" step="0.01" min="0"></div>
+          <div class="field"><label>ساعات الصيام</label><input id="ct-fasting" type="number" min="0" value="0"></div>
+          <div class="field"><label>نوع الأنبوب</label><input id="ct-tube" placeholder="EDTA / سيرم / بول"></div>
+          <div class="field"><label>نوع العينة</label><input id="ct-spec" placeholder="دم / بول / مسحة"></div>
+          <div class="field"><label>وحدة القياس</label><input id="ct-unit" placeholder="g/dL"></div>
+          <div class="field"><label>النطاق الأدنى</label><input id="ct-refmin" type="number" step="any"></div>
+          <div class="field"><label>النطاق الأعلى</label><input id="ct-refmax" type="number" step="any"></div>
+        </div>
+        <button class="btn success" style="margin-top:12px" onclick="saveLabTest()">حفظ الفحص</button>
+      </details>` : '';
+    return `
+    <div class="card">
+      <div class="toolbar"><h3 style="margin:0">📖 دليل الفحوصات (${tests.length})</h3></div>
+      ${addForm}
+      <div style="overflow-x:auto"><table id="tbl">
+        <thead><tr><th>الرمز</th><th>الاسم</th><th>التصنيف</th><th>السعر</th><th>الصيام</th>
+          <th>الأنبوب/العيّنة</th><th>الوحدة</th><th>النطاق الطبيعي</th><th>الحالة</th>${admin ? '<th></th>' : ''}</tr></thead>
+        <tbody>${tests.map(t => `<tr data-status="${t.active ? 'ready' : 'pending'}">
+          <td><code>${esc(t.code)}</code></td>
+          <td><strong>${esc(t.name)}</strong></td>
+          <td>${t.category === 'radiology' ? '🩻 أشعة' : '🧪 تحليل'}</td>
+          <td>${Number(t.price || 0).toLocaleString()} ر.س</td>
+          <td>${t.fasting_hours ? t.fasting_hours + ' ساعة' : '—'}</td>
+          <td><small>${esc(t.tube_type || '—')} / ${esc(t.specimen_type || '—')}</small></td>
+          <td>${esc(t.unit || '—')}</td>
+          <td>${labRange(t)}</td>
+          <td>${t.active
+            ? '<span class="pill reviewed">مفعّل</span>'
+            : '<span class="pill pending">موقوف</span>'}</td>
+          ${admin ? `<td class="actions">
+            <button class="btn sm ghost" onclick="editLabTest(${t.id})">✏️ تعديل</button>
+            <button class="btn sm ghost" onclick="toggleLabTest(${t.id})">${t.active ? '⏸ إيقاف' : '▶ تفعيل'}</button>
+            <button class="btn sm danger" onclick="del('lab-tests',${t.id},'lab')">حذف</button></td>` : ''}
+        </tr>`).join('') || emptyRow(admin ? 10 : 9, 'الدليل فارغ — أضِف أول فحص')}</tbody>
+      </table></div>
+      <p class="muted" style="margin-top:8px">الدليل هو مصدر السعر وشرط الصيام ونوع الأنبوب والوحدة والنطاق الطبيعي
+        لكل طلب يُنشأ من هنا (يمكن تعديل القيم يدويًا لكل طلب).</p>
+    </div>`;
+  },
+
+  /* ——— 🩻 RIS: طلبات الأشعة ——— */
+  'ris/orders'() {
+    const rows = LAB_DATA.orders.filter(o => o.test_type === 'radiology');
+    return `
+    <div class="card">
+      <div class="toolbar"><h3 style="margin:0">طلبات الأشعة (${rows.length})</h3></div>
+      ${labOrderFormHTML('radiology')}
+      <div style="overflow-x:auto"><table id="tbl">
+        <thead><tr><th>#</th><th>التاريخ</th><th>المريض</th><th>الفحص</th><th>الأولوية</th>
+          <th>الجهاز/الغرفة</th><th>الموعد</th><th>الحالة</th><th></th></tr></thead>
+        <tbody>${rows.map(o => `<tr data-status="${o.status}">
+          <td>${o.id}</td><td>${fmtDate(o.ordered_at)}</td>
+          <td>${esc(o.patient.full_name)}</td>
+          <td><strong>${esc(o.test_name)}</strong>${o.price ? `<br><small>${o.price.toLocaleString()} ر.س</small>` : ''}</td>
+          <td>${o.priority === 'stat'
+            ? '<span class="pill cancelled">عاجل STAT</span>'
+            : '<span class="pill pending">روتيني</span>'}</td>
+          <td><small>${o.modality ? (LAB_MODALITY[o.modality] || o.modality) : '—'}${o.room ? ' · ' + esc(o.room) : ''}</small></td>
+          <td>${fmtDate(o.scheduled_at)}</td>
+          <td>${labPill(o)}</td>
+          <td class="actions">
+            <button class="btn sm ghost" onclick="scheduleOrder(${o.id})">🗓️ جدولة</button>
+            <button class="btn sm ghost" onclick="setLabSub('report')">📝 التقرير</button>
+            ${o.priority !== 'stat'
+              ? `<button class="btn sm ghost" onclick="setLabPriority(${o.id},'stat')">⚡ رفع لعاجل</button>`
+              : `<button class="btn sm ghost" onclick="setLabPriority(${o.id},'routine')">إرجاع روتيني</button>`}
+            <button class="btn sm ghost" onclick="download('/lab-orders/${o.id}/pdf','rad_${o.id}.pdf')">🖨️ PDF</button>
+            ${o.status !== 'cancelled' && o.status !== 'reviewed'
+              ? `<button class="btn sm danger" onclick="setLabStatus(${o.id},'cancelled')">إلغاء</button>` : ''}
+          </td></tr>`).join('') || emptyRow(9, 'لا توجد طلبات أشعة — أنشئ أول طلب')}</tbody>
+      </table></div>
+    </div>`;
+  },
+
+  /* ——— 🩻 RIS: جدولة الأجهزة والغرف ——— */
+  'ris/schedule'() {
+    const rows = LAB_DATA.orders.filter(o => o.test_type === 'radiology' &&
+      o.status !== 'cancelled');
+    const busy = rows.filter(o => o.scheduled_at).length;
+    return `
+    <div class="card">
+      <div class="toolbar"><h3 style="margin:0">🗓️ جدولة أجهزة الأشعة (${rows.length} طلبًا · ${busy} مجدول)</h3></div>
+      <div style="overflow-x:auto"><table id="tbl">
+        <thead><tr><th>#</th><th>المريض</th><th>الفحص</th><th>الجهاز</th><th>الغرفة</th>
+          <th>الموعد</th><th>الأولوية</th><th>الحالة</th><th></th></tr></thead>
+        <tbody>${rows.map(o => `<tr data-status="${o.status}">
+          <td>${o.id}</td><td>${esc(o.patient.full_name)}</td>
+          <td>${esc(o.test_name)}</td>
+          <td>${o.modality ? (LAB_MODALITY[o.modality] || o.modality) : '<span class="pill pending">غير محدد</span>'}</td>
+          <td>${esc(o.room || '—')}</td>
+          <td>${o.scheduled_at ? fmtDate(o.scheduled_at) : '<span class="pill pending">غير مجدول</span>'}</td>
+          <td>${o.priority === 'stat'
+            ? '<span class="pill cancelled">عاجل STAT</span>'
+            : '<span class="pill pending">روتيني</span>'}</td>
+          <td>${labPill(o)}</td>
+          <td class="actions">
+            <button class="btn sm success" onclick="scheduleOrder(${o.id})">🗓️ ${o.scheduled_at ? 'تعديل' : 'جدولة'}</button>
+          </td></tr>`).join('') || emptyRow(9, 'لا توجد طلبات أشعة للجدولة')}</tbody>
+      </table></div>
+      <p class="muted" style="margin-top:8px">تُحدَّد لكل طلب ثلاثة حقول: الجهاز (XRAY/CT/MRI/ULTRASOUND) والغرفة وموعد الفحص،
+        مع إمكانية رفع الأولوية إلى «عاجل STAT».</p>
+    </div>`;
+  },
+
+  /* ——— 🩻 RIS: صور الأشعة (PACS) ——— */
+  'ris/pacs': async function () {
+    const rads = LAB_DATA.orders.filter(o => o.test_type === 'radiology');
+    if (!rads.some(o => o.id === LAB_PACS_ORDER)) LAB_PACS_ORDER = rads[0] ? rads[0].id : 0;
+    const order = rads.find(o => o.id === LAB_PACS_ORDER);
+    let atts = [];
+    if (order) {
+      try { atts = await api('/attachments/?patient_id=' + order.patient_id); }
+      catch (e) { atts = []; }
+    }
+    const imgs = atts.filter(a => /\.(jpg|jpeg|png|gif|webp|dcm|pdf)$/i.test(a.original_name || ''));
+    const picker = rads.length ? `
+      <div class="toolbar"><label style="color:var(--muted,#6c757d)">الطلب</label>
+        <select onchange="setPacsOrder(this.value)">
+          ${rads.map(o => `<option value="${o.id}" ${o.id === LAB_PACS_ORDER ? 'selected' : ''}>
+            #${o.id} — ${esc(o.patient.full_name)} — ${esc(o.test_name)}</option>`).join('')}
+        </select></div>` : '';
+    const upload = order && isAdmin() ? `
+      <div class="toolbar">
+        <input type="file" id="pacs-file" accept=".jpg,.jpeg,.png,.gif,.webp,.dcm,.pdf">
+        <button class="btn success" onclick="uploadPacsFile(${order.patient_id})">⬆️ رفع صورة إلى الأرشيف</button>
+      </div>` : '';
+    const list = imgs.length ? `<div style="overflow-x:auto"><table id="tbl">
+      <thead><tr><th>#</th><th>اسم الملف</th><th>النوع</th><th>الحجم</th><th>التاريخ</th><th></th></tr></thead>
+      <tbody>${imgs.map(a => `<tr>
+        <td>${a.id}</td><td>${esc(a.original_name)}</td>
+        <td>${esc(a.content_type)}</td>
+        <td>${Math.round(Number(a.size_bytes || 0) / 1024)} KB</td>
+        <td>${fmtDate(a.uploaded_at)}</td>
+        <td class="actions">
+          <a class="btn sm ghost" href="/attachments/${a.id}/preview" target="_blank" rel="noopener">👁️ معاينة</a>
+          <button class="btn sm ghost" onclick="download('/attachments/${a.id}/file','attachment_${a.id}')">⬇️ تنزيل</button>
+        </td></tr>`).join('')}</tbody></table></div>`
+      : `<div class="empty">${order ? 'لا توجد صور مرفوعة لهذا المريض بعد' : 'لا توجد طلبات أشعة'}</div>`;
+    return `<div class="card">
+      <div class="toolbar"><h3 style="margin:0">🖼️ صور الأشعة — أرشيف PACS</h3></div>
+      ${picker}
+      ${order ? `<p class="muted">الطلب #${order.id} · ${esc(order.patient.full_name)} · ${esc(order.test_name)}
+        ${order.modality ? ' · ' + (LAB_MODALITY[order.modality] || order.modality) : ''}</p>` : ''}
+      ${upload}
+      ${list}
+      <p class="muted" style="margin-top:8px">تُخزَّن صور الأشعة وملفات DICOM في أرشيف المرفقات الخاص بالمريض
+        (حد أقصى 10MB للملف: JPG/PNG/PDF/DICOM)، وتُعرض هنا مرتبطة بطلب الفحص.</p>
+    </div>`;
+  },
+
+  /* ——— 🩻 RIS: التقارير التشخيصية ——— */
+  'ris/report'() {
+    const rads = LAB_DATA.orders.filter(o => o.test_type === 'radiology' &&
+      o.status !== 'cancelled');
+    if (!rads.some(o => o.id === LAB_RIS_ORDER)) LAB_RIS_ORDER = rads[0] ? rads[0].id : 0;
+    const o = rads.find(x => x.id === LAB_RIS_ORDER);
+    if (!o) return `<div class="card"><div class="empty">لا توجد طلبات أشعة — أنشئ طلبًا من تبويب «طلبات الأشعة»</div></div>`;
+    return `
+    <div class="card">
+      <div class="toolbar"><h3 style="margin:0">📝 التقارير التشخيصية</h3>
+        <select onchange="setRisOrder(this.value)">
+          ${rads.map(x => `<option value="${x.id}" ${x.id === LAB_RIS_ORDER ? 'selected' : ''}>
+            #${x.id} — ${esc(x.patient.full_name)} — ${esc(x.test_name)}</option>`).join('')}
+        </select></div>
+      <div class="kv"><span>الحالة</span><b>${LAB_ST[o.status] || o.status}</b></div>
+      <div class="kv"><span>الفحص</span><b>${esc(o.test_name)}${o.modality ? ' · ' + (LAB_MODALITY[o.modality] || o.modality) : ''}</b></div>
+      <div class="field"><label>التقرير التشخيصي</label>
+        <textarea id="m-report" rows="7" placeholder="اكتب التقرير هنا…">${esc(o.report || '')}</textarea></div>
+      <div class="actions" style="margin-bottom:8px">
+        ${RAD_TEMPLATES.map((t, i) => `<button class="btn sm ghost" onclick="radTemplate(RAD_TEMPLATES[${i}][1])">📄 ${t[0]}</button>`).join('')}
+      </div>
+      <div class="actions">
+        <button class="btn success" onclick="saveRadReport(${o.id})">💾 حفظ التقرير</button>
+        ${o.report && o.status === 'ready' && (isAdmin() || isDoctor())
+          ? `<button class="btn success" onclick="verifyOrder(${o.id})">✍️ اعتماد وتوقيع</button>` : ''}
+        <button class="btn ghost" onclick="download('/lab-orders/${o.id}/pdf','radiology_report_${o.id}.pdf')">🖨️ ورقة التقرير</button>
+      </div>
+      ${o.reported_by ? `<p class="muted">آخر من أعدّه: ${esc(o.reported_by)} · ${fmtDate(o.reported_at)}</p>` : ''}
+      ${o.verified_by ? `<p class="muted">معتمد إلكترونيًا: ${esc(o.verified_by)} · ${fmtDate(o.verified_at)}</p>` : ''}
+    </div>`;
+  },
+
+  /* ——— 📊 المشترك: تسليم النتائج ——— */
+  'shared/delivery'() {
+    const rows = LAB_DATA.orders.filter(o => o.status === 'ready' || o.status === 'reviewed');
+    return `
+    <div class="card">
+      <div class="toolbar"><h3 style="margin:0">📤 تسليم النتائج (${rows.length})</h3></div>
+      <div style="overflow-x:auto"><table id="tbl">
+        <thead><tr><th>#</th><th>المريض</th><th>الفحص</th><th>النوع</th><th>الحالة</th><th>التسليم</th></tr></thead>
+        <tbody>${rows.map(o => `<tr data-status="${o.status}">
+          <td>${o.id}</td><td>${esc(o.patient.full_name)}</td>
+          <td>${esc(o.test_name)}</td>
+          <td>${o.test_type === 'radiology' ? '🩻 أشعة' : '🧪 تحليل'}</td>
+          <td>${labPill(o)}${o.verified_by ? `<br><small>✍️ ${esc(o.verified_by)}</small>` : ''}</td>
+          <td class="actions">
+            <button class="btn sm ghost" onclick="download('/lab-orders/${o.id}/pdf','lab_result_${o.id}.pdf')">🖨️ ورقة PDF</button>
+            <button class="btn sm ghost" onclick="deliveryChannel('واتساب')">📱 واتساب</button>
+            <button class="btn sm ghost" onclick="deliveryChannel('رسالة نصية')">💬 SMS</button>
+            <button class="btn sm ghost" onclick="deliveryChannel('البريد الإلكتروني')">📧 إيميل</button>
+            <button class="btn sm ghost" onclick="deliveryChannel('بوابة المريض')">👤 بوابة المريض</button>
+          </td></tr>`).join('') || emptyRow(6, 'لا توجد نتائج جاهزة للتسليم')}</tbody>
+      </table></div>
+      <p class="muted" style="margin-top:8px">ورقة النتيجة PDF متاحة فورًا، ونتيجة الطلب المعتمدة تظهر للمريض في بوابته.
+        قنوات الرسائل (واتساب/SMS/إيميل) تُفعَّل عند ربط بوابة الرسائل.</p>
+    </div>`;
+  },
+
+  /* ——— 📊 المشترك: مخزون المختبر والأشعة ——— */
+  'shared/inventory': async function () {
+    let sum = null, items = [];
+    try {
+      [sum, items] = await Promise.all([
+        api('/inventory/summary?expiring_days=30'),
+        api('/inventory/?expiring_days=30')]);
+    } catch (e) { return `<div class="empty">⚠️ ${esc(e.message)}</div>`; }
+    const watch = items.filter(i => i.status && i.status !== 'ok');
+    const lbl = { ok: 'سليم', low: 'منخفض', out: 'نافد',
+                  expiring: 'قارب على الانتهاء', expired: 'منتهي الصلاحية' };
+    const cls = { ok: 'reviewed', low: 'pending', out: 'cancelled',
+                  expiring: 'in_progress', expired: 'cancelled' };
+    return `
+    <div class="card">
+      <div class="toolbar"><h3 style="margin:0">🧪 مخزون المستهلكات والمواد</h3>
+        <button class="btn ghost" onclick="navigate('inventory')">فتح شاشة المخزون الكاملة</button></div>
+      <div class="stats">
+        <div class="stat"><div class="num">${sum.items}</div><div class="lbl">صنف</div></div>
+        <div class="stat"><div class="num">${sum.units}</div><div class="lbl">وحدة</div></div>
+        <div class="stat green"><div class="num">${Number(sum.total_value).toLocaleString()}</div><div class="lbl">القيمة (ر.س)</div></div>
+        <div class="stat ${sum.low ? 'red' : ''}"><div class="num">${sum.low}</div><div class="lbl">منخفض</div></div>
+        <div class="stat ${sum.out ? 'red' : ''}"><div class="num">${sum.out}</div><div class="lbl">نافد</div></div>
+        <div class="stat ${sum.expiring || sum.expired ? 'red' : ''}">
+          <div class="num">${Number(sum.expiring) + Number(sum.expired)}</div><div class="lbl">انتهاء قريب/منتهٍ</div></div>
+      </div>
+      <div style="overflow-x:auto"><table id="tbl">
+        <thead><tr><th>#</th><th>الصنف</th><th>الكمية</th><th>الحالة</th><th>الصلاحية</th></tr></thead>
+        <tbody>${watch.map(i => `<tr data-status="${i.status}">
+          <td>${i.id}</td><td><strong>${esc(i.name)}</strong><br><small><code>${esc(i.code || '')}</code></small></td>
+          <td>${i.quantity} ${esc(i.unit || '')}</td>
+          <td><span class="pill ${cls[i.status] || 'pending'}">${lbl[i.status] || i.status}</span></td>
+          <td>${fmtDate(i.expiry_date)}</td></tr>`).join('') || emptyRow(5, 'كل الأصناف في الحالة السليمة ✅')}</tbody>
+      </table></div>
+      <p class="muted" style="margin-top:8px">تُعرض الأصناف التي تحتاج إجراءً (منخفض/نافد/قارب على الانتهاء)
+        لتسهيل توريد مواد الأنابيب والكواشف والمواد المستهلكة في المختبر والأشعة.</p>
+    </div>`;
+  },
+
+  /* ——— 📊 المشترك: التقارير والإحصائيات ——— */
+  'shared/analytics'() {
+    const rows = LAB_DATA.orders;
+    const lab = rows.filter(o => o.test_type === 'lab').length;
+    const rad = rows.filter(o => o.test_type === 'radiology').length;
+    const stat = rows.filter(o => o.priority === 'stat').length;
+    const done = rows.filter(o => o.status === 'ready' || o.status === 'reviewed').length;
+    const verified = rows.filter(o => o.verified_by).length;
+    const tat = rows.filter(o => o.result_at && o.ordered_at)
+      .map(o => (new Date(o.result_at) - new Date(o.ordered_at)) / 36e5)
+      .filter(h => h >= 0);
+    const avgTat = tat.length ? tat.reduce((a, b) => a + b, 0) / tat.length : null;
+    const money = list => list.reduce((s, o) => s + (Number(o.price) || 0), 0);
+    const rev = money(rows);
+    const revDone = money(rows.filter(o => o.status === 'ready' || o.status === 'reviewed'));
+    const counts = {};
+    rows.forEach(o => { counts[o.test_name] = (counts[o.test_name] || 0) + 1; });
+    const top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8);
+    const stCount = s => rows.filter(o => o.status === s).length;
+    return `
+    <div class="card">
+      <div class="toolbar"><h3 style="margin:0">📊 إحصائيات المختبر والأشعة</h3>
+        <div class="actions">
+          <button class="btn ghost" onclick="download('/reports/lab/pdf','lab_report.pdf')">📄 تقرير PDF</button>
+          <button class="btn ghost" onclick="download('/reports/lab/csv','lab_orders.csv')">⬇️ CSV</button>
+        </div></div>
+      <div class="stats">
+        <div class="stat"><div class="num">${rows.length}</div><div class="lbl">إجمالي الطلبات</div></div>
+        <div class="stat"><div class="num">${lab}</div><div class="lbl">تحاليل</div></div>
+        <div class="stat"><div class="num">${rad}</div><div class="lbl">أشعة</div></div>
+        <div class="stat ${stat ? 'red' : ''}"><div class="num">${stat}</div><div class="lbl">عاجلة (STAT)</div></div>
+        <div class="stat green"><div class="num">${done}</div><div class="lbl">نتائج جاهزة</div></div>
+        <div class="stat green"><div class="num">${verified}</div><div class="lbl">معتمدة إلكترونيًا</div></div>
+        <div class="stat"><div class="num">${avgTat == null ? '—' : avgTat.toFixed(1)}</div>
+          <div class="lbl">متوسط زمن الإنجاز (ساعة)</div></div>
+        <div class="stat"><div class="num">${rev.toLocaleString()}</div><div class="lbl">إيراد الطلبات (ر.س)</div></div>
+      </div>
+      <p class="muted">النتائج الجاهزة ${done} · إيراد الطلبات الجاهزة ${revDone.toLocaleString()} ر.س
+        ${tat.length ? ` · أسرع نتيجة ${Math.min.apply(null, tat).toFixed(1)} ساعة` : ''}</p>
+      <div class="toolbar"><h3 style="margin:0">الحالات</h3></div>
+      <div class="actions">${Object.entries(LAB_ST).map(([k, v]) =>
+        `<span class="pill ${k}">${v}: ${stCount(k)}</span>`).join('')}</div>
+      <div class="toolbar"><h3 style="margin:0">أكثر الفحوصات طلبًا</h3></div>
+      ${top.length ? `<div style="overflow-x:auto"><table id="tbl">
+        <thead><tr><th>الفحص</th><th>عدد الطلبات</th></tr></thead>
+        <tbody>${top.map(([n, c]) => `<tr><td>${esc(n)}</td><td>${c}</td></tr>`).join('')}</tbody></table></div>`
+        : '<div class="empty">لا توجد بيانات بعد</div>'}
+    </div>`;
+  },
+};
 
 async function setLabStatus(id, status) {
   try {
@@ -4175,6 +5012,17 @@ function filterLabRows() {
   document.querySelectorAll('#tbl tbody tr[data-status]').forEach(tr => {
     const okQ = !q || tr.textContent.toLowerCase().includes(q);
     const okS = !want || tr.dataset.status === want;
+    tr.style.display = (okQ && okS) ? '' : 'none';
+  });
+}
+
+/* فلتر تبويب «سحب وإدارة العينات»: بحث + حالة العيّنة */
+function filterLabSampleRows() {
+  const q = (V('f-sample-q') || '').toLowerCase();
+  const want = V('f-sample-status') || '';
+  document.querySelectorAll('#tbl tbody tr[data-sample]').forEach(tr => {
+    const okQ = !q || tr.textContent.toLowerCase().includes(q);
+    const okS = !want || tr.dataset.sample === want;
     tr.style.display = (okQ && okS) ? '' : 'none';
   });
 }

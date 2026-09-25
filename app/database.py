@@ -101,6 +101,34 @@ PENDING_COLUMNS = {
         # ملف الموارد البشرية يُحفظ JSON نصيًا ليعمل SQLite وPostgreSQL معًا
         "hr_profile": "TEXT NOT NULL DEFAULT '{}'",
     },
+    "lab_orders": {
+        # LIS/RIS: أولوية الطلب وارتباطه بدليل الفحوصات
+        "priority": "VARCHAR NOT NULL DEFAULT 'routine'",
+        "lab_test_id": "INTEGER",
+        # سحب العينة وإدارة الباركود
+        "specimen_type": "VARCHAR",
+        "barcode": "VARCHAR",
+        "sample_status": "VARCHAR NOT NULL DEFAULT 'none'",
+        "collected_at": "TIMESTAMP",
+        "collected_by": "VARCHAR",
+        "received_at": "TIMESTAMP",
+        # إدخال النتيجة ومقارنتها بالنطاق المرجعي
+        "unit": "VARCHAR",
+        "ref_min": "FLOAT",
+        "ref_max": "FLOAT",
+        "abnormal": "BOOLEAN DEFAULT 0",
+        "critical": "BOOLEAN DEFAULT 0",
+        # اعتماد التقرير والتوقيع الإلكتروني
+        "verified_by": "VARCHAR",
+        "verified_at": "TIMESTAMP",
+        # RIS: تصنيف الجهاز والجدولة والتقرير التشخيصي
+        "modality": "VARCHAR",
+        "room": "VARCHAR",
+        "scheduled_at": "TIMESTAMP",
+        "report": "TEXT",
+        "reported_by": "VARCHAR",
+        "reported_at": "TIMESTAMP",
+    },
 }
 
 # إعادة بناء جدول الفواتير مع مفاتيح FK سليمة (ALTER TABLE لا يدعم REFERENCES في SQLite)
@@ -208,7 +236,8 @@ INDEXES = {
     "medical_records": ["patient_id", "doctor_id"],
     "attachments": ["patient_id", "record_id"],
     "notifications": ["is_read", "appointment_id", "patient_id", "prescription_id"],
-    "lab_orders": ["patient_id", "status"],
+    "lab_orders": ["patient_id", "status", "barcode", "sample_status", "priority"],
+    "lab_tests": ["category", "active"],
     "dispenses": ["patient_id", "medication_id", "created_at", "prescription_id"],
     "stock_movements": ["medication_id", "created_at"],
     "prescriptions": ["patient_id", "status", "doctor_id"],

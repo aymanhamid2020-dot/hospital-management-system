@@ -399,8 +399,55 @@ class LabOrder(Base):
     ordered_at = Column(DateTime, server_default=func.now())
     result_at = Column(DateTime, nullable=True)
 
+    # — أولوية الطلب وربطه بدليل الفحوصات (LIS/RIS) —
+    priority = Column(String, default="routine")        # routine | stat
+    lab_test_id = Column(Integer, ForeignKey("lab_tests.id", ondelete="SET NULL"), nullable=True)
+    # — سحب العينة والباركود —
+    specimen_type = Column(String, nullable=True)       # دم، بول، مسحة…
+    barcode = Column(String, unique=True, nullable=True)
+    sample_status = Column(String, default="none")      # none|collected|received|rejected
+    collected_at = Column(DateTime, nullable=True)
+    collected_by = Column(String, nullable=True)
+    received_at = Column(DateTime, nullable=True)
+    # — إدخال النتيجة ونطاقها المرجعي —
+    unit = Column(String, nullable=True)
+    ref_min = Column(Float, nullable=True)
+    ref_max = Column(Float, nullable=True)
+    abnormal = Column(Boolean, default=False)           # خارج النطاق الطبيعي
+    critical = Column(Boolean, default=False)           # قيمة حرجة تتطلب إشعارًا
+    # — اعتماد التقرير والتوقيع الإلكتروني —
+    verified_by = Column(String, nullable=True)
+    verified_at = Column(DateTime, nullable=True)
+    # — الأشعة (RIS): تصنيف وجدولة وتقرير —
+    modality = Column(String, nullable=True)            # XRAY|CT|MRI|ULTRASOUND
+    room = Column(String, nullable=True)
+    scheduled_at = Column(DateTime, nullable=True)
+    report = Column(Text, nullable=True)                # التقرير التشخيصي
+    reported_by = Column(String, nullable=True)
+    reported_at = Column(DateTime, nullable=True)
+
     patient = relationship("Patient")
     doctor = relationship("Doctor")
+
+
+# ===== دليل الفحوصات (كتالوج التحاليل والأشعة) =====
+class LabTest(Base):
+    __tablename__ = "lab_tests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String, unique=True, nullable=False)   # رمز الفحص (CBC، XR-PA)
+    name = Column(String, nullable=False)
+    category = Column(SAEnum(TestType), default=TestType.LAB, nullable=False)
+    price = Column(Float, default=0)
+    fasting_hours = Column(Integer, default=0)           # ساعات الصيام المطلوبة
+    tube_type = Column(String, nullable=True)            # نوع الأنبوب (EDTA، سيرم…)
+    specimen_type = Column(String, nullable=True)        # نوع العينة
+    unit = Column(String, nullable=True)                 # وحدة القياس
+    ref_min = Column(Float, nullable=True)               # النطاق الطبيعي: الحد الأدنى
+    ref_max = Column(Float, nullable=True)               # النطاق الطبيعي: الحد الأعلى
+    active = Column(Boolean, default=True)               # مفعّل في نموذج الطلب
+
+    orders = relationship("LabOrder", backref="test_catalog")
 
 
 # ===== أدوية الصيدلية =====

@@ -243,6 +243,7 @@ from app.routers.backup import router as backup_router
 from app.routers.attachments import router as attachments_router
 from app.routers.notifications import router as notifications_router
 from app.routers.lab_orders import router as lab_orders_router
+from app.routers.lab_tests import router as lab_tests_router
 from app.routers.pharmacy import medications_router, dispenses_router, pharmacy_stats_router
 from app.routers.prescriptions import router as prescriptions_router
 from app.routers.payroll import router as payroll_router
@@ -273,6 +274,7 @@ app.include_router(backup_router)
 app.include_router(attachments_router)
 app.include_router(notifications_router)
 app.include_router(lab_orders_router)
+app.include_router(lab_tests_router)
 app.include_router(medications_router)
 app.include_router(dispenses_router)
 app.include_router(pharmacy_stats_router)

@@ -632,6 +632,45 @@ class PasswordChange(BaseModel):
     new_password: str = Field(..., min_length=6, description="كلمة المرور الجديدة")
 
 
+# ===== دليل الفحوصات (كتالوج التحاليل والأشعة) =====
+class LabTestBase(BaseModel):
+    code: str = Field(..., min_length=1, max_length=40, description="رمز الفحص (CBC…)")
+    name: str = Field(..., min_length=2, description="اسم الفحص")
+    category: TestType = Field(TestType.LAB, description="lab / radiology")
+    price: float = Field(0, ge=0, description="السعر")
+    fasting_hours: int = Field(0, ge=0, description="ساعات الصيام المطلوبة قبل الفحص")
+    tube_type: Optional[str] = Field(None, description="نوع الأنبوب المطلوب (EDTA…)")
+    specimen_type: Optional[str] = Field(None, description="نوع العينة (دم، بول، مسحة…)")
+    unit: Optional[str] = Field(None, description="وحدة القياس")
+    ref_min: Optional[float] = Field(None, description="النطاق الطبيعي: الحد الأدنى")
+    ref_max: Optional[float] = Field(None, description="النطاق الطبيعي: الحد الأعلى")
+    active: bool = Field(True, description="مفعّل في نموذج الطلب")
+
+
+class LabTestCreate(LabTestBase):
+    pass
+
+
+class LabTestUpdate(BaseModel):
+    """تحديث جزئي — الحقول المفقودة تبقى كما هي."""
+    code: Optional[str] = Field(None, min_length=1, max_length=40)
+    name: Optional[str] = Field(None, min_length=2)
+    category: Optional[TestType] = None
+    price: Optional[float] = Field(None, ge=0)
+    fasting_hours: Optional[int] = Field(None, ge=0)
+    tube_type: Optional[str] = None
+    specimen_type: Optional[str] = None
+    unit: Optional[str] = None
+    ref_min: Optional[float] = None
+    ref_max: Optional[float] = None
+    active: Optional[bool] = None
+
+
+class LabTestInDB(LabTestBase):
+    id: int
+    model_config = ConfigDict(from_attributes=True)
+
+
 # ===== طلبات المختبر والأشعة =====
 class LabOrderBase(BaseModel):
     patient_id: int = Field(..., description="معرّف المريض")
@@ -640,6 +679,13 @@ class LabOrderBase(BaseModel):
     test_name: str = Field(..., min_length=2, description="اسم التحليل أو الأشعة")
     price: float = Field(0, ge=0, description="السعر")
     notes: Optional[str] = Field(None, description="ملاحظات")
+    priority: str = Field("routine", pattern="^(routine|stat)$",
+                          description="الأولوية: routine عادية / stat طارئة")
+    lab_test_id: Optional[int] = Field(None, description="ربط بدليل الفحوصات")
+    specimen_type: Optional[str] = Field(None, description="نوع العينة المطلوبة")
+    modality: Optional[str] = Field(None, description="جهاز الأشعة (XRAY|CT|MRI|ULTRASOUND)")
+    room: Optional[str] = Field(None, description="غرفة الأشعة")
+    scheduled_at: Optional[datetime] = Field(None, description="موعد الفحص المجدول")
 
 
 class LabOrderCreate(LabOrderBase):
@@ -651,6 +697,12 @@ class LabOrderUpdate(BaseModel):
     result: Optional[str] = None
     price: Optional[float] = Field(None, ge=0)
     notes: Optional[str] = None
+    priority: Optional[str] = Field(None, pattern="^(routine|stat)$")
+    specimen_type: Optional[str] = None
+    modality: Optional[str] = Field(None, pattern="^(XRAY|CT|MRI|ULTRASOUND)$")
+    room: Optional[str] = None
+    scheduled_at: Optional[datetime] = None
+    report: Optional[str] = Field(None, description="تقرير الأشعة التشخيصي")
 
 
 class LabOrderInDB(LabOrderBase):
@@ -659,10 +711,59 @@ class LabOrderInDB(LabOrderBase):
     result: Optional[str] = None
     ordered_at: datetime
     result_at: Optional[datetime] = None
+    # العينة والباركود
+    barcode: Optional[str] = None
+    sample_status: str = "none"
+    collected_at: Optional[datetime] = None
+    collected_by: Optional[str] = None
+    received_at: Optional[datetime] = None
+    # النتيجة ونطاقها وعلامتها
+    unit: Optional[str] = None
+    ref_min: Optional[float] = None
+    ref_max: Optional[float] = None
+    abnormal: bool = False
+    critical: bool = False
+    # الاعتماد والتوقيع
+    verified_by: Optional[str] = None
+    verified_at: Optional[datetime] = None
+    # تقرير الأشعة
+    report: Optional[str] = None
+    reported_by: Optional[str] = None
+    reported_at: Optional[datetime] = None
     patient: PatientBrief
     doctor: Optional[DoctorBrief] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class LabSampleCollect(BaseModel):
+    """تسجيل سحب عيّنة من المريض وتوليد باركود لها."""
+    specimen_type: str = Field(..., min_length=2, max_length=60,
+                               description="نوع العينة (دم، بول، مسحة…)")
+    collected_by: Optional[str] = Field(None, max_length=120,
+                                        description="اسم من قام بالسحب")
+
+
+class LabSampleReceive(BaseModel):
+    """تأكيد استلام العيّنة في المختبر أو رفضها."""
+    accepted: bool = Field(True, description="true استلام / false رفض العيّنة")
+    reason: Optional[str] = Field(None, max_length=300,
+                                  description="سبب الرفض عند accepted=false")
+
+
+class LabResultEntry(BaseModel):
+    """إدخال نتيجة الفحص ومقارنتها بالنطاق الطبيعي لاستخراج علاماتها."""
+    result: str = Field(..., min_length=1, description="قيمة/وصف النتيجة")
+    value: Optional[float] = Field(None, description="القيمة الرقمية للمقارنة بالنطاق")
+    critical: bool = Field(False, description="تعليم يدوي كقيمة حرجة")
+    unit: Optional[str] = Field(None, max_length=40, description="وحدة القياس")
+    ref_min: Optional[float] = Field(None, description="النطاق المرجعي الأدنى (يُرثه من الدليل)")
+    ref_max: Optional[float] = Field(None, description="النطاق المرجعي الأعلى (يُرثه من الدليل)")
+
+
+class LabVerify(BaseModel):
+    """التوقيع الإلكتروني للاستشاري عند إتاحة النتيجة."""
+    note: Optional[str] = Field(None, max_length=500, description="ملاحظة المُعتمد")
 
 
 # ===== الصيدلية =====

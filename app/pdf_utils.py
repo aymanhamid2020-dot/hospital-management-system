@@ -1289,6 +1289,69 @@ def labels_pdf(meds) -> bytes:
     return bytes(pdf.output())
 
 
+def sample_labels_pdf(order, copies: int = 1) -> bytes:
+    """ملصقات باركود عيّنة المختبر — شبكة A4 نفسها (3×7 ملصقًا لكل صفحة).
+
+    كل ملصق: اسم المريض + نوع الفحص + الباركود Code39 ورقمه المقروء
+    + نوع العينة ورقم الطلب — لتفادي اختلاط العينات في المختبر.
+    """
+    if not FONT_REGULAR:
+        raise RuntimeError(
+            "لم يُعثر على خط عربي: ثبّت Arial (ويندوز) أو fonts-dejavu-core "
+            "(لينكس) أو حدّد HMS_FONT_REGULAR"
+        )
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.add_font("ar", "", FONT_REGULAR)
+    pdf.add_font("ar", "B", FONT_BOLD or FONT_REGULAR)
+    pdf.set_auto_page_break(auto=False)
+    pdf.add_page()
+
+    LW, LH = 60.0, 36.0          # مقاس الملصق (مم)
+    X0, Y0, GX, GY = 5.0, 8.0, 5.0, 3.0
+    PER_PAGE = 21                # 3 أعمدة × 7 صفوف
+
+    if not order.barcode:
+        return bytes(pdf.output())
+
+    code = _code39_text(order.barcode)
+    patient = order.patient.full_name if order.patient else "-"
+    test = order.test_name or "-"
+    spec = order.specimen_type or "-"
+    items = [(patient, test, spec, code, order.id)] * max(1, int(copies))
+
+    for n, (pname, tname, spec, code, oid) in enumerate(items):
+        if n and n % PER_PAGE == 0:
+            pdf.add_page()
+        col, row = n % 3, (n % PER_PAGE) // 3
+        x = X0 + col * (LW + GX)
+        y = Y0 + row * (LH + GY)
+
+        pdf.set_draw_color(200, 200, 200)
+        pdf.rect(x, y, LW, LH)
+        # اسم المريض
+        pdf.set_font("ar", "B", 9)
+        pdf.set_text_color(*DARK)
+        pdf.set_xy(x + 2, y + 1.5)
+        pdf.cell(LW - 4, 5, ar(_fit(pdf, pname, LW - 4)), align="C")
+        # نوع الفحص
+        pdf.set_font("ar", "", 7)
+        pdf.set_text_color(*GRAY)
+        pdf.set_xy(x + 2, y + 6)
+        pdf.cell(LW - 4, 4, ar(_fit(pdf, tname, LW - 4)), align="C")
+        # الباركود
+        _draw_code39(pdf, x + 2, y + 10.5, LW - 4, 12, code)
+        pdf.set_font("helvetica", "", 9)
+        pdf.set_text_color(*DARK)
+        pdf.set_xy(x + 2, y + 23)
+        pdf.cell(LW - 4, 4, code, align="C")
+        # نوع العينة ورقم الطلب
+        pdf.set_font("ar", "", 7)
+        pdf.set_text_color(*GRAY)
+        pdf.set_xy(x + 2, y + 27.5)
+        pdf.cell(LW - 4, 4, ar(_fit(pdf, f"{spec} — طلب #{oid}", LW - 4)), align="C")
+    return bytes(pdf.output())
+
+
 # ===== ورقة نتيجة المختبر/الأشعة (طلب واحد) =====
 _LAB_STATUS_AR = {"pending": "مسجّل", "in_progress": "قيد التنفيذ",
                   "ready": "جاهزة", "reviewed": "راجَعها الطبيب",
