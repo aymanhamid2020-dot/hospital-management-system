@@ -8,8 +8,11 @@ async function openChart(page: import('@playwright/test').Page) {
   await page.click('.sidebar a[data-view="patients"]');
   await expect(page.locator('#main h3').filter({ hasText: 'المرضى' })).toBeVisible();
   await page.locator('#tbl tbody tr').first().locator('button:has-text("الملف")').first().click();
-  await expect(page.locator('#modal-back')).toHaveClass(/show/);
+  // الملف يُعرض كتبويب داخل شاشة المرضى نفسها (لا نافذة منبثقة)
+  await expect(page.locator('#modal-back')).not.toHaveClass(/show/);
+  await expect(page.locator('#pat-tabs .tab.active')).toContainText('الملف الشخصي');
   await expect(page.locator('#chart-tabs .tab')).toHaveCount(6);
+  await expect(page.locator('#chart-body h3').first()).toBeVisible();
 }
 
 /** الأقسام الستة وعناوين محتواها */

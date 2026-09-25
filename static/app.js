@@ -143,6 +143,7 @@ const AR2EN = {
   '🏥 المستشفى': '🏥 Hospital',
   'لوحة التحكم': 'Dashboard',
   'المرضى': 'Patients',
+  'قائمة المرضى': 'Patient List',
   'الأطباء': 'Doctors',
   'المواعيد': 'Appointments',
   'المختبر والأشعة': 'Lab & Radiology',
@@ -862,6 +863,8 @@ let ACC_ROWS = [];
    يُرسل إلى الخادم (كان قبلها يطابق نص الصف كله ⇒ نتائج مضلّلة). */
 const PAGE_SIZE = 25;
 let PAT_LIST = { search: '', blood: '', alert: false, sort: 'created', sortDir: 'desc', page: 0, total: 0 };
+/* تبويب شاشة المرضى: القائمة (افتراضيًا) أو أحد أقسام ملف المريض المحدَّد */
+let PAT_TAB = 'list';
 let patSearchTimer = null;
 
 function getPatientListState() { return { ...PAT_LIST }; }
@@ -959,6 +962,10 @@ const CHART_TABS = [
   ['docs', 'المرفقات', '📎'],
 ];
 
+/* تبويبات شاشة «المرضى»: القائمة أولًا ثم الأقسام الستة لملف المريض —
+   كلها داخل الشاشة نفسها بلا نافذة منبثقة (النقر على صف يفتح «الملف الشخصي»). */
+const PAT_TABS = [['list', 'قائمة المرضى', '🧑‍🤝‍🧑'], ...CHART_TABS];
+
 const emptyRow = (cols, msg) =>
   `<tr><td colspan="${cols}" class="empty">${msg}</td></tr>`;
 
@@ -969,9 +976,17 @@ async function openPatientChart(id) {
   } catch (e) { return toast(e.message, true); }
   if (!CHART) return;
   CHART_TAB = 'profile';
-  openModal('🗂️ ملف المريض', `<div id="chart-box"></div>`, true);
-  renderPatientChart();
-  paintChartTab();
+  PAT_TAB = 'profile';   /* الملف يُعرض ضمن الشاشة: تبويب الملف الشخصي */
+  if (CURRENT_VIEW === 'patients') return renderView('patients');
+}
+
+/* تبديل تبويبات شاشة المرضى بين القائمة وأقسام الملف */
+function setPatTab(tab) {
+  if (tab !== 'list' && !(CHART && CHART_ID)) {
+    return toast('اختر مريضًا من «قائمة المرضى» أولًا', true);
+  }
+  PAT_TAB = tab;
+  return renderView('patients');
 }
 
 function chartHead() {
@@ -1551,6 +1566,7 @@ async function refreshBell() {
 let NAV_CHAIN = Promise.resolve();
 
 function navigate(view) {
+  if (view === 'patients') PAT_TAB = 'list';   /* القائمة هي نقطة الدخول للشاشة */
   const step = () => renderView(view);
   const run = NAV_CHAIN.then(step, step);
   NAV_CHAIN = run.catch(() => {});
@@ -2974,6 +2990,21 @@ async function deleteStaffDoc(id) {
 
   /* --- المرضى: بحث على الخادم + فلاتر + ترقيم + أعمدة محسوبة --- */
   async patients(main) {
+    /* شريط تبويبات الشاشة: القائمة أولًا ثم أقسام ملف المريض المحدَّد */
+    const tabbar = `<div class="tabbar" id="pat-tabs">${PAT_TABS.map(([k, l, i]) =>
+      `<button class="tab${k === PAT_TAB ? ' active' : ''}" data-ptab="${k}"
+        onclick="setPatTab('${k}')">${i} ${tr(l)}</button>`).join('')}</div>`;
+
+    if (PAT_TAB !== 'list') {
+      /* ── ملف المريض داخل الشاشة نفسها (بلا نافذة منبثقة) ── */
+      main.innerHTML = tabbar + ((CHART && CHART_ID)
+        ? `<div id="chart-box"></div>`
+        : `<div class="card"><div class="empty">لا يوجد مريض محدَّد — اختر مريضًا من
+             «قائمة المرضى» لعرض ملفه.</div></div>`);
+      if (CHART && CHART_ID) { renderPatientChart(); paintChartTab(); }
+      return;
+    }
+
     const st = getPatientListState();
     const qs = new URLSearchParams();
     if (st.search) qs.set('search', st.search);
@@ -3005,7 +3036,7 @@ async function deleteStaffDoc(id) {
     const canAdd = isAdmin() || !isDoctor();
     const opt = (v, l, sel) => `<option value="${v}" ${sel ? 'selected' : ''}>${l}</option>`;
 
-    main.innerHTML = `
+    main.innerHTML = tabbar + `
       <div class="card">
         <h3>المرضى <span class="count-badge">${total}</span></h3>
         <div class="toolbar">

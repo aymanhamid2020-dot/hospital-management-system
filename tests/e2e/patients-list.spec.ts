@@ -95,8 +95,15 @@ test.describe('قائمة المرضى 🧑‍🤝‍🧑', () => {
   test('النقر على صف مريض يفتح ملفه', async ({ page }) => {
     await openPatients(page);
     await page.locator('#tbl tbody tr').first().locator('td:nth-child(2)').click();
-    await expect(page.locator('#modal-back')).toHaveClass(/show/);
+    // الملف داخل الشاشة: تبويب «الملف الشخصي» مفعّل بدل النافذة المنبثقة
+    await expect(page.locator('#pat-tabs .tab.active')).toContainText('الملف الشخصي');
+    await expect(page.locator('#modal-back')).not.toHaveClass(/show/);
     await expect(page.locator('#chart-tabs .tab')).toHaveCount(6);
+
+    // شريط التبويبات يعود بالكامل إلى القائمة (الجدول والفلاتر والصفحات)
+    await page.click('#pat-tabs .tab:has-text("قائمة المرضى")');
+    await expect(page.locator('#tbl')).toBeVisible();
+    await expect(page.locator('.pager')).toBeVisible();
     await expectNoUiError(page);
   });
 
