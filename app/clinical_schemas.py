@@ -149,3 +149,60 @@ class PatientAppointmentCreate(StrictModel):
     doctor_id: int = Field(gt=0)
     appointment_date: datetime
     reason: str = Field(min_length=2, max_length=300)
+
+
+# ===== خطط الرعاية =====
+class CarePlanCreate(StrictModel):
+    patient_id: int = Field(gt=0)
+    title: str = Field(min_length=2, max_length=200)
+    description: Optional[str] = Field(None, max_length=1000)
+
+class CarePlanItemCreate(StrictModel):
+    care_plan_id: int = Field(gt=0)
+    title: str = Field(min_length=2, max_length=200)
+    due_date: Optional[str] = Field(None)
+
+class CarePlanExecutionCreate(StrictModel):
+    care_plan_id: int = Field(gt=0)
+    performed_by: int = Field(gt=0)
+    notes: Optional[str] = Field(None, max_length=500)
+
+class CarePlanOut(StrictModel):
+    id: int; patient_id: int; title: str
+    description: Optional[str]; status: str; created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+# ===== طب الأسنان =====
+class DentalChartUpsert(StrictModel):
+    tooth_number: int = Field(ge=1, le=32)
+    finding: str = Field(min_length=1, max_length=500)
+    notes: Optional[str] = Field(None, max_length=500)
+
+class DentalChartOut(StrictModel):
+    id: int; patient_id: int; teeth: list
+    notes: Optional[str]
+    model_config = ConfigDict(from_attributes=True)
+
+class DentalTreatmentPlanCreate(StrictModel):
+    patient_id: int = Field(gt=0)
+    title: str = Field(min_length=2, max_length=200)
+    description: Optional[str] = Field(None, max_length=1000)
+
+class DentalTreatmentPlanOut(StrictModel):
+    id: int; patient_id: int; title: str; status: str
+    model_config = ConfigDict(from_attributes=True)
+
+class DentalProcedureCreate(StrictModel):
+    patient_id: int = Field(gt=0)
+    treatment_plan_id: Optional[int] = Field(None, gt=0)
+    procedure_code: str = Field(min_length=2, max_length=50)
+    tooth_number: Optional[int] = Field(None, ge=1, le=32)
+
+class DentalProcedureExecute(StrictModel):
+    procedure_id: int = Field(gt=0)
+    performed_by: int = Field(gt=0)
+    notes: Optional[str] = Field(None, max_length=500)
+
+class DentalProcedureOut(StrictModel):
+    id: int; patient_id: int; procedure_code: str; status: str
+    model_config = ConfigDict(from_attributes=True)
