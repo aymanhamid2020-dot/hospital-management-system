@@ -324,3 +324,137 @@ def test_performance_report(client, admin):
                       params={"month": "2031-04"}).status_code == 401
     assert client.get("/doctors/999999/performance", headers=admin,
                       params={"month": "2031-04"}).status_code == 404
+
+
+# ========== التقرير المقارن + التصدير ==========
+def test_performance_ranking_and_exports(client, admin):
+    """تقرير مقارن: ترتيب حسب الإتمام + أصفار + تصدير CSV/PDF وبطاقة ترخيص."""
+    doc_a = _mk_doctor(client, admin)      # إتمام 100%
+    doc_b = _mk_doctor(client, admin)      # إتمام 0%
+    pat = _mk_patient(client, admin)
+
+    def mk_appt(doc, when, status):
+        r = client.post("/appointments/", headers=admin, json={
+            "patient_id": pat, "doctor_id": doc["id"],
+            "appointment_date": when, "reason": "كشف"})
+        assert r.status_code == 200, r.text
+        assert client.put(f"/appointments/{r.json()['id']}", headers=admin,
+                          json={"status": status}).status_code == 200
+
+    mk_appt(doc_a, "2031-06-01T10:00:00", "completed")
+    mk_appt(doc_b, "2031-06-02T10:00:00", "cancelled")
+
+    r = client.get("/doctors/performance", headers=admin, params={"month": "2031-06"})
+    assert r.status_code == 200, r.text
+    rows = r.json()
+    ids = [x["doctor_id"] for x in rows]
+    assert doc_a["id"] in ids and doc_b["id"] in ids and len(rows) >= 2
+    ra = next(x for x in rows if x["doctor_id"] == doc_a["id"])
+    rb = next(x for x in rows if x["doctor_id"] == doc_b["id"])
+    assert ra["full_name"] == doc_a["full_name"]
+    assert ra["completion_rate"] == 1.0 and ra["completed"] == 1
+    assert rb["completion_rate"] == 0.0 and rb["cancelled"] == 1
+    assert ids.index(doc_a["id"]) < ids.index(doc_b["id"])  # 100% قبل 0%
+    assert all(k in ra for k in ("specialty", "is_available", "month", "patients"))
+
+    # شهر بلا مواعيد لأي طبيب ⇒ كل الصفوف أصفار
+    r0 = client.get("/doctors/performance", headers=admin, params={"month": "2031-01"})
+    assert r0.status_code == 200 and all(x["total"] == 0 for x in r0.json())
+
+    # month خاطئ ⇒ 400 · 401 بلا توكن
+    assert client.get("/doctors/performance", headers=admin,
+                      params={"month": "2031-13"}).status_code == 400
+    assert client.get("/doctors/performance",
+                      params={"month": "2031-06"}).status_code == 401
+
+    # تصدير الفرد: CSV
+    rc = client.get(f"/doctors/{doc_a['id']}/performance/export.csv",
+                    headers=admin, params={"month": "2031-06"})
+    assert rc.status_code == 200 and rc.headers["content-type"].startswith("text/csv")
+    body = rc.content.decode("utf-8-sig")
+    assert "نسبة الإتمام" in body and doc_a["full_name"] in body
+    assert "2031-06" in body and "100.0" in body
+
+    # تصدير الفرد: PDF التقرير
+    rp = client.get(f"/doctors/{doc_a['id']}/performance/report.pdf",
+                    headers=admin, params={"month": "2031-06"})
+    assert rp.status_code == 200
+    assert rp.headers["content-type"].startswith("application/pdf")
+    assert rp.content[:4] == b"%PDF"
+
+    # التصدير المقارن
+    rl = client.get("/doctors/performance/export.csv",
+                    headers=admin, params={"month": "2031-06"})
+    assert rl.status_code == 200
+    lb = rl.content.decode("utf-8-sig")
+    assert doc_a["full_name"] in lb and "نسبة الإتمام" in lb
+
+    # بطاقة الترخيص
+    rlic = client.get(f"/doctors/{doc_a['id']}/license.pdf", headers=admin)
+    assert rlic.status_code == 200 and rlic.content[:4] == b"%PDF"
+
+    # month خاطئ في التصدير ⇒ 400 · مفقود ⇒ 404 · بلا توكن ⇒ 401
+    assert client.get(f"/doctors/{doc_a['id']}/performance/export.csv",
+                      headers=admin, params={"month": "xx"}).status_code == 400
+    assert client.get("/doctors/999999/license.pdf", headers=admin).status_code == 404
+    assert client.get(f"/doctors/{doc_a['id']}/license.pdf").status_code == 401
+
+
+# ========== نوبات العمل ==========
+def test_doctor_schedule(client, admin):
+    """نوبات الأسبوع: حفظ/استبدال/استرجاع + تكرار اليوم + صلاحيات."""
+    doc = _mk_doctor(client, admin)
+    url = f"/doctors/{doc['id']}/schedule"
+
+    # فارغ قبل أول حفظ
+    r = client.get(url, headers=admin)
+    assert r.status_code == 200 and r.json() == []
+
+    entries = [
+        {"day_of_week": 0, "start_time": "09:00", "end_time": "14:00",
+         "location": "عيادة 1"},
+        {"day_of_week": 3, "start_time": "10:00", "end_time": "16:00"},
+    ]
+    r = client.put(url, headers=admin, json={"entries": entries})
+    assert r.status_code == 200, r.text
+    back = r.json()
+    assert len(back) == 2 and back[0]["day_of_week"] == 0
+    assert back[0]["start_time"].startswith("09:00") and back[0]["location"] == "عيادة 1"
+    assert back[1]["location"] is None and back[1]["end_time"].startswith("16:00")
+
+    # الاستبدال الكامل: نوبة واحدة فقط تبقى
+    r = client.put(url, headers=admin, json={"entries": [entries[1]]})
+    assert r.status_code == 200 and len(r.json()) == 1
+    assert r.json()[0]["day_of_week"] == 3
+
+    # يوم مكرر ⇒ 400
+    dup = [entries[1], {"day_of_week": 3, "start_time": "17:00", "end_time": "18:00"}]
+    r = client.put(url, headers=admin, json={"entries": dup})
+    assert r.status_code == 400 and "مكرر" in r.json()["detail"]
+
+    # نهاية قبل البداية ⇒ 400
+    r = client.put(url, headers=admin, json={"entries": [
+        {"day_of_week": 1, "start_time": "15:00", "end_time": "09:00"}]})
+    assert r.status_code == 400 and "النهاية" in r.json()["detail"]
+
+    # نموذج نوبة واحدة لكل يوم (قيد فريد) — تكرار اليوم مرفوض أعلاه
+
+    # يوم خارج 0..6 ⇒ 422 (تحقّق السكيما)
+    r = client.put(url, headers=admin, json={"entries": [
+        {"day_of_week": 9, "start_time": "09:00", "end_time": "12:00"}]})
+    assert r.status_code == 422
+
+    # فشل التحقق لا يمسّ المحفوظ (الحذف بعد التحقق فقط)
+    assert len(client.get(url, headers=admin).json()) == 1
+
+    # صلاحيات: غير المدير ولا الذات ⇒ 403 برسالة النوبات
+    h = _nonadmin(client, "sch")
+    r = client.put(url, headers=h, json={"entries": []})
+    assert r.status_code == 403 and "نوبات" in r.json()["detail"]
+    # القراءة متاحة لأي مستخدم موثّق
+    assert client.get(url, headers=h).status_code == 200
+
+    # 404 + 401
+    assert client.put("/doctors/999999/schedule", headers=admin,
+                      json={"entries": []}).status_code == 404
+    assert client.get(url).status_code == 401

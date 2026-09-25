@@ -1,7 +1,7 @@
 from typing import Optional, List, Literal
 from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, time
 
 from app.models import (
     Gender, UserRole, AppointmentStatus, InvoiceStatus, BedStatus,
@@ -231,6 +231,29 @@ class DoctorPerformance(BaseModel):
     completion_rate: float = Field(..., description="نسبة المواعيد المكتملة (0..1)")
     patients: int = Field(0, description="مرضى فريدون خلال الشهر")
     records: int = Field(0, description="سجلات طبية أُنشئت خلال الشهر")
+
+
+class DoctorPerformanceRow(DoctorPerformance):
+    """صف في التقرير المقارن الشهري — بيانات الطبيب مع أرقام شهره."""
+    full_name: str
+    specialty: str
+    is_available: bool
+    department: Optional[str] = None
+
+
+class DoctorScheduleEntry(ORMModel):
+    """نوبة واحدة في أسبوع الطبيب (0=السبت … 6=الجمعة)."""
+    day_of_week: int = Field(..., ge=0, le=6,
+                            description="يوم الأسبوع: 0=السبت … 6=الجمعة")
+    start_time: time
+    end_time: time
+    location: Optional[str] = None
+    is_active: bool = True
+
+
+class DoctorScheduleUpdate(BaseModel):
+    """استبدال جدول نوبات الأسبوع كاملًا."""
+    entries: List[DoctorScheduleEntry]
 
 
 # ===== المواعيد =====

@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    Column, Integer, String, DateTime, Float, Boolean, ForeignKey,
+    Column, Integer, String, DateTime, Float, Boolean, Time, ForeignKey,
     Enum as SAEnum, UniqueConstraint
 )
 from sqlalchemy.orm import relationship
@@ -788,4 +788,24 @@ class InvoiceLedgerPayment(Base):
     journal_entry_id = Column(Integer, ForeignKey("journal_entries.id", ondelete="RESTRICT"), nullable=False, unique=True)
     created_by = Column(String, nullable=False)
     created_at = Column(DateTime, server_default=func.now())
+
+
+class DoctorSchedule(Base):
+    """نوبات عمل الطبيب الأسبوعية — نوبة واحدة كحد أقصى لكل يوم."""
+    __tablename__ = "doctor_schedules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    doctor_id = Column(Integer, ForeignKey("doctors.id", ondelete="CASCADE"),
+                       nullable=False, index=True)
+    day_of_week = Column(Integer, nullable=False)  # 0=السبت … 6=الجمعة
+    start_time = Column(Time, nullable=False)
+    end_time = Column(Time, nullable=False)
+    location = Column(String, nullable=True)       # حجرة/عيادة اختيارية
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("doctor_id", "day_of_week", name="uq_schedule_doctor_day"),
+    )
+
 

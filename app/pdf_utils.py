@@ -1411,3 +1411,46 @@ def _lab_result_en(order) -> bytes:
     pdf.kv_row("Lab technician", "____________________")
     pdf.kv_row("Reviewed by doctor", "____________________")
     return bytes(pdf.output())
+
+
+def doctor_report_pdf(report, doctor, month: str) -> bytes:
+    """تقرير أداء الطبيب الشهري — عربي (A4) مولّد من أرقام الشهر."""
+    pdf = ArabicPDF(f"تقرير أداء الطبيب — {month}")
+    pdf.kv_row("الاسم الكامل", doctor.full_name)
+    pdf.kv_row("التخصص", doctor.specialty)
+    pdf.kv_row("رقم الترخيص", doctor.license_number)
+    pdf.kv_row("القسم", doctor.department.name if doctor.department else "بدون قسم")
+    pdf.kv_row("الشهر", report.month)
+    pdf.section("المواعيد")
+    pdf.kv_row("إجمالي المواعيد", report.total)
+    pdf.kv_row("مكتملة", report.completed)
+    pdf.kv_row("ملغاة", report.cancelled)
+    pdf.kv_row("معلّقة", report.pending)
+    pdf.kv_row("مؤكّدة", report.confirmed)
+    pdf.kv_row("نسبة الإتمام", f"{report.completion_rate * 100:.1f}%")
+    pdf.section("المرضى والسجلات الطبية")
+    pdf.kv_row("مرضى فريدون", report.patients)
+    pdf.kv_row("سجلات طبية", report.records)
+    return bytes(pdf.output())
+
+
+def doctor_license_pdf(doctor) -> bytes:
+    """بطاقة ترخيص ممارسة المهن الطبية — مستند إلكتروني قابل للطباعة."""
+    from datetime import datetime
+
+    pdf = ArabicPDF("بطاقة ترخيص ممارسة مهنة طبية")
+    pdf.kv_row("الاسم الكامل", doctor.full_name)
+    pdf.kv_row("التخصص", doctor.specialty)
+    pdf.kv_row("رقم الترخيص", doctor.license_number)
+    pdf.kv_row("الهاتف", doctor.phone or "—")
+    pdf.kv_row("البريد الإلكتروني", doctor.email or "—")
+    pdf.kv_row("العنوان", doctor.address or "—")
+    pdf.kv_row("القسم", doctor.department.name if doctor.department else "بدون قسم")
+    pdf.kv_row("حالة الممارسة",
+               "متاح للتوافر" if doctor.is_available else "غير متاح حاليًا")
+    pdf.kv_row("تاريخ الانتساب",
+               doctor.created_at.strftime("%Y-%m-%d") if doctor.created_at else "—")
+    pdf.section("إفادة")
+    pdf.kv_row("تصدر بتاريخ", datetime.now().strftime("%Y-%m-%d"))
+    pdf.kv_row("المصدر", "نظام إدارة المستشفيات — مستند مولّد إلكترونيًا")
+    return bytes(pdf.output())

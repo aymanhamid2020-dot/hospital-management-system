@@ -9,6 +9,7 @@
 <link rel="icon" href="/ui/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/ui/icon.svg">
 <meta name="theme-color" content="#2c7be5">
+<script>try{var t=localStorage.getItem('hms_theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
 </head>
 <body>
 
@@ -22,7 +23,10 @@
     <div class="field"><label>كلمة المرور</label><input id="li-pass" type="password" autocomplete="current-password" value="admin123"></div>
     <button class="btn block" onclick="login()">تسجيل الدخول</button>
     <p style="margin-top:16px; font-size:12px;">admin / admin123 — طبيب: drsara / sara12345 — موظف: reception1 / rec12345</p>
-    <button class="btn ghost sm lang-btn" onclick="toggleLang()" style="width:100%;margin-top:12px" title="تبديل اللغة">🌐 EN</button>
+    <div class="row2" style="margin-top:12px;display:flex;gap:8px">
+      <button class="btn ghost sm lang-btn" onclick="toggleLang()" style="flex:1" title="تبديل اللغة">🌐 EN</button>
+      <button class="btn ghost sm" id="theme-btn-login" onclick="toggleTheme()" style="flex:1" title="الوضع الداكن/الفاتح">🌙</button>
+    </div>
   </div>
 </div>
 
@@ -66,6 +70,7 @@
           <span class="role-badge" id="ub-role"></span>
           <button class="btn ghost sm" onclick="changePassword()" title="تغيير كلمة المرور">🔑</button>
           <button class="btn ghost sm lang-btn" onclick="toggleLang()" title="تبديل اللغة">🌐 EN</button>
+          <button class="btn ghost sm" id="theme-btn" onclick="toggleTheme()" title="الوضع الداكن/الفاتح">🌙</button>
           <button class="btn sm danger" onclick="logout()">خروج</button>
         </div>
       </header>

@@ -641,6 +641,50 @@ def main():
     check("شهر غير صالح ⇒ 400 عربي", r_pf4.status_code == 400
           and "YYYY-MM" in r_pf4.json().get("detail", ""), str(r_pf4.status_code))
 
+    # تقرير مقارن لجميع الأطباء (نهاية جديدة)
+    r_all = c.get("/doctors/performance", headers=h, params={"month": nowm})
+    j_all = r_all.json() if r_all.status_code == 200 else []
+    check("تقرير مقارن لجميع الأطباء", r_all.status_code == 200
+          and isinstance(j_all, list) and len(j_all) >= 2
+          and all(k in j_all[0] for k in ("full_name", "completion_rate",
+                                          "total", "specialty")),
+          str(r_all.status_code))
+
+    # تصدير: CSV + PDF التقرير + بطاقة الترخيص
+    r_csv = c.get(f"/doctors/{d2}/performance/export.csv", headers=h,
+                  params={"month": nowm})
+    r_pdf = c.get(f"/doctors/{d2}/performance/report.pdf", headers=h,
+                  params={"month": nowm})
+    r_lic = c.get(f"/doctors/{d2}/license.pdf", headers=h)
+    check("تصدير التقرير: CSV + PDF + بطاقة الترخيص",
+          r_csv.status_code == 200 and r_csv.content[:3] == b"\xef\xbb\xbf"
+          and r_pdf.status_code == 200 and r_pdf.content[:4] == b"%PDF"
+          and r_lic.status_code == 200 and r_lic.content[:4] == b"%PDF",
+          f"csv={r_csv.status_code} pdf={r_pdf.status_code} lic={r_lic.status_code}")
+
+    # تصدير التقرير المقارن
+    r_csv_all = c.get("/doctors/performance/export.csv", headers=h,
+                      params={"month": nowm})
+    check("تصدير CSV مقارن لجميع الأطباء",
+          r_csv_all.status_code == 200 and r_csv_all.content[:3] == b"\xef\xbb\xbf",
+          str(r_csv_all.status_code))
+
+    # نوبات العمل الأسبوعية: حفظ + استرجاع + تحقق + تفريغ
+    r_sc = c.put(f"/doctors/{d2}/schedule", headers=h, json={"entries": [
+        {"day_of_week": 0, "start_time": "09:00", "end_time": "14:00",
+         "location": "عيادة الفحص"}]})
+    r_sg = c.get(f"/doctors/{d2}/schedule", headers=h)
+    check("نوبات العمل: حفظ أسبوعي واسترجاع", r_sc.status_code == 200
+          and r_sg.status_code == 200 and len(r_sg.json()) == 1
+          and r_sg.json()[0]["start_time"].startswith("09:00"),
+          f"put={r_sc.status_code} get={r_sg.status_code}")
+    r_sc_bad = c.put(f"/doctors/{d2}/schedule", headers=h, json={"entries": [
+        {"day_of_week": 1, "start_time": "16:00", "end_time": "10:00"}]})
+    check("نوبة بعصر خاطئ ⇒ 400 عربي", r_sc_bad.status_code == 400
+          and "النهاية" in r_sc_bad.json().get("detail", ""),
+          str(r_sc_bad.status_code))
+    c.put(f"/doctors/{d2}/schedule", headers=h, json={"entries": []})  # تفريغ
+
     # حذف محميّ: طبيب ذي مواعيد ⇒ 409 بدل انفجار/حذف صامت للسجل
     r_del = c.delete(f"/doctors/{doctor_id}", headers=h)
     check("حذف طبيب ذي مواعيد ⇒ 409", r_del.status_code == 409
@@ -657,9 +701,12 @@ def main():
 
     # علامات الواجهة الجديدة في app.js
     ru2 = c.get("/ui/app.js")
-    check("واجهة الأطباء: بحث/فلاتر + توافر + تعديل + تقرير",
+    check("واجهة الأطباء: بحث/فلاتر + تعديل + تقرير + مقارنة + نوبات + ثيم",
           b"filterDoctors" in ru2.content and b"toggleDoctorAvail" in ru2.content
-          and b"editDoctor" in ru2.content and b"doctorReport" in ru2.content)
+          and b"editDoctor" in ru2.content and b"doctorReport" in ru2.content
+          and b"doctorsPerformance" in ru2.content
+          and b"doctorSchedule" in ru2.content
+          and b"toggleTheme" in ru2.content)
 
     print(f"\n==== LIVE CONTAINER RESULT: {PASSED} passed, {FAILED} failed ====")
     return 0 if FAILED == 0 else 1

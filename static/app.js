@@ -94,6 +94,25 @@ function isDoctor() { return USER && USER.role === 'doctor'; }
 
 /* ========== اللغة: عربي / English (i18n) ========== */
 let LANG = localStorage.getItem('hms_lang') || 'ar';
+
+/* ===== الوضع الداكن 🌙 ===== */
+let THEME = localStorage.getItem('hms_theme') || 'light';
+
+function applyTheme() {
+  document.documentElement.dataset.theme = THEME;
+  ['theme-btn', 'theme-btn-login'].forEach(id => {
+    const b = document.getElementById(id);
+    if (b) b.textContent = THEME === 'dark' ? '☀️' : '🌙';
+  });
+}
+
+function toggleTheme() {
+  THEME = THEME === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('hms_theme', THEME);
+  applyTheme();
+  toast(THEME === 'dark' ? '🌙 الوضع الداكن مفعّل' : '☀️ الوضع الفاتح مفعّل');
+}
+applyTheme();
 const AR2EN = {
   /* الشاشة العامة */
   'نظام إدارة المستشفيات — لوحة التحكم': 'Hospital Management — Dashboard',
@@ -738,12 +757,14 @@ async function downloadAccounts(kind) {
 /* تسديد دفعة لعملية بيع — نافذة منبثقة (مبلغ + طريقة + معاينة المتبقي) */
 let ACC_ROWS = [];
 
-function openModal(title, html) {
+function openModal(title, html, wide = false) {
   const t = document.getElementById('modal-title');
   t.textContent = title;
   document.getElementById('modal-body').innerHTML = html;
-  document.getElementById('modal-back').classList.add('show');
-  applyI18n(document.getElementById('modal-back'));
+  const back = document.getElementById('modal-back');
+  back.classList.add('show');
+  back.classList.toggle('wide', !!wide);
+  applyI18n(back);
 }
 function closeModal() { document.getElementById('modal-back').classList.remove('show'); }
 
@@ -1076,6 +1097,7 @@ const VIEWS = {
             <option value="none">بدون قسم</option></select>
           <select id="flt-avail" onchange="filterDoctors()"><option value="">كل الحالات</option>
             <option value="1">✅ متاح</option><option value="0">⛔ غير متاح</option></select>
+          <button class="btn ghost" onclick="doctorsPerformance()">📊 أداء الشهر</button>
         </div>
         ${form}
         <div style="overflow-x:auto"><table id="tbl">
@@ -1088,6 +1110,7 @@ const VIEWS = {
             <td>
               ${isAdmin() ? `<button class="btn sm ghost" onclick="editDoctor(${d.id})">✏️ تعديل</button>` : ''}
               <button class="btn sm ghost" onclick="doctorReport(${d.id})">📈 تقرير</button>
+              ${canToggle(d) ? `<button class="btn sm ghost" onclick="doctorSchedule(${d.id})" title="نوبات العمل">🗓️</button>` : ''}
               ${canToggle(d) ? `<button class="btn sm ghost" onclick="toggleDoctorAvail(${d.id},${d.is_available})">${d.is_available ? '⛔ تعطيل' : '✅ تمكين'}</button>` : ''}
               ${isAdmin() ? `<button class="btn sm danger" onclick="del('doctors',${d.id},'doctors')">حذف</button>` : ''}
             </td>
@@ -2522,7 +2545,12 @@ function doctorReport(id) {
              onchange="loadDoctorReport(${id})">
       <button class="btn ghost" onclick="loadDoctorReport(${id})">🔄 تحديث</button>
     </div>
-    <div id="rp-body"><div class="empty">جارٍ التحميل…</div></div>`);
+    <div id="rp-body"><div class="empty">جارٍ التحميل…</div></div>
+    <div class="row2" style="margin-top:12px">
+      <button class="btn ghost" onclick="exportDoctorReport(${id},'csv')">⬇️ CSV</button>
+      <button class="btn ghost" onclick="exportDoctorReport(${id},'pdf')">🖨️ PDF</button>
+      <button class="btn ghost" onclick="exportDoctorReport(${id},'license')">🪪 بطاقة الترخيص</button>
+    </div>`, true);
   loadDoctorReport(id);
 }
 
@@ -2547,6 +2575,107 @@ async function loadDoctorReport(id) {
   } catch (e) {
     box.innerHTML = `<div class="empty" style="color:#dc3545">⚠️ ${esc(e.message)}</div>`;
   }
+}
+
+/* تصدير تقرير الطبيب: CSV / PDF / بطاقة الترخيص */
+function exportDoctorReport(id, kind) {
+  const m = V('rp-month') || new Date().toISOString().slice(0, 7);
+  if (kind === 'license') return download(`/doctors/${id}/license.pdf`, `license_doctor_${id}.pdf`);
+  if (kind === 'pdf') return download(`/doctors/${id}/performance/report.pdf?month=${encodeURIComponent(m)}`, `doctor_${id}_report_${m}.pdf`);
+  return download(`/doctors/${id}/performance/export.csv?month=${encodeURIComponent(m)}`, `doctor_${id}_report_${m}.csv`);
+}
+
+/* تقرير مقارن لجميع الأطباء — ترتيب حسب نسبة الإتمام ثم حجم العمل */
+async function doctorsPerformance() {
+  const def = new Date().toISOString().slice(0, 7);
+  openModal('📊 أداء جميع الأطباء الشهري', `
+    <div class="toolbar" style="margin-bottom:10px">
+      <input type="month" id="pm-month" value="${def}" onchange="loadDoctorsPerformance()">
+      <button class="btn ghost" onclick="loadDoctorsPerformance()">🔄 تحديث</button>
+      <button class="btn ghost" onclick="downloadDoctorsPerfCSV()">⬇️ CSV</button>
+    </div>
+    <div id="pm-body"><div class="empty">جارٍ التحميل…</div></div>`, true);
+  loadDoctorsPerformance();
+}
+
+async function loadDoctorsPerformance() {
+  const box = document.getElementById('pm-body');
+  const m = V('pm-month') || new Date().toISOString().slice(0, 7);
+  if (!box) return;
+  box.innerHTML = '<div class="empty">جارٍ التحميل…</div>';
+  try {
+    const rows = await api(`/doctors/performance?month=${encodeURIComponent(m)}`);
+    if (!rows.length) { box.innerHTML = '<div class="empty">لا يوجد أطباء</div>'; return; }
+    box.innerHTML = `<div style="overflow-x:auto"><table>
+      <thead><tr><th>#</th><th>الطبيب</th><th>التخصص</th><th>القسم</th><th>إجمالي</th>
+      <th>مكتملة</th><th>ملغاة</th><th>الإتمام</th><th>مرضى</th><th>سجلات</th></tr></thead>
+      <tbody>${rows.map((r, i) => `<tr>
+        <td>${i + 1}</td><td><strong>${esc(r.full_name)}</strong></td>
+        <td>${esc(r.specialty)}</td><td>${esc(r.department || '-')}</td>
+        <td>${r.total}</td><td>${r.completed}</td><td>${r.cancelled}</td>
+        <td>${Math.round((r.completion_rate || 0) * 100)}%</td>
+        <td>${r.patients}</td><td>${r.records}</td>
+      </tr>`).join('')}</tbody></table></div>
+      <p style="margin:8px 0 0;color:#64748b">الترتيب: نسبة الإتمام ثم حجم العمل — الشهر ${esc(m)}</p>`;
+  } catch (e) {
+    box.innerHTML = `<div class="empty" style="color:#dc3545">⚠️ ${esc(e.message)}</div>`;
+  }
+}
+
+function downloadDoctorsPerfCSV() {
+  const m = V('pm-month') || new Date().toISOString().slice(0, 7);
+  return download(`/doctors/performance/export.csv?month=${encodeURIComponent(m)}`, `doctors_performance_${m}.csv`);
+}
+
+/* نوبات العمل الأسبوعية — جدول 7 أيام يُحفظ استبدالًا */
+async function doctorSchedule(id) {
+  const d = (DOCTORS_CACHE || []).find(x => x.id === id);
+  if (!d) return toast('الطبيب غير موجود', true);
+  const DAYS = ['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة'];
+  let entries = [];
+  try { entries = await api(`/doctors/${id}/schedule`); }
+  catch (e) { return toast(e.message, true); }
+  const by = {};
+  entries.forEach(e => { by[e.day_of_week] = e; });
+  const rows = DAYS.map((name, day) => {
+    const e = by[day];
+    return `<tr>
+      <td><label style="display:flex;gap:6px;align-items:center;font-weight:bold">
+        <input type="checkbox" id="sc-on-${day}" ${e && e.is_active !== false ? 'checked' : ''}> ${name}</label></td>
+      <td><input type="time" id="sc-s-${day}" value="${e ? e.start_time.slice(0, 5) : '09:00'}"></td>
+      <td><input type="time" id="sc-e-${day}" value="${e ? e.end_time.slice(0, 5) : '15:00'}"></td>
+      <td><input id="sc-l-${day}" style="width:100%" placeholder="الحجرة/العيادة"
+           value="${e && e.location ? esc(e.location) : ''}"></td>
+    </tr>`;
+  }).join('');
+  openModal('🗓️ نوبات العمل — ' + esc(d.full_name), `
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>اليوم</th><th>من</th><th>إلى</th><th>المكان</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+    <p style="margin:8px 0 0;color:#64748b">علّم الأيام العاملة ثم احفظ — يُستبدل الأسبوع كاملًا.</p>
+    <div class="row2" style="margin-top:12px">
+      <button class="btn success" onclick="saveDoctorSchedule(${id})">💾 حفظ الأسبوع</button>
+      <button class="btn ghost" onclick="closeModal()">إلغاء</button>
+    </div>`);
+}
+
+async function saveDoctorSchedule(id) {
+  const entries = [];
+  for (let day = 0; day < 7; day++) {
+    if (!document.getElementById('sc-on-' + day)?.checked) continue;
+    entries.push({
+      day_of_week: day,
+      start_time: V('sc-s-' + day),
+      end_time: V('sc-e-' + day),
+      location: V('sc-l-' + day) || null
+    });
+  }
+  try {
+    await api(`/doctors/${id}/schedule`, { method: 'PUT', body: JSON.stringify({ entries }) });
+    toast('حُفظت نوبات الأسبوع ✅');
+    closeModal();
+  } catch (e) { toast(e.message, true); }
 }
 
 function addAppt() {
