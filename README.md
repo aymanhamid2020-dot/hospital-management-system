@@ -32,7 +32,7 @@
 |---|---|---|---|
 | ![المخزون](docs/screenshots/gallery/05-inventory.png) | ![المختبر](docs/screenshots/gallery/06-lab.png) | ![الفواتير](docs/screenshots/gallery/07-invoices.png) | ![الرعاية](docs/screenshots/gallery/08-clinical.png) |
 
-| المحاسبة (7 تبويبات) |
+| المحاسبة (6 تبويبات) |
 |---|
 | ![المحاسبة](docs/screenshots/gallery/09-accounting.png) |
 
@@ -507,7 +507,7 @@ npm install                          # تثبيت @playwright/test (مرة وا�
 npx playwright install chromium      # تثبيت المتصفح (مرة واحدة)
 
 # الخادم يجب أن يعمل: uvicorn main:app --host 127.0.0.1 --port 8001
-npm run test:e2e                     # 31 اختبارًا: الأطباء 6 + الأساسية 6 + المحاسبة 5 + شؤون الموظفين 1 + اللقطات 4 + المعرض 9
+npm run test:e2e                     # 33 اختبارًا: الأطباء 7 + الأساسية 6 + المحاسبة 5 + شؤون الموظفين 2 + اللقطات 4 + المعرض 9
 npx playwright test --grep "الشاشات الأساسية"  # تشغيل مجموعة واحدة
 npm run screenshots                  # 📸 تجديد لقطات docs/screenshots/doctors-e2e/ (4 صور)
 node scripts/gen-user-guide-pdf.js   # 📘 تجديد docs/user-guide.pdf من دليل HTML

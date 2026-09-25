@@ -38,4 +38,24 @@ test.describe('شؤون الموظفين 🗂️', () => {
 
     await expectNoUiError(page);
   });
+
+  test('اختيار موظف آخر لا يُفرغ تبويب الرواتب', async ({ page }) => {
+    await login(page);
+    await page.click('.sidebar a[data-view="hr"]');
+    await expect(page.locator('#hr-editor')).toBeVisible();
+
+    const people = page.locator('#hr-list .hr-person');
+    test.skip((await people.count()) < 2, 'يحتاج موظفين اثنين على الأقل');
+
+    await page.click('#hr-editor .tabbar .tab:has-text("💵 الرواتب")');
+    await expect(page.locator('#hr-payroll h3').filter({ hasText: 'كشف الرواتب' }).first())
+      .toBeVisible();
+
+    // إعادة بناء المحرّر عند تبديل الموظف كانت تُبقي حاوية الرواتب فارغة
+    await people.nth(1).click();
+    await expect(page.locator('#hr-payroll h3').filter({ hasText: 'كشف الرواتب' }).first())
+      .toBeVisible();
+
+    await expectNoUiError(page);
+  });
 });

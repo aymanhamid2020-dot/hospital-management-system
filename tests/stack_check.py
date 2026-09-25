@@ -311,7 +311,10 @@ def main():
     check("جرد بدون توكن ⇒ 401", rr.status_code == 401, str(rr.status_code))
 
     # 9) حماية الدخول: قفل مؤقت (في الذاكرة — مستخدم وهمي لا يمسّ البيانات)
-    lk = {"username": "stack_lock_dummy", "password": "badpass1"}
+    # اسم فريد لكل تشغيل: القفل يبقى 15 دقيقة على (المستخدم + الـIP)، فاسم
+    # ثابت يجعل الفحص الثاني يفشل بـ429×6 بدل 401×5 ثم 429.
+    lk = {"username": f"stack_lock_dummy_{int(time.time() * 1000)}",
+          "password": "badpass1"}
     lk_codes = [c.post("/auth/login", json=lk).status_code for _ in range(5)]
     rr = c.post("/auth/login", json=lk)
     check("قفل الدخول بعد 5 محاولات فاشلة (401×5 ثم 429)",

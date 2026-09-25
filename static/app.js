@@ -157,7 +157,7 @@ const AR2EN = {
   'شؤون الموظفين': 'Employee Affairs',
   'البيانات الشخصية والتعريفية': 'Personal & Identification Info',
   'البيانات الوظيفية والإدارية': 'Employment & Job Info',
-  'البيانات المالية والرواتب': 'Salary & Payroll Info',
+  'البيانات المالية والتعويضات': 'Salary & Allowances Info',
   'الاستقطاعات والتأمينات والضرائب': 'Deductions & Taxes',
   'الإجازات والدوام': 'Leave & Attendance',
   'العهد العينية والعهد': 'Assets & Loans',
@@ -1324,7 +1324,7 @@ async function ledgerAction(action) {
 let HR_ROWS = [], HR_SELECTED = null, HR_TAB = 'personal', HR_ACCOUNTS = [];
 const HR_TABS = [
   ['personal','البيانات الشخصية والتعريفية','🪪'], ['employment','البيانات الوظيفية والإدارية','🏢'],
-  ['salary','البيانات المالية والرواتب','💰'], ['deductions','الاستقطاعات والتأمينات والضرائب','🧮'],
+  ['salary','البيانات المالية والتعويضات','💰'], ['deductions','الاستقطاعات والتأمينات والضرائب','🧮'],
   ['attendance','الإجازات والدوام','🕒'], ['assets','العهد العينية والعهد','💻'],
   ['end_service','مستحقات نهاية الخدمة والقيود','🏁'], ['payroll','الرواتب','💵']
 ];
@@ -1362,7 +1362,16 @@ function hrEditorHTML() {
     <div class="tabbar" role="tablist">${HR_TABS.map(([k,l,i])=>`<button class="tab${HR_TAB===k?' active':''}" role="tab" aria-selected="${HR_TAB===k}" onclick="setHRTab('${k}')">${i} ${l}</button>`).join('')}</div>
     <div id="hr-tab" class="hr-tab">${hrTabHTML()}</div></div>`;
 }
-function selectHR(id) { captureHRFields(); HR_SELECTED=id; document.getElementById('hr-list').innerHTML=hrDirectoryHTML(); document.getElementById('hr-editor').innerHTML=hrEditorHTML(); applyI18n(document.getElementById('hr-editor')); }
+/* اختيار موظف: يُعاد بناء المحرّر كاملًا — ومع التبويب الحالي «الرواتب»
+   يجب إعادة رسم كشف الرواتب أيضًا، وإلا بقيت حاويتها فارغة (‎#hr-payroll‎)
+   لأن hrEditorHTML() يعيد بناء <div id="hr-payroll"></div> من الصفر. */
+async function selectHR(id) {
+  captureHRFields(); HR_SELECTED=id;
+  document.getElementById('hr-list').innerHTML=hrDirectoryHTML();
+  document.getElementById('hr-editor').innerHTML=hrEditorHTML();
+  applyI18n(document.getElementById('hr-editor'));
+  if (HR_TAB === 'payroll') await renderHRPayroll();
+}
 async function setHRTab(tab) { captureHRFields(); HR_TAB=tab; document.getElementById('hr-editor').innerHTML=hrEditorHTML(); applyI18n(document.getElementById('hr-editor')); if (tab === 'payroll') await renderHRPayroll(); }
 function filterHR(value) { document.getElementById('hr-list').innerHTML=hrDirectoryHTML(value); }
 function captureHRFields() {
@@ -1434,6 +1443,7 @@ async function renderHRPayroll() {
   box.innerHTML = '<div class="empty">جارٍ التحميل…</div>';
   try { await VIEWS.payroll(box); }
   catch (e) { box.innerHTML = `<div class="empty" style="color:#dc3545">⚠️ ${esc(e.message)}</div>`; }
+  applyI18n(box);   /* المحتوى يُبنى بعد applyI18n في المستدعي — نترجمه هنا */
 }
 
 const VIEWS = {
