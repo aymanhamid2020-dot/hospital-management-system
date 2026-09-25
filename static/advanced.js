@@ -15,7 +15,13 @@ const OP_GROUPS = {
     ['assets','الأصول الثابتة','🏗️',null]]
 };
 const OP_FIELDS = {
-  'service-requests':[['patient_id','المريض','number'],['service_type','نوع الخدمة','select',['care_sets','dental','physiotherapy','emergency','home_health','wellness','nutrition']],['title','العنوان'],['details','التفاصيل'],['priority','الأولوية','select',['low','normal','high','critical']]],
+  'service-requests':[['patient_id','المريض','number'],['service_type','نوع الخدمة','select',['care_sets','dental','physiotherapy','emergency','home_health','wellness','nutrition','housekeeping']],['title','العنوان'],['details','التفاصيل'],['priority','الأولوية','select',['low','normal','high','critical']]],
+  physiotherapy:[['patient_id','المريض','number'],['therapist_id','الطبيب المعالج','number'],['title','عنوان الحالة'],['assessment','التقييم'],['plan','الخطة العلاجية'],['notes','ملاحظات']],
+  nutrition:[['patient_id','المريض','number'],['title','عنوان الحالة'],['dietary_plan','الخطة الغذائية'],['meal_plan','خطة الوجبات'],['notes','ملاحظات']],
+  emergency:[['patient_id','المريض','number'],['complaint','الشكوى'],['triage_level','الفرز','select',['resuscitation','emergent','urgent','less_urgent','non_urgent','standard']],['arrival_at','وقت الوصول','datetime'],['disposition','الوجهة'],['notes','ملاحظات']],
+  'home-health':[['patient_id','المريض','number'],['coordinator','منسق الرعاية'],['care_plan','خطة الزيارة المنزلية'],['next_visit_at','الزيارة القادمة','datetime'],['notes','ملاحظات']],
+  wellness:[['patient_id','المريض','number'],['program_name','اسم البرنامج'],['goal','الهدف'],['baseline_metrics','المؤشرات الأساسية'],['progress_notes','ملاحظات التقدم'],['next_review_at','موعد المراجعة','datetime']],
+  housekeeping:[['room_number','رقم الغرفة'],['task_type','نوع المهمة','select',['cleaning','laundry','sanitation','linen','other']],['priority','الأولوية','select',['low','normal','high','critical']],['assigned_to','المسؤول'],['notes','ملاحظات']],
   'nursing-tasks':[['patient_id','المريض','number'],['department_id','القسم','number'],['title','المهمة'],['instructions','التعليمات'],['shift','الوردية','select',['day','evening','night']],['priority','الأولوية','select',['low','normal','high','critical']]],
   surgeries:[['patient_id','المريض','number'],['surgeon_id','الجراح','number'],['procedure_name','العملية'],['theater','المسرح'],['priority','الأولوية','select',['emergency','urgent','elective']],'scheduled_at','الموعد','datetime'],
   admissions:[['patient_id','المريض','number'],['bed_id','السرير','number'],['department_id','القسم','number'],['admission_date','وقت الدخول','datetime'],['diagnosis','التشخيص'],['notes','ملاحظات']],

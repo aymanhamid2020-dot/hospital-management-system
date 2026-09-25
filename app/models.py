@@ -472,6 +472,137 @@ class ServiceRequest(Base):
     patient = relationship("Patient")
 
 
+class CarePlan(Base):
+    """خطة رعاية متعددة العناصر مرتبطة بالمريض وقد تربط بالتنويم والطلب."""
+    __tablename__ = "care_plans"
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, index=True)
+    service_request_id = Column(Integer, ForeignKey("service_requests.id", ondelete="SET NULL"), nullable=True, index=True)
+    admission_id = Column(Integer, ForeignKey("admissions.id", ondelete="SET NULL"), nullable=True, index=True)
+    responsible_doctor_id = Column(Integer, ForeignKey("doctors.id", ondelete="SET NULL"), nullable=True)
+    title = Column(String, nullable=False)
+    goals = Column(String, nullable=False)
+    notes = Column(String, nullable=True)
+    coordinator = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="active")
+    started_at = Column(DateTime, nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+    cancelled_at = Column(DateTime, nullable=True)
+    created_by = Column(String, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    patient = relationship("Patient")
+    service_request = relationship("ServiceRequest")
+    admission = relationship("Admission")
+    responsible_doctor = relationship("Doctor")
+    items = relationship("CarePlanItem", back_populates="plan", cascade="all, delete-orphan", lazy="selectin")
+
+
+class CarePlanItem(Base):
+    """بند داخل خطة الرعاية، له مسؤول وموعد وطريقة تحقق."""
+    __tablename__ = "care_plan_items"
+    id = Column(Integer, primary_key=True, index=True)
+    plan_id = Column(Integer, ForeignKey("care_plans.id", ondelete="CASCADE"), nullable=False, index=True)
+    category = Column(String, nullable=False)
+    title = Column(String, nullable=False)
+    instructions = Column(String, nullable=True)
+    scheduled_at = Column(DateTime, nullable=True)
+    assigned_to = Column(String, nullable=True)
+    verification_method = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="pending")
+    completed_at = Column(DateTime, nullable=True)
+    cancelled_at = Column(DateTime, nullable=True)
+    plan = relationship("CarePlan", back_populates="items")
+    executions = relationship("CarePlanExecution", back_populates="item", cascade="all, delete-orphan", lazy="selectin")
+
+
+class CarePlanExecution(Base):
+    """سجل تنفيذ فعلي لبند؛ يضمن فهرس التفرد عدم تكرار التنفيذ في الوقت نفسه."""
+    __tablename__ = "care_plan_executions"
+    __table_args__ = (
+        UniqueConstraint("item_id", "executed_at", name="uq_care_item_execution_time"),
+    )
+    id = Column(Integer, primary_key=True, index=True)
+    item_id = Column(Integer, ForeignKey("care_plan_items.id", ondelete="CASCADE"), nullable=False, index=True)
+    executed_at = Column(DateTime, nullable=False, index=True)
+    performed_by = Column(String, nullable=False)
+    notes = Column(String, nullable=True)
+    outcome = Column(String, nullable=False, default="completed")
+    item = relationship("CarePlanItem", back_populates="executions")
+
+class DentalChart(Base):
+    """مخطط أسنان وملخص طبي لمريض؛ سجل واحد لكل مريض."""
+    __tablename__ = "dental_charts"
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    allergies = Column(String, nullable=True)
+    medical_conditions = Column(String, nullable=True)
+    last_exam_at = Column(DateTime, nullable=True)
+    notes = Column(String, nullable=True)
+    updated_by = Column(String, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    patient = relationship("Patient")
+
+
+class DentalTreatmentPlan(Base):
+    """خطة علاج سنchner مرتبطة بالمريض والطبيب وطلب خدمة الأسنان."""
+    __tablename__ = "dental_treatment_plans"
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, index=True)
+    dentist_id = Column(Integer, ForeignKey("doctors.id", ondelete="SET NULL"), nullable=True, index=True)
+    service_request_id = Column(Integer, ForeignKey("service_requests.id", ondelete="SET NULL"), nullable=True, index=True)
+    title = Column(String, nullable=False)
+    chief_complaint = Column(String, nullable=False)
+    diagnosis = Column(String, nullable=True)
+    notes = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="active", index=True)
+    started_at = Column(DateTime, nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+    cancelled_at = Column(DateTime, nullable=True)
+    created_by = Column(String, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    patient = relationship("Patient")
+    dentist = relationship("Doctor")
+    service_request = relationship("ServiceRequest")
+    procedures = relationship(
+        "DentalProcedure", back_populates="plan", cascade="all, delete-orphan", lazy="selectin",
+        order_by="DentalProcedure.id",
+    )
+
+
+class DentalProcedure(Base):
+    """إجراء سنchner مخطط أو منفذ داخل خطة علاج."""
+    __tablename__ = "dental_procedures"
+    __table_args__ = (
+        UniqueConstraint(
+            "plan_id", "tooth_number", "procedure_type", "performed_at",
+            name="uq_dental_procedure_session",
+        ),
+    )
+    id = Column(Integer, primary_key=True, index=True)
+    plan_id = Column(Integer, ForeignKey("dental_treatment_plans.id", ondelete="CASCADE"), nullable=False, index=True)
+    dentist_id = Column(Integer, ForeignKey("doctors.id", ondelete="SET NULL"), nullable=True, index=True)
+    tooth_number = Column(Integer, nullable=True)
+    surfaces = Column(String, nullable=True)
+    procedure_type = Column(String, nullable=False, index=True)
+    status = Column(String, nullable=False, default="planned", index=True)
+    scheduled_at = Column(DateTime, nullable=True)
+    performed_at = Column(DateTime, nullable=True, index=True)
+    notes = Column(String, nullable=True)
+    material = Column(String, nullable=True)
+    cost = Column(Float, nullable=False, default=0)
+    follow_up_at = Column(DateTime, nullable=True)
+    created_by = Column(String, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    plan = relationship("DentalTreatmentPlan", back_populates="procedures")
+    dentist = relationship("Doctor")
+
+
+
+
 class NursingTask(Base):
     """مهمة تمريض مرتبطة بالمريض والقسم ووردية العمل."""
     __tablename__ = "nursing_tasks"
@@ -791,7 +922,7 @@ class InvoiceLedgerPayment(Base):
 
 
 class DoctorSchedule(Base):
-    """نوبات عمل الطبيب الأسبوعية — نوبة واحدة كحد أقصى لكل يوم."""
+    """نوبات عمل الطبيب الأسبوعية — نوبتان كحد أقصى لكل يوم."""
     __tablename__ = "doctor_schedules"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -808,4 +939,111 @@ class DoctorSchedule(Base):
         Index("ix_schedule_doctor_day", "doctor_id", "day_of_week"),
     )
 
+
+# ===== وحدات تشغيل مستقلة للخدمات المكملة =====
+class PhysiotherapyCase(Base):
+    __tablename__ = "physiotherapy_cases"
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, index=True)
+    therapist_id = Column(Integer, ForeignKey("doctors.id", ondelete="SET NULL"), nullable=True, index=True)
+    title = Column(String(160), nullable=False)
+    assessment = Column(String(2000), nullable=True)
+    plan = Column(String(2000), nullable=True)
+    notes = Column(String(2000), nullable=True)
+    status = Column(String(30), nullable=False, default="assessed", index=True)
+    created_by = Column(String(100), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+    completed_at = Column(DateTime, nullable=True)
+    cancelled_at = Column(DateTime, nullable=True)
+
+
+class NutritionCase(Base):
+    __tablename__ = "nutrition_cases"
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, index=True)
+    title = Column(String(160), nullable=False)
+    dietary_plan = Column(String(2000), nullable=True)
+    meal_plan = Column(String(2000), nullable=True)
+    notes = Column(String(2000), nullable=True)
+    status = Column(String(30), nullable=False, default="assessed", index=True)
+    created_by = Column(String(100), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+    completed_at = Column(DateTime, nullable=True)
+    suspended_at = Column(DateTime, nullable=True)
+
+
+class EmergencyCase(Base):
+    __tablename__ = "emergency_cases"
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="RESTRICT"), nullable=False, index=True)
+    complaint = Column(String(1000), nullable=False)
+    triage_level = Column(String(20), nullable=False, default="standard")
+    arrival_at = Column(DateTime, nullable=False, index=True)
+    disposition = Column(String(160), nullable=True)
+    notes = Column(String(2000), nullable=True)
+    status = Column(String(30), nullable=False, default="arrived", index=True)
+    created_by = Column(String(100), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+    closed_at = Column(DateTime, nullable=True)
+
+
+class HomeHealthCase(Base):
+    __tablename__ = "home_health_cases"
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, index=True)
+    coordinator = Column(String(120), nullable=True)
+    care_plan = Column(String(2000), nullable=True)
+    next_visit_at = Column(DateTime, nullable=True, index=True)
+    visits_completed = Column(Integer, nullable=False, default=0)
+    notes = Column(String(2000), nullable=True)
+    status = Column(String(30), nullable=False, default="referred", index=True)
+    created_by = Column(String(100), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+    completed_at = Column(DateTime, nullable=True)
+    cancelled_at = Column(DateTime, nullable=True)
+
+
+class WellnessProgram(Base):
+    __tablename__ = "wellness_programs"
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, index=True)
+    program_name = Column(String(160), nullable=False)
+    goal = Column(String(1000), nullable=False)
+    baseline_metrics = Column(String(2000), nullable=True)
+    progress_notes = Column(String(2000), nullable=True)
+    next_review_at = Column(DateTime, nullable=True, index=True)
+    status = Column(String(30), nullable=False, default="planned", index=True)
+    created_by = Column(String(100), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+    completed_at = Column(DateTime, nullable=True)
+
+
+class HomeCareManagementCase(Base):
+    __tablename__ = "home_care_management_cases"
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, index=True)
+    assessment = Column(String(2000), nullable=True)
+    intervention_plan = Column(String(2000), nullable=True)
+    follow_up_at = Column(DateTime, nullable=True, index=True)
+    notes = Column(String(2000), nullable=True)
+    status = Column(String(30), nullable=False, default="assessment", index=True)
+    created_by = Column(String(100), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+    closed_at = Column(DateTime, nullable=True)
+
+
+
+class HousekeepingTask(Base):
+    __tablename__ = "housekeeping_tasks"
+    id = Column(Integer, primary_key=True, index=True)
+    room_number = Column(String(50), nullable=False, index=True)
+    task_type = Column(String(50), nullable=False, default="cleaning")
+    priority = Column(String(20), nullable=False, default="normal")
+    assigned_to = Column(String(100), nullable=True)
+    notes = Column(String(2000), nullable=True)
+    status = Column(String(30), nullable=False, default="pending", index=True)
+    created_by = Column(String(100), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+    completed_at = Column(DateTime, nullable=True)
+    cancelled_at = Column(DateTime, nullable=True)
 

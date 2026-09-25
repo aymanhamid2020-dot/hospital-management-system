@@ -248,7 +248,11 @@ from app.routers.accounts import router as accounts_router
 from app.routers.accounting import router as accounting_router
 from app.routers.inventory import router as inventory_router
 from app.routers.search import router as search_router
+from app.routers.care_plans import router as care_plans_router
 from app.routers.clinical import router as clinical_router
+from app.routers.dental import router as dental_router
+from app.routers.service_units import router as service_units_router
+
 from app.routers.patient_portal import router as patient_portal_router
 
 app.include_router(auth_router)
@@ -275,7 +279,12 @@ app.include_router(audit_router)
 app.include_router(accounts_router)
 app.include_router(accounting_router)
 app.include_router(inventory_router)
+app.include_router(dental_router)
+app.include_router(service_units_router)
+
 app.include_router(search_router)
+# يسجل قبل الراوتر العام /clinical/{path} حتى لا يبتلع مسارات خطط الرعاية.
+app.include_router(care_plans_router)
 app.include_router(clinical_router)
 app.include_router(patient_portal_router)
 

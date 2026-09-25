@@ -10,6 +10,7 @@ class StrictModel(BaseModel):
 
 
 class ServiceRequestCreate(StrictModel):
+    service_type: Literal["care_sets", "dental", "physiotherapy", "emergency", "home_health", "wellness", "nutrition", "housekeeping"]
     service_type: Literal["care_sets", "dental", "physiotherapy", "emergency", "home_health", "wellness", "nutrition"]
     patient_id: int = Field(gt=0)
     title: str = Field(min_length=2, max_length=160)
@@ -152,57 +153,344 @@ class PatientAppointmentCreate(StrictModel):
 
 
 # ===== خطط الرعاية =====
+class CarePlanItemInCreate(StrictModel):
+    category: str = Field(min_length=2, max_length=100)
+    title: str = Field(min_length=2, max_length=200)
+    instructions: Optional[str] = Field(None, max_length=1000)
+    scheduled_at: Optional[datetime] = None
+    assigned_to: Optional[str] = Field(None, max_length=100)
+    verification_method: Optional[str] = Field(None, max_length=100)
+
 class CarePlanCreate(StrictModel):
     patient_id: int = Field(gt=0)
+    service_request_id: Optional[int] = Field(None, gt=0)
+    admission_id: Optional[int] = Field(None, gt=0)
+    responsible_doctor_id: Optional[int] = Field(None, gt=0)
     title: str = Field(min_length=2, max_length=200)
-    description: Optional[str] = Field(None, max_length=1000)
+    goals: str = Field(min_length=2, max_length=2000)
+    notes: Optional[str] = Field(None, max_length=2000)
+    coordinator: Optional[str] = Field(None, max_length=120)
+    started_at: datetime
+    items: list[CarePlanItemInCreate] = Field(default_factory=list)
 
 class CarePlanItemCreate(StrictModel):
-    care_plan_id: int = Field(gt=0)
+    category: str = Field(min_length=2, max_length=100)
     title: str = Field(min_length=2, max_length=200)
-    due_date: Optional[str] = Field(None)
+    instructions: Optional[str] = Field(None, max_length=1000)
+    scheduled_at: Optional[datetime] = None
+    assigned_to: Optional[str] = Field(None, max_length=100)
+    verification_method: Optional[str] = Field(None, max_length=100)
 
 class CarePlanExecutionCreate(StrictModel):
-    care_plan_id: int = Field(gt=0)
-    performed_by: int = Field(gt=0)
-    notes: Optional[str] = Field(None, max_length=500)
+    executed_at: datetime
+    outcome: Literal["completed", "failed"] = "completed"
+    notes: Optional[str] = Field(None, max_length=1000)
+
+class CarePlanItemOut(StrictModel):
+    id: int
+    plan_id: int
+    category: str
+    title: str
+    instructions: Optional[str] = None
+    scheduled_at: Optional[datetime] = None
+    assigned_to: Optional[str] = None
+    verification_method: Optional[str] = None
+    status: str
+    completed_at: Optional[datetime] = None
+    cancelled_at: Optional[datetime] = None
+    model_config = ConfigDict(from_attributes=True)
 
 class CarePlanOut(StrictModel):
-    id: int; patient_id: int; title: str
-    description: Optional[str]; status: str; created_at: datetime
+    id: int
+    patient_id: int
+    service_request_id: Optional[int] = None
+    admission_id: Optional[int] = None
+    responsible_doctor_id: Optional[int] = None
+    title: str
+    goals: str
+    notes: Optional[str] = None
+    coordinator: Optional[str] = None
+    status: str
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    cancelled_at: Optional[datetime] = None
+    created_by: str
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    items: list[CarePlanItemOut] = Field(default_factory=list)
+    completion_percentage: float = 0.0
     model_config = ConfigDict(from_attributes=True)
 
 # ===== طب الأسنان =====
 class DentalChartUpsert(StrictModel):
-    tooth_number: int = Field(ge=1, le=32)
-    finding: str = Field(min_length=1, max_length=500)
-    notes: Optional[str] = Field(None, max_length=500)
+    allergies: Optional[str] = Field(None, max_length=500)
+    medical_conditions: Optional[str] = Field(None, max_length=500)
+    last_exam_at: Optional[datetime] = None
+    notes: Optional[str] = Field(None, max_length=1000)
 
 class DentalChartOut(StrictModel):
-    id: int; patient_id: int; teeth: list
-    notes: Optional[str]
+    id: int
+    patient_id: int
+    allergies: Optional[str] = None
+    medical_conditions: Optional[str] = None
+    last_exam_at: Optional[datetime] = None
+    notes: Optional[str] = None
+    updated_by: str
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)
 
 class DentalTreatmentPlanCreate(StrictModel):
     patient_id: int = Field(gt=0)
+    dentist_id: Optional[int] = Field(None, gt=0)
+    service_request_id: Optional[int] = Field(None, gt=0)
     title: str = Field(min_length=2, max_length=200)
-    description: Optional[str] = Field(None, max_length=1000)
-
-class DentalTreatmentPlanOut(StrictModel):
-    id: int; patient_id: int; title: str; status: str
-    model_config = ConfigDict(from_attributes=True)
+    chief_complaint: str = Field(min_length=2, max_length=1000)
+    diagnosis: Optional[str] = Field(None, max_length=1000)
+    notes: Optional[str] = Field(None, max_length=1000)
+    started_at: datetime
 
 class DentalProcedureCreate(StrictModel):
-    patient_id: int = Field(gt=0)
-    treatment_plan_id: Optional[int] = Field(None, gt=0)
-    procedure_code: str = Field(min_length=2, max_length=50)
-    tooth_number: Optional[int] = Field(None, ge=1, le=32)
+    dentist_id: Optional[int] = Field(None, gt=0)
+    tooth_number: Optional[int] = Field(None, ge=1, le=52)
+    surfaces: Optional[str] = Field(None, max_length=50)
+    procedure_type: str = Field(min_length=2, max_length=100)
+    scheduled_at: Optional[datetime] = None
+    notes: Optional[str] = Field(None, max_length=1000)
+    material: Optional[str] = Field(None, max_length=100)
+    cost: float = Field(default=0.0, ge=0)
 
 class DentalProcedureExecute(StrictModel):
-    procedure_id: int = Field(gt=0)
-    performed_by: int = Field(gt=0)
-    notes: Optional[str] = Field(None, max_length=500)
+    performed_at: datetime
+    outcome: Literal["completed", "failed"] = "completed"
+    notes: Optional[str] = Field(None, max_length=1000)
+    material: Optional[str] = Field(None, max_length=100)
+    cost: float = Field(default=0.0, ge=0)
+    follow_up_at: Optional[datetime] = None
 
 class DentalProcedureOut(StrictModel):
-    id: int; patient_id: int; procedure_code: str; status: str
+    id: int
+    plan_id: int
+    dentist_id: Optional[int] = None
+    tooth_number: Optional[int] = None
+    surfaces: Optional[str] = None
+    procedure_type: str
+    status: str
+    scheduled_at: Optional[datetime] = None
+    performed_at: Optional[datetime] = None
+    notes: Optional[str] = None
+    material: Optional[str] = None
+    cost: float = 0.0
+    follow_up_at: Optional[datetime] = None
+    created_by: str
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    model_config = ConfigDict(from_attributes=True)
+
+class DentalTreatmentPlanOut(StrictModel):
+    id: int
+    patient_id: int
+    dentist_id: Optional[int] = None
+    service_request_id: Optional[int] = None
+    title: str
+    chief_complaint: str
+    diagnosis: Optional[str] = None
+    notes: Optional[str] = None
+    status: str
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    cancelled_at: Optional[datetime] = None
+    created_by: str
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    procedures: list[DentalProcedureOut] = Field(default_factory=list)
+    completion_percentage: float = 0.0
+    total_cost: float = 0.0
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ===== الوحدات التشغيلية المكملة (Service Units) =====
+
+# 1. العلاج الطبيعي
+class PhysiotherapyCaseCreate(StrictModel):
+    patient_id: int = Field(gt=0)
+    therapist_id: Optional[int] = Field(None, gt=0)
+    title: str = Field(min_length=2, max_length=160)
+    assessment: Optional[str] = Field(None, max_length=2000)
+    plan: Optional[str] = Field(None, max_length=2000)
+    notes: Optional[str] = Field(None, max_length=2000)
+
+class PhysiotherapyCaseUpdate(StrictModel):
+    therapist_id: Optional[int] = Field(None, gt=0)
+    title: Optional[str] = Field(None, min_length=2, max_length=160)
+    assessment: Optional[str] = Field(None, max_length=2000)
+    plan: Optional[str] = Field(None, max_length=2000)
+    notes: Optional[str] = Field(None, max_length=2000)
+
+class PhysiotherapyCaseOut(StrictModel):
+    id: int
+    patient_id: int
+    therapist_id: Optional[int] = None
+    title: str
+    assessment: Optional[str] = None
+    plan: Optional[str] = None
+    notes: Optional[str] = None
+    status: str
+    created_by: str
+    created_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    cancelled_at: Optional[datetime] = None
+    model_config = ConfigDict(from_attributes=True)
+
+
+# 2. التغذية السريرية
+class NutritionCaseCreate(StrictModel):
+    patient_id: int = Field(gt=0)
+    title: str = Field(min_length=2, max_length=160)
+    dietary_plan: Optional[str] = Field(None, max_length=2000)
+    meal_plan: Optional[str] = Field(None, max_length=2000)
+    notes: Optional[str] = Field(None, max_length=2000)
+
+class NutritionCaseUpdate(StrictModel):
+    title: Optional[str] = Field(None, min_length=2, max_length=160)
+    dietary_plan: Optional[str] = Field(None, max_length=2000)
+    meal_plan: Optional[str] = Field(None, max_length=2000)
+    notes: Optional[str] = Field(None, max_length=2000)
+
+class NutritionCaseOut(StrictModel):
+    id: int
+    patient_id: int
+    title: str
+    dietary_plan: Optional[str] = None
+    meal_plan: Optional[str] = None
+    notes: Optional[str] = None
+    status: str
+    created_by: str
+    created_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    suspended_at: Optional[datetime] = None
+    model_config = ConfigDict(from_attributes=True)
+
+
+# 3. الطوارئ
+class EmergencyCaseCreate(StrictModel):
+    patient_id: int = Field(gt=0)
+    complaint: str = Field(min_length=2, max_length=1000)
+    triage_level: Literal["resuscitation", "emergent", "urgent", "less_urgent", "non_urgent", "standard"] = "standard"
+    arrival_at: datetime
+    disposition: Optional[str] = Field(None, max_length=160)
+    notes: Optional[str] = Field(None, max_length=2000)
+
+class EmergencyCaseUpdate(StrictModel):
+    complaint: Optional[str] = Field(None, min_length=2, max_length=1000)
+    triage_level: Optional[Literal["resuscitation", "emergent", "urgent", "less_urgent", "non_urgent", "standard"]] = None
+    arrival_at: Optional[datetime] = None
+    disposition: Optional[str] = Field(None, max_length=160)
+    notes: Optional[str] = Field(None, max_length=2000)
+
+class EmergencyCaseOut(StrictModel):
+    id: int
+    patient_id: int
+    complaint: str
+    triage_level: str
+    arrival_at: datetime
+    disposition: Optional[str] = None
+    notes: Optional[str] = None
+    status: str
+    created_by: str
+    created_at: Optional[datetime] = None
+    closed_at: Optional[datetime] = None
+    model_config = ConfigDict(from_attributes=True)
+
+
+
+# 4. الرعاية الصحية المنزلية
+class HomeHealthCaseCreate(StrictModel):
+    patient_id: int = Field(gt=0)
+    coordinator: Optional[str] = Field(None, max_length=120)
+    care_plan: Optional[str] = Field(None, max_length=2000)
+    next_visit_at: Optional[datetime] = None
+    notes: Optional[str] = Field(None, max_length=2000)
+
+class HomeHealthCaseUpdate(StrictModel):
+    coordinator: Optional[str] = Field(None, max_length=120)
+    care_plan: Optional[str] = Field(None, max_length=2000)
+    next_visit_at: Optional[datetime] = None
+    visits_completed: Optional[int] = Field(None, ge=0)
+    notes: Optional[str] = Field(None, max_length=2000)
+
+class HomeHealthCaseOut(StrictModel):
+    id: int
+    patient_id: int
+    coordinator: Optional[str] = None
+    care_plan: Optional[str] = None
+    next_visit_at: Optional[datetime] = None
+    visits_completed: int = 0
+    notes: Optional[str] = None
+    status: str
+    created_by: str
+    created_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    cancelled_at: Optional[datetime] = None
+    model_config = ConfigDict(from_attributes=True)
+
+
+# 5. برامج العافية ونمط الحياة
+class WellnessProgramCreate(StrictModel):
+    patient_id: int = Field(gt=0)
+    program_name: str = Field(min_length=2, max_length=160)
+    goal: str = Field(min_length=2, max_length=1000)
+    baseline_metrics: Optional[str] = Field(None, max_length=2000)
+    progress_notes: Optional[str] = Field(None, max_length=2000)
+    next_review_at: Optional[datetime] = None
+
+class WellnessProgramUpdate(StrictModel):
+    program_name: Optional[str] = Field(None, min_length=2, max_length=160)
+    goal: Optional[str] = Field(None, min_length=2, max_length=1000)
+    baseline_metrics: Optional[str] = Field(None, max_length=2000)
+    progress_notes: Optional[str] = Field(None, max_length=2000)
+    next_review_at: Optional[datetime] = None
+
+class WellnessProgramOut(StrictModel):
+    id: int
+    patient_id: int
+    program_name: str
+    goal: str
+    baseline_metrics: Optional[str] = None
+    progress_notes: Optional[str] = None
+    next_review_at: Optional[datetime] = None
+    status: str
+    created_by: str
+    created_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    model_config = ConfigDict(from_attributes=True)
+
+
+# 6. النظافة والتدبير المنزلي
+class HousekeepingTaskCreate(StrictModel):
+    room_number: str = Field(min_length=1, max_length=50)
+    task_type: str = Field(default="cleaning", min_length=2, max_length=50)
+    priority: Literal["low", "normal", "high", "critical"] = "normal"
+    assigned_to: Optional[str] = Field(None, max_length=100)
+    notes: Optional[str] = Field(None, max_length=2000)
+
+class HousekeepingTaskUpdate(StrictModel):
+    room_number: Optional[str] = Field(None, min_length=1, max_length=50)
+    task_type: Optional[str] = Field(None, min_length=2, max_length=50)
+    priority: Optional[Literal["low", "normal", "high", "critical"]] = None
+    assigned_to: Optional[str] = Field(None, max_length=100)
+    notes: Optional[str] = Field(None, max_length=2000)
+
+class HousekeepingTaskOut(StrictModel):
+    id: int
+    room_number: str
+    task_type: str
+    priority: str
+    assigned_to: Optional[str] = None
+    notes: Optional[str] = None
+    status: str
+    created_by: str
+    created_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    cancelled_at: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)

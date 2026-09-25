@@ -1,5 +1,5 @@
 ﻿"""مسارات CRUD للمحاور السريرية والتشغيلية والدعمية والجودة والموارد."""
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import ValidationError
@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user, get_user_role, require_role, hash_password
 from app.database import get_db
 from app.models import (
-    Admission, Bed, BedStatus, BloodUnit, Budget, Department, Doctor,
+    Admission, Bed, BedStatus, BloodUnit, Budget, CarePlan, Department, Doctor,
     FixedAsset, MaintenanceOrder, NursingTask, Patient, PatientPortalAccount,
     SafetyEvent, ServiceRequest, SterilizationCycle, Surgery, User,
 )
@@ -53,6 +53,7 @@ def overview(_: User = Depends(get_current_user), db: Session = Depends(get_db))
         return db.query(model).filter(model.status.in_(states)).count()
     return {
         "service_pending": count(ServiceRequest, "pending", "in_progress"),
+        "care_plans_active": count(CarePlan, "active"),
         "nursing_pending": count(NursingTask, "pending", "in_progress"),
         "surgeries_active": count(Surgery, "scheduled", "in_progress"),
         "admitted": count(Admission, "admitted"),
@@ -116,7 +117,7 @@ def set_status(
             bed.patient_id = None
     obj.status = status
     if time_field and status in ("completed", "discharged", "resolved", "closed"):
-        setattr(obj, time_field, datetime.utcnow())
+        setattr(obj, time_field, datetime.now(timezone.utc).replace(tzinfo=None))
     db.commit()
     db.refresh(obj)
     return obj

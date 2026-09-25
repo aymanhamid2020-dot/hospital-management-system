@@ -203,6 +203,13 @@ INDEXES = {
     "maintenance_orders": ["status", "priority", "scheduled_at"],
     "sterilization_cycles": ["status", "started_at"],
     "safety_events": ["category", "status", "created_at"],
+    "physiotherapy_cases": ["patient_id", "status", "therapist_id"],
+    "nutrition_cases": ["patient_id", "status"],
+    "emergency_cases": ["patient_id", "status", "arrival_at"],
+    "home_health_cases": ["patient_id", "status", "next_visit_at"],
+    "wellness_programs": ["patient_id", "status"],
+    "housekeeping_tasks": ["room_number", "status", "priority"],
+
     "budgets": ["fiscal_year", "department"],
 }
 

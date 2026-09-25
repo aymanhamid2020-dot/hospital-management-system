@@ -1,5 +1,5 @@
 """واجهة طب الأسنان: مخطط المريض، خطط العلاج، والإجراءات."""
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError
@@ -204,7 +204,7 @@ def complete_plan(
     if unfinished:
         raise HTTPException(409, f"لا يمكن إكمال الخطة قبل إنهاء الإجراءات: {unfinished}")
     plan.status = "completed"
-    plan.completed_at = datetime.utcnow()
+    plan.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
     db.commit()
     db.refresh(plan)
     return _plan_out(plan)
@@ -219,7 +219,7 @@ def cancel_plan(
     plan = _plan(db, plan_id)
     if plan.status != "active":
         raise HTTPException(409, "الخطة غير نشطة")
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     plan.status = "cancelled"
     plan.cancelled_at = now
     for row in plan.procedures:

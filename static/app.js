@@ -942,12 +942,18 @@ async function renderView(view) {
 }
 
 const OP_GROUPS = {
-  clinical: [['service-requests','مجموعات الرعاية والوحدات','🧑‍⚕️','service_pending'],['nursing-tasks','خطة التمريض','🩺','nursing_pending'],['surgeries','مسرح العمليات','🏥','surgeries_active'],['admissions','التنويم الداخلي','🛏️','admitted']],
+  clinical: [['service-requests','مجموعات الرعاية والوحدات','🧑‍⚕️','service_pending'],['care-plans','خطط الرعاية والتقييم','🗺️','care_plans_active'],['nursing-tasks','مهام التمريض','🩺','nursing_pending'],['surgeries','مسرح العمليات','🏥','surgeries_active'],['admissions','التنويم الداخلي','🛏️','admitted']],
   support: [['blood-bank','بنك الدم','🩸','blood_available'],['maintenance','صيانة الأجهزة','🔧','maintenance_open'],['sterilization','التعقيم','♨️','sterilization_running']],
   governance: [['safety-events','الجودة ومكافحة العدوى والحوادث','🛡️','safety_open'],['budgets','الميزانيات','📊','budget_total'],['assets','الأصول الثابتة','🏗️',''],['patient-portal-accounts','حسابات بوابة المريض','👤','']]
 };
 const OP_FIELDS = {
-  'service-requests': [['patient_id','المريض','number'],['service_type','نوع الخدمة','select',['care_sets','dental','physiotherapy','emergency','home_health','wellness','nutrition']],['title','العنوان'],['details','التفاصيل'],['priority','الأولوية']],
+  'service-requests': [['patient_id','المريض','number'],['service_type','نوع الخدمة','select',['care_sets','dental','physiotherapy','emergency','home_health','wellness','nutrition','housekeeping']],['title','العنوان'],['details','التفاصيل'],['priority','الأولوية']],
+  physiotherapy: [['patient_id','المريض','number'],['therapist_id','الطبيب المعالج','number'],['title','عنوان الحالة'],['assessment','التقييم'],['plan','الخطة العلاجية'],['notes','ملاحظات']],
+  nutrition: [['patient_id','المريض','number'],['title','عنوان الحالة'],['dietary_plan','الخطة الغذائية'],['meal_plan','خطة الوجبات'],['notes','ملاحظات']],
+  emergency: [['patient_id','المريض','number'],['complaint','الشكوى'],['triage_level','الفرز','select',['resuscitation','emergent','urgent','less_urgent','non_urgent','standard']],['arrival_at','وقت الوصول','datetime'],['disposition','الوجهة'],['notes','ملاحظات']],
+  'home-health': [['patient_id','المريض','number'],['coordinator','منسق الرعاية'],['care_plan','خطة الزيارة المنزلية'],['next_visit_at','الزيارة القادمة','datetime'],['notes','ملاحظات']],
+  wellness: [['patient_id','المريض','number'],['program_name','اسم البرنامج'],['goal','الهدف'],['baseline_metrics','المؤشرات الأساسية'],['progress_notes','ملاحظات التقدم'],['next_review_at','موعد المراجعة','datetime']],
+  housekeeping: [['room_number','رقم الغرفة'],['task_type','نوع المهمة','select',['cleaning','laundry','sanitation','linen','other']],['priority','الأولوية','select',['low','normal','high','critical']],['assigned_to','المسؤول'],['notes','ملاحظات']],
   'nursing-tasks': [['patient_id','المريض','number'],['department_id','القسم','number'],['title','المهمة'],['instructions','التعليمات'],['shift','الوردية','select',['day','evening','night']],['priority','الأولوية']],
   surgeries: [['patient_id','المريض','number'],['surgeon_id','الجراح','number'],['procedure_name','العملية'],['theater','المسرح'],['priority','الأولوية','select',['emergency','urgent','elective']]],
   admissions: [['patient_id','المريض','number'],['bed_id','السرير','number'],['department_id','القسم','number'],['admission_date','وقت الدخول','datetime'],['diagnosis','التشخيص'],['notes','ملاحظات']],
@@ -968,9 +974,80 @@ async function renderOps(main, group) {
   const ov = await api('/clinical/overview'), defs = OP_GROUPS[group].filter(([p]) => p !== 'patient-portal-accounts' || isAdmin());
   const cards = defs.map(([p,t,i,k]) => `<button class="stat" style="cursor:pointer;border:2px solid ${OP_PATH===p?'#2c7be5':'transparent'}" onclick="selectOps('${p}')"><div class="num">${k ? Number(ov[k] || 0) : '∞'}</div><div class="lbl">${i} ${t}</div></button>`).join('');
   const [path,title,icon] = defs.find(x => x[0] === OP_PATH) || defs[0]; OP_PATH = path;
+  if (path === 'care-plans') { await renderCarePlans(main, cards); return; }
   const rows = await api('/clinical/' + path);
   const canAdd = (isAdmin() || isDoctor()) && path !== 'patient-portal-accounts' && !(isDoctor() && ['budgets','assets'].includes(path));
   main.innerHTML = `<div class="stats">${cards}</div><div class="card"><div class="toolbar"><h3 style="margin:0">${icon} ${title}</h3>${canAdd?'<button class="btn success" onclick="opForm()">➕ إضافة</button>':''}<input oninput="filterTable('ops-table',this.value)" placeholder="🔍 بحث…"></div><div style="overflow-x:auto"><table id="ops-table"><thead><tr><th>#</th><th>التفاصيل</th><th>الحالة</th><th>التاريخ</th><th>الإجراء</th></tr></thead><tbody>${rows.map(r => `<tr><td>${r.id}</td><td>${esc(opLabel(r))}</td><td>${pill(r.status || 'نشط')}</td><td>${fmtDate(r.created_at || r.started_at || r.purchase_date || r.admission_date)}</td><td><div class="actions">${canAdd?(OP_STATUS[path] || []).map(s => `<button class="btn sm ghost" onclick="opStatus('${path}',${r.id},'${s}')">${s}</button>`).join(''):'—'}</div></td></tr>`).join('') || `<tr><td colspan="5" class="empty">لا توجد سجلات</td></tr>`}</tbody></table></div></div>`;
+async function renderCarePlans(main, cards) {
+  const plans = await api('/clinical/care-plans?limit=200');
+  const canManage = isAdmin() || isDoctor();
+  const planCards = plans.map(plan => {
+    const actions = canManage && plan.status === 'active' ? `<div class="actions" style="margin-top:10px">
+      <button class="btn success sm" onclick="carePlanAction('complete',${plan.id})">إكمال الخطة</button>
+      <button class="btn danger sm" onclick="carePlanAction('cancel',${plan.id})">إلغاء الخطة</button></div>` : '';
+    const items = plan.items.map(item => {
+      const execute = canManage && plan.status === 'active' && !['completed','cancelled'].includes(item.status)
+        ? `<button class="btn sm" onclick="carePlanAction('execute',${plan.id},${item.id})">تسجيل تنفيذ</button>` : '';
+      return `<tr><td>${item.id}</td><td>${esc(item.title)}</td><td>${esc(item.category)}</td>
+        <td>${esc(item.assigned_to || '—')}</td><td>${esc(item.instructions || '—')}</td>
+        <td>${pill(item.status)}</td><td>${fmtDate(item.completed_at || item.cancelled_at || item.scheduled_at)}</td>
+        <td>${item.executions.length}<div class="actions">${execute}</div></td></tr>`;
+    }).join('');
+    return `<details class="care-plan" ${plans.length === 1 ? 'open' : ''}>
+      <summary><strong>${esc(plan.title)}</strong> — المريض #${plan.patient_id} ${pill(plan.status)}
+        <span class="care-progress">${Number(plan.completion_percentage || 0).toLocaleString()}%</span></summary>
+      <div class="care-goal"><b>الأهداف:</b> ${esc(plan.goals)}<br><b>الإحداث:</b> ${fmtDate(plan.started_at)} — ${esc(plan.coordinator || plan.created_by)}</div>
+      <div style="overflow-x:auto"><table><thead><tr><th>#</th><th>البند</th><th>الفئة</th><th>المسؤول</th><th>التعليمات</th><th>الحالة</th><th>آخر إجراء</th><th>التنفيذات</th></tr></thead>
+      <tbody>${items || '<tr><td colspan="8" class="empty">لا توجد بنود</td></tr>'}</tbody></table></div>${actions}</details>`;
+  }).join('');
+  main.innerHTML = `<div class="stats">${cards}</div><div class="card">
+    <div class="toolbar"><h3 style="margin:0">🗺️ خطط الرعاية والتقييم</h3>
+    ${canManage ? '<button class="btn success" onclick="carePlanForm()">➕ خطة جديدة</button>' : ''}
+    <input oninput="filterCarePlans(this.value)" placeholder="🔍 بحث…"></div>
+    <div id="care-plans-table">${planCards || '<div class="empty">لا توجد خطط رعاية بعد</div>'}</div></div>`;
+}
+
+function filterCarePlans(term) {
+  document.querySelectorAll('#care-plans-table .care-plan').forEach(el => {
+    el.style.display = el.textContent.toLowerCase().includes(term.trim().toLowerCase()) ? '' : 'none';
+  });
+}
+
+function carePlanForm() {
+  const now = new Date().toISOString().slice(0,16);
+  const item = n => `<fieldset class="care-item-fields"><legend>بند الرعاية ${n}</legend><div class="form-grid">
+    <div class="field"><label>الفئة</label><select id="cp-item-${n}-category">
+    ${['nursing','medication','nutrition','mobility','education','discharge','other'].map(x=>`<option value="${x}">${x}</option>`).join('')}</select></div>
+    <div class="field"><label>عنوان البند *</label><input id="cp-item-${n}-title"></div>
+    <div class="field"><label>التعليمات</label><input id="cp-item-${n}-instructions"></div></div></fieldset>`;
+  openModal('➕ خطة رعاية جديدة', `<div class="form-grid">
+    <div class="field"><label>المريض *</label><input id="cp-patient" type="number" min="1"></div>
+    <div class="field"><label>طلب الخدمة (اختياري)</label><input id="cp-request" type="number" min="1"></div>
+    <div class="field"><label>التنويم (اختياري)</label><input id="cp-admission" type="number" min="1"></div>
+    <div class="field"><label>بداية الخطة *</label><input id="cp-started" type="datetime-local" value="${now}"></div>
+    <div class="field"><label>عنوان الخطة *</label><input id="cp-title"></div>
+    <div class="field"><label>المنسق</label><input id="cp-coordinator"></div>
+    <div class="field" style="grid-column:1/-1"><label>الأهداف *</label><textarea id="cp-goals" rows="2"></textarea></div>
+  </div>${item(1)}${item(2)}<div class="row2"><button class="btn success" onclick="submitCarePlan()">حفظ الخطة</button>
+  <button class="btn ghost" onclick="closeModal()">إلغاء</button></div>`);
+}
+
+async function submitCarePlan() {
+  const items = [1,2].map(n => { const title=V(`cp-item-${n}-title`).trim(); return title ? {
+    category:V(`cp-item-${n}-category`), title, instructions:V(`cp-item-${n}-instructions`).trim() || null } : null; }).filter(Boolean);
+  const patientId=Number(V('cp-patient')), optional=id => { const n=Number(V(id)); return n>0?n:null; };
+  if (patientId<1) return toast('أدخل رقم المريض الصحيح',true);
+  if (!V('cp-title').trim() || !V('cp-goals').trim()) return toast('عنوان الخطة والأهداف مطلوبان',true);
+  if (!items.length) return toast('أضف بند رعاية واحدًا على الأقل',true);
+  try {
+    await api('/clinical/care-plans',{method:'POST',body:JSON.stringify({patient_id:patientId,
+      service_request_id:optional('cp-request'),admission_id:optional('cp-admission'),title:V('cp-title').trim(),
+      goals:V('cp-goals').trim(),coordinator:V('cp-coordinator').trim()||null,started_at:V('cp-started'),items})});
+    closeModal(); toast('تم إنشاء خطة الرعاية ✅'); await navigate(CURRENT_VIEW);
+  } catch(e) { toast(typeof e.message==='string'?e.message:'تعذر إنشاء الخطة',true); }
+}
+
+
 }
 function opLabel(r) { return esc(r.title || r.procedure_name || r.issue || r.load_description || r.unit_number || r.asset_name || r.name || r.username || `${r.department || ''} ${r.category || ''}`); }
 function selectOps(path) { OP_PATH = path; navigate(CURRENT_VIEW); }
@@ -984,6 +1061,155 @@ async function submitOp() {
   const data = {}; (OP_FIELDS[OP_PATH] || []).forEach(([n,,t]) => { const v=V('op-'+n); if(v!=='' && v!=null) data[n]=t==='number'?Number(v):v; });
   try { await api('/clinical/'+OP_PATH,{method:'POST',body:JSON.stringify(data)}); closeModal(); toast('تمت الإضافة ✅'); await navigate(CURRENT_VIEW); } catch(e) { toast(e.message,true); }
 }
+async function carePlanAction(action, planId, itemId) {
+  try {
+    if (action === 'execute') {
+      const notes = prompt('ملاحظات التنفيذ (اختياري)') ?? '';
+      if (!confirm('تسجيل تنفيذ هذا البند الآن؟')) return;
+      await api(`/clinical/care-plan-items/${itemId}/execute`, {method:'POST',body:JSON.stringify({
+        executed_at:new Date().toISOString(),outcome:'completed',notes:notes.trim()||null})});
+      toast('تم تسجيل تنفيذ البند ✅');
+    } else if (action === 'complete') {
+      if (!confirm('إكمال الخطة؟ يجب تنفيذ جميع البنود أولًا.')) return;
+      await api(`/clinical/care-plans/${planId}/complete`,{method:'POST'}); toast('تم إكمال خطة الرعاية ✅');
+    } else if (action === 'cancel') {
+      if (!confirm('إلغاء الخطة وبنودها غير المنفذة؟')) return;
+      await api(`/clinical/care-plans/${planId}/cancel`,{method:'POST'}); toast('تم إلغاء خطة الرعاية');
+    }
+    await navigate(CURRENT_VIEW);
+  } catch (e) { toast(typeof e.message==='string'?e.message:'تعذر تنفيذ العملية',true); }
+}
+
+
+
+async function renderGeneralLedger(main) {
+  try {
+    const [gl, chart, entries, vendors, bills, trial] = await Promise.all([
+      api('/accounts/ledger/summary'), api('/accounts/ledger/accounts'),
+      api('/accounts/ledger/entries?limit=30'), api('/accounts/ledger/vendors'),
+      api('/accounts/ledger/vendor-bills'), api('/accounts/ledger/trial-balance')
+    ]);
+    const money = v => `${(Number(v) || 0).toLocaleString('ar-SA', { maximumFractionDigits: 2 })} ر.س`;
+    const aging = (title, rows) => `<div class="card"><h3>${title}</h3>
+      <div style="overflow-x:auto"><table><thead><tr><th>الفئة</th><th>العدد</th><th>الإجمالي</th><th>المتبقي</th></tr></thead>
+      <tbody>${rows.map(r => `<tr><td>${esc(r.bucket)}</td><td>${r.count}</td><td>${money(r.total)}</td><td>${money(r.outstanding)}</td></tr>`).join('')}</tbody>
+      </table></div></div>`;
+    const actions = isAdmin() ? `<div class="toolbar">
+      <button class="btn success sm" onclick="ledgerAction('postInvoice')">ترحيل فاتورة</button>
+      <button class="btn success sm" onclick="ledgerAction('invoicePayment')">تحصيل دفعة</button>
+      <button class="btn sm" onclick="ledgerAction('vendor')">إضافة مورد</button>
+      <button class="btn sm" onclick="ledgerAction('vendorBill')">فاتورة مورد</button>
+      <button class="btn ghost sm" onclick="ledgerAction('vendorPayment')">دفع مورد</button>
+    </div>` : '';
+    main.insertAdjacentHTML('beforeend', `
+      <div class="card ledger-panel">
+        <div class="toolbar"><h3 style="margin:0">🏛️ الدفتر العام والمحاسبة المؤسسية</h3>
+          <span class="pill ${Math.abs(gl.trial_balance_difference) < 0.01 ? 'paid' : 'unpaid'}">
+            فرق ميزان المراجعة: ${money(gl.trial_balance_difference)}</span>
+          <button class="btn ghost sm" onclick="navigate('accounts')">تحديث</button></div>
+        ${actions}
+        <div class="stats" style="margin:16px 0">
+          <div class="stat"><div class="num">${money(gl.cash)}</div><div class="lbl">النقدية والبنك</div></div>
+          <div class="stat"><div class="num">${money(gl.accounts_receivable)}</div><div class="lbl">ذمم المرضى والتأمين</div></div>
+          <div class="stat amber"><div class="num">${money(gl.accounts_payable)}</div><div class="lbl">ذمم الموردين</div></div>
+          <div class="stat green"><div class="num">${money(gl.net_income)}</div><div class="lbl">صافي الربح</div></div>
+        </div>
+        <div class="toolbar"><h3 style="margin:0">ميزان المراجعة</h3>
+          <span class="pill confirmed">مدين ${money(trial.total_debit)}</span>
+          <span class="pill pending">دائن ${money(trial.total_credit)}</span></div>
+        <div style="overflow-x:auto"><table><thead><tr><th>الكود</th><th>الحساب</th><th>مدين</th><th>دائن</th><th>الرصيد</th></tr></thead>
+          <tbody>${trial.rows.map(r => `<tr><td>${esc(r.code)}</td><td>${esc(r.name)}</td><td>${money(r.debit)}</td><td>${money(r.credit)}</td><td><strong>${money(r.balance)}</strong></td></tr>`).join('') || '<tr><td colspan="5" class="empty">لا توجد قيود</td></tr>'}</tbody>
+        </table></div>
+      </div>
+      <div class="card"><h3>📘 دليل الحسابات (${chart.length})</h3><div style="overflow-x:auto"><table>
+        <thead><tr><th>الكود</th><th>الاسم</th><th>النوع</th><th>الحساب الأب</th><th>الحالة</th></tr></thead>
+        <tbody>${chart.map(a => `<tr><td>${esc(a.code)}</td><td>${esc(a.name)}</td><td>${esc(a.account_type)}</td><td>${esc(a.parent_code || '—')}</td><td>${a.is_active ? 'نشط' : 'موقوف'}</td></tr>`).join('')}</tbody>
+      </table></div></div>
+      <div class="card"><h3>📒 القيود اليومية (${entries.length})</h3><div style="overflow-x:auto"><table>
+        <thead><tr><th>رقم القيد</th><th>التاريخ</th><th>البيان</th><th>الحساب</th><th>مدين</th><th>دائن</th></tr></thead>
+        <tbody>${entries.map(e => e.lines.map((l, i) => `<tr>${i ? '' : `<td rowspan="${e.lines.length}">${esc(e.entry_no)}</td><td rowspan="${e.lines.length}">${fmtDate(e.entry_date)}</td><td rowspan="${e.lines.length}">${esc(e.description)}</td>`}<td>${esc(l.account_code)} — ${esc(l.account_name)}</td><td>${money(l.debit)}</td><td>${money(l.credit)}</td></tr>`).join('')).join('') || '<tr><td colspan="6" class="empty">لا توجد قيود</td></tr>'}</tbody>
+      </table></div></div>
+      ${aging('⏳ أعمار ذمم المرضى', gl.debtors)}
+      ${aging('🏭 أعمار ذمم الموردين', gl.creditors)}
+      <div class="card"><h3>الموردون (${vendors.length}) وفواتيرهم (${bills.length})</h3><div style="overflow-x:auto"><table>
+        <thead><tr><th>فاتورة المورد</th><th>المورد</th><th>التاريخ</th><th>الإجمالي</th><th>المتبقي</th><th>الحالة</th></tr></thead>
+        <tbody>${bills.map(b => `<tr><td>${esc(b.bill_no)}</td><td>${esc(b.vendor_name)}</td><td>${fmtDate(b.bill_date)}</td><td>${money(b.amount)}</td><td>${money(b.outstanding)}</td><td>${esc(b.status)}</td></tr>`).join('') || `<tr><td colspan="6" class="empty">لا توجد فواتير موردين (${vendors.length} مورد مسجل)</td></tr>`}</tbody>
+      </table></div></div>`);
+  } catch (err) {
+    main.insertAdjacentHTML('beforeend', `<div class="card"><div class="empty">تعذر تحميل الدفتر العام: ${esc(err.message || 'خطأ غير معروف')}</div></div>`);
+  }
+}
+
+async function ledgerAction(action) {
+  if (!isAdmin()) return toast('هذه العملية متاحة للمدير فقط', true);
+  const ask = (label, required = true) => {
+    const value = window.prompt(label);
+    return value == null ? null : (required && !value.trim() ? (toast('لا يمكن ترك الحقل فارغًا', true), null) : value.trim());
+  };
+  const askNumber = (label, positive = true) => {
+    const value = ask(label);
+    if (value == null) return null;
+    const number = Number(value);
+    if (!Number.isFinite(number) || (positive && number <= 0)) {
+      toast('أدخل قيمة رقمية صحيحة', true);
+      return null;
+    }
+    return number;
+  };
+  const askChoice = (label, values) => {
+    const value = ask(`${label} (${values.join(' / ')})`);
+    return value && values.includes(value) ? value : (value ? (toast('اختر طريقة صحيحة', true), null) : null);
+  };
+  const now = () => new Date().toISOString();
+  let path, payload = {};
+  try {
+    if (action === 'postInvoice') {
+      const id = askNumber('رقم فاتورة المريض');
+      if (id == null) return;
+      path = `/accounts/ledger/invoices/${id}/post`;
+    } else if (action === 'invoicePayment') {
+      const id = askNumber('رقم فاتورة المريض');
+      const amount = id == null ? null : askNumber('مبلغ التحصيل');
+      const method = amount == null ? null : askChoice('طريقة التحصيل', ['cash', 'card', 'bank', 'insurance']);
+      const reference = amount == null ? null : ask('مرجع الدفعة (اختياري)', false);
+      if (id == null || amount == null || method == null || reference === null) return;
+      path = `/accounts/ledger/invoices/${id}/payments`;
+      payload = { amount, method, paid_at: now(), reference: reference || null };
+    } else if (action === 'vendor') {
+      const code = ask('كود المورد');
+      const name = code == null ? null : ask('اسم المورد');
+      const phone = name == null ? null : ask('هاتف المورد (اختياري)', false);
+      if (code == null || name == null || phone === null) return;
+      path = '/accounts/ledger/vendors';
+      payload = { code, name, phone: phone || null };
+    } else if (action === 'vendorBill') {
+      const billNo = ask('رقم فاتورة المورد');
+      const vendorId = billNo == null ? null : askNumber('رقم المورد');
+      const amount = vendorId == null ? null : askNumber('قيمة الفاتورة');
+      const expenseCode = amount == null ? null : ask('حساب المصروف (5100 افتراضي)', false);
+      if (billNo == null || vendorId == null || amount == null || expenseCode === null) return;
+      path = '/accounts/ledger/vendor-bills';
+      payload = { bill_no: billNo, vendor_id: vendorId, amount, bill_date: now(),
+                  due_date: now(), expense_account_code: expenseCode || '5100' };
+    } else if (action === 'vendorPayment') {
+      const id = askNumber('رقم فاتورة المورد');
+      const amount = id == null ? null : askNumber('مبلغ الدفعة');
+      const method = amount == null ? null : askChoice('طريقة الدفع', ['cash', 'card', 'bank']);
+      const reference = method == null ? null : ask('مرجع الدفعة (اختياري)', false);
+      if (id == null || amount == null || method == null || reference === null) return;
+      path = `/accounts/ledger/vendor-bills/${id}/payments`;
+      payload = { amount, method, paid_at: now(), reference: reference || null };
+    } else {
+      return toast('العملية غير معروفة', true);
+    }
+    await api(path, { method: 'POST', body: JSON.stringify(payload) });
+    toast('تم ترحيل العملية المحاسبية ✅');
+    await navigate('accounts');
+  } catch (err) {
+    toast(err.message || 'تعذر تنفيذ العملية المحاسبية', true);
+  }
+}
+
 
 const VIEWS = {
 
@@ -1983,6 +2209,7 @@ const VIEWS = {
           </tr></tfoot>` : ''}
         </table></div>
       </div>`;
+    await renderGeneralLedger(main);
   },
 
   /* --- الرواتب --- */

@@ -53,7 +53,7 @@ def login(payload: PatientPortalLogin, db: Session = Depends(get_db)):
     patient = db.query(Patient).filter(Patient.id == account.patient_id).first()
     if not patient:
         raise HTTPException(404, "سجل المريض غير موجود")
-    account.last_login_at = datetime.utcnow()
+    account.last_login_at = datetime.now(timezone.utc).replace(tzinfo=None)
     db.commit()
     return {
         "access_token": _token(account), "token_type": "bearer",
