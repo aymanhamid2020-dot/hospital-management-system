@@ -1,5 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile
+from fastapi import (
+    APIRouter, Depends, HTTPException, status, Query, File, UploadFile, Response,
+)
 from sqlalchemy.orm import Session
+from sqlalchemy import func
+from datetime import date
 from typing import List, Optional
 
 from app.database import get_db
@@ -10,7 +14,7 @@ from app.models import (
 )
 from app.schemas import (
     PatientCreate, PatientUpdate, PatientInDB, PatientProfileUpdate,
-    VitalSignCreate, VitalSignUpdate, VitalSignInDB,
+    PatientListItem, VitalSignCreate, VitalSignUpdate, VitalSignInDB,
     InsuranceClaimCreate, InsuranceClaimUpdate, InsuranceClaimInDB,
 )
 from app.auth import get_current_user, require_admin, get_user_role
@@ -18,24 +22,126 @@ from app.auth import get_current_user, require_admin, get_user_role
 router = APIRouter(prefix="/patients", tags=["Patients"])
 
 
-@router.get("/", response_model=List[PatientInDB], summary="عرض قائمة المرضى")
+def _age_at(dob, today=None) -> Optional[int]:
+    """العمر بالسنوات من تاريخ الميلاد."""
+    if not dob:
+        return None
+    today = today or date.today()
+    years = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+    return max(years, 0)
+
+
+@router.get("/", response_model=List[PatientListItem], summary="عرض قائمة المرضى")
 def list_patients(
-    search: Optional[str] = Query(None, description="بحث بالاسم أو رقم الهاتف"),
+    search: Optional[str] = Query(None, description="بحث بالاسم/الهاتف/الهوية/البريد"),
     blood_type: Optional[str] = Query(None, description="فلترة حسب مجموعة الدم"),
+    alert: Optional[str] = Query(None, description="has = من له حساسية أو تحذير طبي"),
+    sort: Optional[str] = Query("created", description="created | name | age"),
+    limit: int = Query(0, ge=0, le=500, description="0 = بلا حد (الكل)"),
+    offset: int = Query(0, ge=0),
+    response: Response = None,
     db = Depends(get_db),
     _ = Depends(get_current_user),
 ):
-    """جلب المرضى مع إمكانية البحث والفلترة — متزامن (threadpool) لأجل استجابة أسرع"""
+    """جلب المرضى مع بحث وفلاتر وترقيم — متزامن (threadpool) لأجل استجابة أسرع.
+
+    يبقى الاستجابة **قائمة** (لتوافق الاستهلاك القائم) ويصل العدد الكلي
+    في الترويسة `X-Total-Count` لحساب صفحات الواجهة.
+    """
     q = db.query(Patient)
     if search:
+        # ilike ⇒ بحث غير حسّاس لحالة الأحرف على SQLite وPostgreSQL معًا
+        like = f"%{search.strip()}%"
         q = q.filter(
-            (Patient.full_name.contains(search))
-            | (Patient.phone.contains(search))
-            | (Patient.national_id.contains(search))
+            Patient.full_name.ilike(like)
+            | Patient.phone.ilike(like)
+            | Patient.national_id.ilike(like)
+            | Patient.email.ilike(like)
         )
     if blood_type:
         q = q.filter(Patient.blood_type == blood_type)
-    return q.order_by(Patient.created_at.desc()).all()
+    if (alert or "").lower() == "has":
+        q = q.filter(
+            (Patient.allergies.isnot(None)) & (Patient.allergies != "")
+            | (Patient.medical_warnings.isnot(None)) & (Patient.medical_warnings != "")
+        )
+
+    total = q.count()
+
+    if sort == "name":
+        q = q.order_by(Patient.full_name.asc())
+    elif sort == "age":
+        q = q.order_by(Patient.date_of_birth.asc(), Patient.id.asc())
+    else:
+        q = q.order_by(Patient.created_at.desc(), Patient.id.desc())
+
+    rows = q.offset(offset).limit(limit).all() if limit else q.all()
+    if response is not None:
+        response.headers["X-Total-Count"] = str(total)
+
+    if not rows:
+        return []
+
+    # استعلامان مجمّعان لكل الصفحة (لا N+1): آخر/قادم موعد، والمتبقي المالي
+    ids = [p.id for p in rows]
+    today = date.today()
+    last_visit, upcoming, outstanding = {}, {}, {}
+    for a in (db.query(Appointment.patient_id, Appointment.appointment_date)
+              .filter(Appointment.patient_id.in_(ids)).all()):
+        d = a.appointment_date.date() if a.appointment_date else None
+        if not d:
+            continue
+        if d < today:
+            if a.patient_id not in last_visit or d > last_visit[a.patient_id]:
+                last_visit[a.patient_id] = d
+        elif a.patient_id not in upcoming or d < upcoming[a.patient_id]:
+            upcoming[a.patient_id] = d
+
+    # استعلامان مجمّعان لكل الصفحة (لا N+1): آخر/قادم موعد، والمتبقي المالي.
+    # الإجمالي يُحسب في Python لأن Invoice.total خاصية محسوبة (خصم + ضريبة)،
+    # ولا يصلح وضعها داخل SUM على مستوى SQL — فنجلب أعمدة الفاتورة ونحسبها
+    # بنفس معادلة النموذج (مجموع صفحة واحدة فقط).
+    ids = [p.id for p in rows]
+    today = date.today()
+    last_visit, upcoming, outstanding = {}, {}, {}
+    for a in (db.query(Appointment.patient_id, Appointment.appointment_date)
+              .filter(Appointment.patient_id.in_(ids)).all()):
+        d = a.appointment_date.date() if a.appointment_date else None
+        if not d:
+            continue
+        if d < today:
+            if a.patient_id not in last_visit or d > last_visit[a.patient_id]:
+                last_visit[a.patient_id] = d
+        elif a.patient_id not in upcoming or d < upcoming[a.patient_id]:
+            upcoming[a.patient_id] = d
+
+    for inv in (db.query(Invoice.patient_id, Invoice.amount, Invoice.discount,
+                         Invoice.tax_rate, Invoice.paid_amount)
+                .filter(Invoice.patient_id.in_(ids)).all()):
+        net = round(float(inv.amount or 0) - float(inv.discount or 0), 2)
+        total = round(net + round(net * float(inv.tax_rate or 0) / 100.0, 2), 2)
+        rest = total - float(inv.paid_amount or 0)
+        if rest > 0:
+            outstanding[inv.patient_id] = outstanding.get(inv.patient_id, 0.0) + rest
+
+    dsp = (db.query(Dispense.patient_id,
+                    func.sum(Dispense.total_price - func.coalesce(Dispense.paid_amount, 0)))
+           .filter(Dispense.patient_id.in_(ids), Dispense.returned_at.is_(None))
+           .group_by(Dispense.patient_id).all())
+    for pid, val in dsp:
+        if float(val or 0) > 0:
+            outstanding[pid] = outstanding.get(pid, 0.0) + float(val)
+
+    items = []
+    for p in rows:
+        d = PatientInDB.model_validate(p).model_dump()
+        d["age"] = _age_at(p.date_of_birth, today)
+        d["has_alerts"] = bool(p.allergies or p.medical_warnings)
+        d["last_visit"] = last_visit.get(p.id)
+        d["upcoming"] = upcoming.get(p.id)
+        d["outstanding"] = round(max(0.0, outstanding.get(p.id, 0.0)), 2)
+        items.append(PatientListItem(**d))
+    return items
 
 
 # أسماء الأعمدة المقبولة في ملف الاستيراد (عربي + إنجليزي)
@@ -54,7 +160,40 @@ _IMPORT_ALIASES = {
     "الهوية الوطنية": "national_id", "الهوية الاقامة": "national_id", "الإقامة": "national_id",
     "insurer": "insurer", "شركة التأمين": "insurer", "التأمين": "insurer",
     "policy_number": "policy_number", "رقم الوثيقة": "policy_number", "الوثيقة": "policy_number",
+    # الملف الشخصي والإداري + التاريخ الطبي (الحقول الجديدة)
+    "nationality": "nationality", "الجنسية": "nationality",
+    "smoking_status": "smoking_status", "التدخين": "smoking_status",
+    "emergency_contact_name": "emergency_contact_name", "جهة الطوارئ": "emergency_contact_name",
+    "emergency_contact_phone": "emergency_contact_phone", "هاتف الطوارئ": "emergency_contact_phone",
+    "emergency_contact_relation": "emergency_contact_relation",
+    "صلة القرابة": "emergency_contact_relation",
+    "insurance_grade": "insurance_grade", "درجة التغطية": "insurance_grade",
+    "insurance_copay": "insurance_copay", "نسبة التحمل": "insurance_copay",
+    "chronic_conditions": "chronic_conditions", "الأمراض المزمنة": "chronic_conditions",
+    "past_surgeries": "past_surgeries", "العمليات السابقة": "past_surgeries",
+    "family_history": "family_history", "التاريخ العائلي": "family_history",
+    "allergies": "allergies", "الحساسية": "allergies",
+    "medical_warnings": "medical_warnings", "التحذيرات": "medical_warnings",
 }
+
+
+# أعمدة التصدير: (الترويسة العربية، الحقل في النموذج) — نفس ترتيب الترويسات
+# التي يقبلها الاستيراد، فتصدير ثم استيراد الملف لا يفقد أي حقل.
+_EXPORT_COLUMNS = [
+    ("الاسم الكامل", "full_name"), ("تاريخ الميلاد", "date_of_birth"),
+    ("النوع", "gender"), ("الهاتف", "phone"), ("البريد", "email"),
+    ("العنوان", "address"), ("مجموعة الدم", "blood_type"),
+    ("الهوية الوطنية", "national_id"), ("شركة التأمين", "insurer"),
+    ("رقم الوثيقة", "policy_number"),
+    ("الجنسية", "nationality"), ("التدخين", "smoking_status"),
+    ("جهة الطوارئ", "emergency_contact_name"), ("هاتف الطوارئ", "emergency_contact_phone"),
+    ("صلة القرابة", "emergency_contact_relation"),
+    ("درجة التغطية", "insurance_grade"), ("نسبة التحمل", "insurance_copay"),
+    ("الأمراض المزمنة", "chronic_conditions"), ("العمليات السابقة", "past_surgeries"),
+    ("التاريخ العائلي", "family_history"), ("الحساسية", "allergies"),
+    ("التحذيرات", "medical_warnings"),
+]
+
 
 
 @router.get("/export.csv", summary="تصدير المرضى إلى CSV (Excel)")
@@ -66,16 +205,17 @@ async def export_patients_csv(db = Depends(get_db), _ = Depends(get_current_user
 
     buf = _io.StringIO()
     w = _csv.writer(buf)
-    w.writerow(["الاسم الكامل", "تاريخ الميلاد", "النوع", "الهاتف", "البريد", "العنوان",
-                "مجموعة الدم", "الهوية الوطنية", "شركة التأمين", "رقم الوثيقة"])
+    w.writerow([head for head, _ in _EXPORT_COLUMNS])
     for p in db.query(Patient).order_by(Patient.id.asc()).all():
-        w.writerow([
-            p.full_name,
-            p.date_of_birth.strftime("%Y-%m-%d") if p.date_of_birth else "",
-            p.gender.value, p.phone or "", p.email or "",
-            p.address or "", p.blood_type or "",
-            p.national_id or "", p.insurer or "", p.policy_number or "",
-        ])
+        row = []
+        for _, field in _EXPORT_COLUMNS:
+            v = getattr(p, field, None)
+            if field == "date_of_birth":
+                v = v.strftime("%Y-%m-%d") if v else ""
+            elif hasattr(v, "value"):        # حقول Enum (النوع)
+                v = v.value
+            row.append("" if v is None else v)
+        w.writerow(row)
     return Response(
         content="\ufeff" + buf.getvalue(),
         media_type="text/csv; charset=utf-8",
@@ -139,6 +279,10 @@ async def import_patients_csv(
             norm["gender"] = "ذكر"
         elif g in ("أنثى", "انثى", "female", "f", "أنثي"):
             norm["gender"] = "أنثى"
+        # خلايا CSV الفارغة في الحقول الاختيارية تُهمَل (وإلا رُفض الصف كله)
+        for k, v in list(norm.items()):
+            if v == "" and k in PatientCreate.model_fields:
+                norm[k] = None
         # تطبيع صيغ التواريخ
         dob = norm.get("date_of_birth", "")
         for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d", "%d-%m-%Y", "%m/%d/%Y"):
@@ -167,13 +311,9 @@ async def import_patients_csv(
             skipped += 1
             seen.add(email_key)
             continue
-        db.add(Patient(
-            full_name=pc.full_name, date_of_birth=pc.date_of_birth,
-            gender=pc.gender, phone=pc.phone, email=pc.email,
-            address=pc.address, blood_type=pc.blood_type,
-            national_id=pc.national_id, insurer=pc.insurer,
-            policy_number=pc.policy_number,
-        ))
+        # تمرير كل الحقول المعروفة (بما فيها حقول الملف الجديدة) دون تكرارها هنا
+        known = PatientCreate.model_fields
+        db.add(Patient(**{f: getattr(pc, f) for f in known if f in norm}))
         seen.add(email_key)
         created += 1
     db.commit()

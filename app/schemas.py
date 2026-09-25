@@ -179,6 +179,20 @@ class PatientInDB(PatientBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class PatientListItem(PatientInDB):
+    """صف في قائمة المرضى — PatientInDB + حقول محسوبة للقائمة.
+
+    الحقول المحسوبة تُملأ في الراوتر باستعلامين مجمّعين (لا استعلام لكل مريض).
+    """
+    age: Optional[int] = Field(None, description="العمر بالسنوات")
+    has_alerts: bool = Field(False, description="له حساسية أو تحذير طبي")
+    last_visit: Optional[datetime] = Field(None, description="آخر زيارة")
+    upcoming: Optional[datetime] = Field(None, description="أقرب موعد قادم")
+    outstanding: float = Field(0.0, description="المتبقي المالي (فواتير + صرف)")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 # ===== العلامات الحيوية =====
 class VitalSignBase(BaseModel):
     systolic: Optional[int] = Field(None, ge=0, le=300, description="الضغط الانقباضي")
