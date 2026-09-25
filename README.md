@@ -20,6 +20,16 @@
 
 🩺 **جولة قسم الأطباء** — [docs/doctors-tour.html](docs/doctors-tour.html): 6 شاشات من بطاقات الإحصاءات والبحث الفوري 🔍 إلى التعديل ✏️ وتبديل التوافر ⛅ وتقرير الأداء الشهري 📈
 
+🖼️ **معرض اللقطات** — [docs/screenshots/gallery/](docs/screenshots/gallery/): ثماني شاشة كاملة الحجم تُلتقط آليًا في كل عملية E2E (لوحة التحكم · المرضى · المواعيد · الصيدلية · المخزون · المختبر · الفواتير · الرعاية والتشغيل).
+
+| لوحة التحكم | المرضى | المواعيد | الصيدلية |
+|---|---|---|---|
+| ![لوحة التحكم](docs/screenshots/gallery/01-dashboard.png) | ![المرضى](docs/screenshots/gallery/02-patients.png) | ![المواعيد](docs/screenshots/gallery/03-appointments.png) | ![الصيدلية](docs/screenshots/gallery/04-pharmacy.png) |
+
+| المخزون | المختبر والأشعة | الفواتير | الرعاية والتشغيل |
+|---|---|---|---|
+| ![المخزون](docs/screenshots/gallery/05-inventory.png) | ![المختبر](docs/screenshots/gallery/06-lab.png) | ![الفواتير](docs/screenshots/gallery/07-invoices.png) | ![الرعاية](docs/screenshots/gallery/08-clinical.png) |
+
 ## المميزات
 
 - 🖥️ **واجهة ويب كاملة (SPA)** على `/ui` — لوحة تحكم عربية مع تسجيل دخول وجداول ونماذج
@@ -481,19 +491,25 @@ USERS=50 REQUESTS=50 python tests/load_test.py    # حمل أثقل: 2500 طلب
 
 ### اختبارات E2E (Playwright)
 ```bash
-npm install                     # تثبيت @playwright/test (مرة واحدة)
-npx playwright install chromium # تثبيت المتصفح (مرة واحدة)
+npm install                          # تثبيت @playwright/test (مرة واحدة)
+npx playwright install chromium      # تثبيت المتصفح (مرة واحدة)
 
 # الخادم يجب أن يعمل: uvicorn main:app --host 127.0.0.1 --port 8001
-npm run test:e2e                # 10 اختبارات E2E لقسم الأطباء (دخول · PDF · CSV · نوبات · ثيم)
-npm run screenshots             # 📸 تجديد لقطات docs/screenshots/doctors-e2e/ (4 صور)
+npm run test:e2e                     # 24 اختبارًا: الأطباء 6 + الشاشات الأساسية 6 + اللقطات 12
+npx playwright test --grep "الشاشات الأساسية"  # تشغيل مجموعة واحدة
+npm run screenshots                  # 📸 تجديد لقطات docs/screenshots/doctors-e2e/ (4 صور)
+node scripts/gen-user-guide-pdf.js   # 📘 تجديد docs/user-guide.pdf من دليل HTML
 ```
-- `playwright.config.js` — الإعداد: `testDir=tests/e2e` · `baseURL=http://127.0.0.1:8001` · chromium · لقطات وأثر عند الفشل.
+- `playwright.config.js` — الإعداد: `testDir=tests/e2e` · `baseURL=http://127.0.0.1:8001` · لقطات وأثر عند الفشل · `workers=1`.
+- **المتصفحات**: chromium افتراضيًا؛ وتُضاف `firefox` و`webkit` تلقائيًا عند `CI=1` (GitHub Actions على Ubuntu مع `--with-deps`) أو يدويًا بـ `MULTI_BROWSER=1 npx playwright test`.
+  *(على ويندوز المحلية يُكتفى بـ Chromium — Firefox/WebKit ينقصهما توابع نظامية مثل `gkcodecs.dll`، ولهذا تمرّ المصفوفة الثلاثية في CI.)*
+- `tests/e2e/views.ts` — أدوات مشتركة: `openView(page, view)` يفتح الشاشة من الشريط الجانبي وينتظر عنوانها ومحتواها، و`expectNoUiError()` يرفض أي شاشة عرضت رسالة فشل (يتجاهل التحذيرات المشروعة مثل «منتهي الصلاحية»).
 - `tests/e2e/doctors.spec.ts` — الدخول، التقرير المقارن PDF، تصدير CSV، بطاقة الترخيص، جدول النوبات (يُحفظ دون تغيير البيانات)، الوضع الداكن.
+- `tests/e2e/core.spec.ts` — الشاشات الأساسية: لوحة التحكم، المرضى (بحث فوري يخفي الصفوف ثم يعيدها)، المواعيد (فلترة بالحالة عبر `.pill.completed`)، الصيدلية (`#ph-count`)، المخزون (بطاقات القيمة + حركات)، وتنقّل سريع بين خمس شاشات **يثبت غياب سباق الكتابة فوق المحتوى**.
+- `tests/e2e/gallery.spec.ts` — 🖼️ ثماني لقطة كاملة الصفحة إلى `docs/screenshots/gallery/`.
 - `tests/e2e/screenshots.spec.ts` — اللقطات الرسمية الأربع في `docs/screenshots/doctors-e2e/`.
-- الحسابات تُضبط بمتغيرات `HMS_USER` / `HMS_PASS` (افتراضي: `admin` / `admin123`).
-- الخادم يُضبط بـ `BASE_URL` (افتراضي: `http://127.0.0.1:8001`).
-- **في CI**: وظيفة `e2e` تبني البيانات التجريبية (`seed_demo.py`) ثم تُشغّل المجموعة كاملة على Chromium وتؤرشف النتائج واللقطات.
+- الحسابات تُضبط بمتغيرات `HMS_USER` / `HMS_PASS` (افتراضي: `admin` / `admin123`)، والخادم بـ `BASE_URL`.
+- **في CI**: وظيفة `e2e` تُبنى في **مصفوفة ثلاثية متصفحات** (بذر `seed_demo.py` → `npm ci` → تثبيت المتصفح مع توابع النظام → خادم على 8001 → `--project=…`) وتؤرشف النتائج باسم `playwright-results-<browser>`، ووظيفة `docs-pdf` تُولّد `docs/user-guide.pdf` وتقارنه بالملف المُلتزَم وتؤرشفه باسم `user-guide-pdf`.
 
 ### التشغيل بـ Docker
 ```bash
@@ -565,6 +581,29 @@ dist\HospitalMS.exe      :: خادم محلي على :8765 + يفتح المتص
 - `POST /{id}/restock` — 📦 توريد `{quantity, note?}` يزيد الكمية ويسجّل حركة `in` *(كمية ≤ 0 ⇒ 422 · غير موجود ⇒ 404)*
 - `PUT /{id}/adjust` — 🧮 جرد مطلق `{quantity, note?}` يضبط الكمية ويسجّل فرقها حركة `adjust` *(سالب ⇒ 422 · غير موجود ⇒ 404)*
 - `POST /{id}/dispose` — 🗑️ إتلاف `{quantity, note?}` يخصم الكمية التالفة ويسجّل حركة `disposal` *(admin فقط — غيره 403 · كمية ≤ 0 ⇒ 422 · تتجاوز الرصيد ⇒ 400 · غير موجود ⇒ 404)*
+
+### الوحدات التشغيلية المكملة `/service-units` *(العرض لأي مستخدم مسجّل — الإنشاء/التعديل/الحالة: admin وطبيب، ما عدا النظافة)*
+ست قيَم متماثلة: `physiotherapy` علاج طبيعي · `nutrition` تغذية سريرية · `emergency` طوارئ · `home-health` رعاية منزلية · `wellness` برامج عافية · `housekeeping` نظافة فندقية:
+- `GET /{unit}?patient_id=&status=&limit=` — قائمة الحالات (`limit` بين 1 و1000 · والعلاج الطبيعي يقبل `therapist_id`، والطوارئ `arrival_at`/`triage_level`، والرعاية المنزلية `next_visit_at`)
+- `POST /{unit}` — حالة جديدة `201` *(مريض غير موجود ⇒ 404 · طبيب غير موجود ⇒ 404 · حقل ناقص ⇒ 422)*
+- `GET /{unit}/{id}` — تفاصيل حالة *(غير موجودة ⇒ 404)* | `PUT /{unit}/{id}` — تعديل جزئي
+- `POST /{unit}/{id}/status` — تحديث الحالة `{status, notes?}` مع ختم زمني آلي للإنجاز/الإلغاء:
+  *(حالة غير مقبولة ⇒ 422 مع المسموح · تغيير حالة منتهية ⇒ 409 · غير موجودة ⇒ 404)*
+- `housekeeping` لا يحتاج مريضًا (حقوله `room_number` و`task_type`) وصلاحياته `admin`/`طبيب`/`موظف استقبال`.
+
+### طب الأسنان `/dental`
+- `GET /charts/{patient_id}` — مخطط الفم (الأسنان وحالتها وملاحظات آخر فحص) *(غير موجود ⇒ 404)* | `PUT /charts/{patient_id}` — إنشاء أو تحديث *(admin/طبيب · مريض غير موجود ⇒ 404)*
+- `GET /plans?patient_id=&status=&limit=` — خطط العلاج | `POST /plans` — خطة جديدة `201` | `GET /plans/{id}`
+- `POST /plans/{id}/procedures` — إجراء (السن، الإجراء، التكلفة) `201` | `POST /procedures/{id}/execute` — تنفيذ بمنفذ التنفيذ ووقته *(مُنفَّذ بالفعل ⇒ 409)*
+- `POST /plans/{id}/complete` — إكمال *(بلا إجراءات ⇒ 409 · إجراءات غير منفذة ⇒ 409)* | `POST /plans/{id}/cancel` — إلغاء *(خطة غير نشطة ⇒ 409)*
+
+### خطط الرعاية `/clinical/care-plans`
+- `GET /clinical/care-plans?patient_id=&status=&limit=` — الخطط مع عناصرها وسجل تنفيذاتها
+- `POST /clinical/care-plans` — خطة `201` *(طلب خدمة/تنويم لا يخص المريض ⇒ 422 · غير موجود ⇒ 404 · طبيب مسؤول غير موجود ⇒ 404)*
+- `POST /clinical/care-plans/{id}/items` — إضافة بند | `POST /clinical/care-plan-items/{item_id}/execute` — تنفيذ بند `201` بنتيجته وملاحظاته
+- `POST /clinical/care-plans/{id}/complete` — إكمال | `/cancel` — إلغاء يُلغي البنود غير المنتهية *(خطة غير نشطة ⇒ 409)*
+- عدّاد لوحة التحكم `GET /clinical/overview` يضمّ `care_plans_active` إلى جانب `service_pending` و`nursing_pending`.
+- الواجهة: الشاشة **«الرعاية والتشغيل»** تُظهر هذه الوحدات عبر `OP_GROUPS`/`OP_FIELDS` مع اختيار نوع الخدمة بما فيه `housekeeping`.
 
 ### البحث العام `/search`
 - `GET /search/?q=…&limit=5` — 🔍 بحث واحد يغطي **المرضى (الاسم/الهاتف/الهوية) + الأدوية (الاسم/الرمز) + الفواتير (الوصف/الرقم/اسم المريض) + المواعيد (المريض/السبب) + الوصفات (المريض/الملاحظات/الرقم)** — حتى `limit` (1–20) نتيجة لكل نوع مع حقول جاهزة للعرض (`type` / `type_label` / `icon` / `title` / `subtitle` / `view` اسم شاشة الواجهة للقفز) *(أي مستخدم مسجّل؛ الوصفات: طبيب مرضاه فقط — نفس قواعد `/prescriptions` · `q` فارغ ⇒ 400 «اكتب نص البحث (حرف واحد على الأقل)» · `limit` خارج 1–20 ⇒ 422)* · والواجهة: **نافذة `Ctrl+K`** (أو زر 🔍 في الشريط العلوي) بحث فوري بتأخير 250ms، تنقّل `↑↓`، فتح `Enter`، إغلاق `Esc`
