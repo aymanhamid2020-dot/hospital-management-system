@@ -182,7 +182,10 @@ def main():
     # ===== 11) المحاور الجديدة: مختبر + صيدلية + طابور + رواتب + كلمة مرور + تدقيق =====
     check("UI has lab nav", 'data-view="lab"' in ui.text)
     check("UI has pharmacy nav", 'data-view="pharmacy"' in ui.text)
-    check("UI has payroll nav", 'data-view="payroll"' in ui.text)
+    check("payroll tab lives inside HR (no standalone nav)",
+          'data-view="payroll"' not in ui.text
+          and "['payroll','الرواتب'" in ui_all
+          and "renderHRPayroll" in ui_all)
     check("UI has audit nav", 'data-view="audit"' in ui.text)
     check("UI has inventory nav + view",
           'data-view="inventory"' in ui.text

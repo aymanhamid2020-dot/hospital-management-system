@@ -2,8 +2,8 @@ import { test, expect } from '@playwright/test';
 import { login } from './helpers';
 import { expectNoUiError, openView } from './views';
 
-/** شاشة المحاسبة: سبعة تبويبات — كل تبويب يجمع كل ما يرتبط به */
-const TABS = ['overview', 'sales', 'debtors', 'invoices', 'ledger', 'reports', 'payroll'] as const;
+/** شاشة المحاسبة: ستة تبويبات — كل تبويب يجمع كل ما يرتبط به */
+const TABS = ['overview', 'sales', 'debtors', 'invoices', 'ledger', 'reports'] as const;
 
 /** علامة مميّزة لكل تبويب تُثبت أن محتواه هو المعروض */
 const MARKERS: Record<(typeof TABS)[number], string> = {
@@ -13,7 +13,6 @@ const MARKERS: Record<(typeof TABS)[number], string> = {
   invoices: 'الفواتير',
   ledger: 'الدفتر العام',
   reports: 'التقارير المالية',
-  payroll: 'كشف الرواتب',
 };
 
 /** التبويب المعروض فعليًا */
@@ -21,7 +20,7 @@ const active = (page: import('@playwright/test').Page) =>
   page.locator('#acc-tabs .tab.active').first();
 
 test.describe('شاشة المحاسبة وتبويباتها 💰', () => {
-  test('سبعة تبويبات + نظرة عامة بالملخّص المالي', async ({ page }) => {
+  test('ستة تبويبات + نظرة عامة بالملخّص المالي', async ({ page }) => {
     await login(page);
     await openView(page, 'accounting');
 
@@ -57,7 +56,6 @@ test.describe('شاشة المحاسبة وتبويباتها 💰', () => {
       ['sales', 'sales'],
       ['accounts', 'overview'],
       ['invoices', 'invoices'],
-      ['payroll', 'payroll'],
       ['accounting', 'overview'],
     ];
 

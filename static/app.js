@@ -732,15 +732,14 @@ const ACC_TAB_LIST = [
   ['debtors', '🧾 المدينون'],
   ['invoices', '💳 الفواتير'],
   ['ledger', '📒 الدفتر العام'],
-  ['reports', '📄 التقارير'],
-  ['payroll', '💵 الرواتب'],
+  ['reports', '📄 التقارير']
 ];
 /* أسماء الشاشات السابقة → التبويب المقابل (تعمل كاختصارات وعمق روابط) */
-const ACC_ALIAS = { sales: 'sales', accounts: 'overview', payroll: 'payroll', invoices: 'invoices' };
+const ACC_ALIAS = { sales: 'sales', accounts: 'overview', invoices: 'invoices' };
 /* مفتاح التبويب → اسم العرض المنفّذ داخل VIEWS (تبويب «نظرة عامة» = قسم الحسابات) */
 const ACC_VIEW = {
   overview: 'accounts', sales: 'sales', debtors: 'debtors', invoices: 'invoices',
-  ledger: 'ledger', reports: 'reports', payroll: 'payroll',
+  ledger: 'ledger', reports: 'reports',
 };
 
 function setAccGroup(g) { accGroup = g; setAccTab('overview'); }
@@ -1028,7 +1027,7 @@ function navigate(view) {
 }
 
 async function renderView(view) {
-  /* اختصارات شاشة المحاسبة (المبيعات/الحسابات/الرواتب/الفواتير) تفتح تبويبها،
+  /* اختصارات شاشة المحاسبة (المبيعات/الحسابات/الفواتير) تفتح تبويبها،
      ورابط «المحاسبة» نفسه يبدأ من تبويب «نظرة عامة» */
   if (ACC_ALIAS[view]) { ACC_TAB = ACC_ALIAS[view]; view = 'accounting'; }
   else if (view === 'accounting') { ACC_TAB = 'overview'; }
@@ -1327,7 +1326,7 @@ const HR_TABS = [
   ['personal','البيانات الشخصية والتعريفية','🪪'], ['employment','البيانات الوظيفية والإدارية','🏢'],
   ['salary','البيانات المالية والرواتب','💰'], ['deductions','الاستقطاعات والتأمينات والضرائب','🧮'],
   ['attendance','الإجازات والدوام','🕒'], ['assets','العهد العينية والعهد','💻'],
-  ['end_service','مستحقات نهاية الخدمة والقيود','🏁']
+  ['end_service','مستحقات نهاية الخدمة والقيود','🏁'], ['payroll','الرواتب','💵']
 ];
 const HR_DEFAULT = {
   personal: { birth_date:'', gender:'', nationality:'', marital_status:'', national_id:'', passport_number:'', document_issue_date:'', document_expiry_date:'', phone:'', email:'', address:'' },
@@ -1364,7 +1363,7 @@ function hrEditorHTML() {
     <div id="hr-tab" class="hr-tab">${hrTabHTML()}</div></div>`;
 }
 function selectHR(id) { captureHRFields(); HR_SELECTED=id; document.getElementById('hr-list').innerHTML=hrDirectoryHTML(); document.getElementById('hr-editor').innerHTML=hrEditorHTML(); applyI18n(document.getElementById('hr-editor')); }
-function setHRTab(tab) { captureHRFields(); HR_TAB=tab; document.getElementById('hr-editor').innerHTML=hrEditorHTML(); applyI18n(document.getElementById('hr-editor')); }
+async function setHRTab(tab) { captureHRFields(); HR_TAB=tab; document.getElementById('hr-editor').innerHTML=hrEditorHTML(); applyI18n(document.getElementById('hr-editor')); if (tab === 'payroll') await renderHRPayroll(); }
 function filterHR(value) { document.getElementById('hr-list').innerHTML=hrDirectoryHTML(value); }
 function captureHRFields() {
   const staff = currentHR();
@@ -1423,7 +1422,18 @@ function hrTabHTML() {
   if (HR_TAB === 'deductions') return `<div class="section-title">🧮 التأمينات والضريبة</div><div class="form-grid">${hrField('deductions','employee_social_rate','نسبة خصم الموظف من التأمينات','number')}${hrField('deductions','company_social_rate','نسبة مشاركة الشركة','number')}${hrField('deductions','income_tax_rule','القاعدة الضريبية / شرائح ضريبة كسب العمل')}${hrField('deductions','tax_allowance','الخصم الإجمالي','number')}${hrField('deductions','other_deductions','استقطاعات ثابتة أخرى','number')}</div>`;
   if (HR_TAB === 'attendance') return `<div class="section-title">🌴 أرصدة الإجازات</div><div class="form-grid">${hrField('attendance','annual_leave','رصيد الإجازة السنوية','number')}${hrField('attendance','sick_leave','رصيد الإجازة المرضية','number')}${hrField('attendance','special_leave','رصيد الإجازة الخاصة','number')}</div><div class="section-title">🕒 سياسة الدوام</div><div class="form-grid">${hrField('attendance','shift','وردية العمل')}${hrField('attendance','work_hours','ساعات الدوام','number')}${hrField('attendance','overtime_policy','سياسة احتساب الإضافي')}${hrField('attendance','absence_policy','سياسة الغياب')}${hrField('attendance','late_policy','سياسة التأخير')}</div>`;
   if (HR_TAB === 'assets') return `<div class="section-title">💳 السلف والقروض</div><div class="form-grid">${hrField('assets','loan_amount','إجمالي السلفة','number')}${hrField('assets','monthly_installment','القسط الشهري','number')}${hrField('assets','remaining_loan','المتبقي','number')}</div><div class="section-title">💻 العهد العينية (Assets)</div>${hrField('assets','assets','الأجهزة المسلمة (لابتوب، سيارة، هاتف، أدوات)')}${hrField('assets','custody_notes','ملاحظات إبراء الذمة')}`;
+  if (HR_TAB === 'payroll') return '<div id="hr-payroll"></div>';
   return `<div class="section-title">🏁 مستحقات نهاية الخدمة</div><div class="form-grid">${hrField('end_service','end_service_method','طريقة الاحتساب','select',['مخصص الخدمة المتبقية','نصف شهر عن كل سنة','أجر شهر عن كل سنة'])}${hrField('end_service','provision_rate','نسبة التخصيص','number')}</div><div class="section-title">🔗 الربط المحاسبي (Posting Accounts)</div><div class="form-grid">${hrField('end_service','payroll_account','حساب مجمع رواتب الموظفين','select',HR_ACCOUNTS.map(a=>a.code+' — '+a.name))}${hrField('end_service','loan_account','حساب سلف الموظفين','select',HR_ACCOUNTS.map(a=>a.code+' — '+a.name))}${hrField('end_service','end_service_account','حساب مستحقات نهاية الخدمة','select',HR_ACCOUNTS.map(a=>a.code+' — '+a.name))}</div>`;
+}
+
+/* تبويب «الرواتب» داخل شؤون الموظفين — يعيد استخدام شاشة قيود الرواتب كاملة
+   (كشف + إضافة قيد + صرف + PDF/CSV) دون تكرار القائمة الجانبية أو تبويب المحاسبة */
+async function renderHRPayroll() {
+  const box = document.getElementById('hr-payroll');
+  if (!box) return;
+  box.innerHTML = '<div class="empty">جارٍ التحميل…</div>';
+  try { await VIEWS.payroll(box); }
+  catch (e) { box.innerHTML = `<div class="empty" style="color:#dc3545">⚠️ ${esc(e.message)}</div>`; }
 }
 
 const VIEWS = {
@@ -1443,6 +1453,7 @@ const VIEWS = {
         </div>
         <div class="hr-editor" id="hr-editor">${hrEditorHTML()}</div>
       </div>`;
+    if (HR_TAB === 'payroll') await renderHRPayroll();
   },
 
   /* --- الموظفون --- */
@@ -2202,7 +2213,7 @@ async function deleteStaffDoc(id) {
               : `<span class="pill unpaid">غير مصروف</span>`}</td>
             <td class="actions">
               ${r.status !== 'paid' ? `<button class="btn sm success" onclick="payPayroll(${r.id})">💵 صرف</button>` : ''}
-              <button class="btn sm danger" onclick="del('payroll',${r.id},'payroll')">حذف</button>
+              <button class="btn sm danger" onclick="del('payroll',${r.id},'hr')">حذف</button>
             </td>
           </tr>`).join('') || '<tr><td colspan="9" class="empty">لا قيود رواتب</td></tr>'}</tbody>
         </table></div>
@@ -3577,14 +3588,14 @@ function addPayroll() {
     bonus: V('f-bonus') ? Number(V('f-bonus')) : 0,
     deduction: V('f-ded') ? Number(V('f-ded')) : 0,
     notes: V('f-pnotes') || null
-  }, 'payroll');
+  }, 'hr');
 }
 
 async function payPayroll(id) {
   if (!confirm('تأكيد صرف هذا الراتب؟')) return;
   try {
     await api('/payroll/' + id + '/pay', { method: 'POST' });
-    toast('تم صرف الراتب 💵'); await navigate('payroll');
+    toast('تم صرف الراتب 💵'); await navigate('hr');
   } catch (e) { toast(e.message, true); }
 }
 

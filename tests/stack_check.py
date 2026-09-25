@@ -93,9 +93,13 @@ def main():
     ui_all = c.get("/").text + c.get("/app.js").text
     check("الواجهة تُقدَّم (200 + تسجيل الدخول)",
           ui.status_code == 200 and "تسجيل الدخول" in ui_all)
-    check("الواجهة فيها مسارات المفاقيد الأربع",
+    check("الواجهة فيها مسارات المفاقيد الثلاثة",
           all(f'data-view="{v}"' in ui_all
-              for v in ("lab", "pharmacy", "payroll", "audit")))
+              for v in ("lab", "pharmacy", "audit")))
+    check("الرواتب: تبويب داخل شؤون الموظفين بلا قائمة مستقلة",
+          "['payroll','الرواتب'" in ui_all
+          and "renderHRPayroll" in ui_all
+          and 'data-view="payroll"' not in ui_all)
     check("القائمة تفصل المبيعات عن الحسابات",
           'data-view="sales"' in ui_all and 'data-view="accounts"' in ui_all
           and "async sales(main)" in ui_all
