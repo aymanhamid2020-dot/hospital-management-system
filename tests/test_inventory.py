@@ -234,7 +234,7 @@ def test_inventory_labels_pdf(client, admin):
 
 # ================= مؤشرات الواجهة =================
 def test_inventory_ui_markers(client):
-    ui = client.get("/ui/").text + client.get("/ui/app.js").text
+    ui = client.get("/").text + client.get("/app.js").text
     assert 'data-view="inventory"' in ui
     assert "async inventory(main)" in ui
     assert "inventory: 'المخزون'" in ui
@@ -250,7 +250,11 @@ def test_inventory_ui_markers(client):
     assert "ملصقات الكل" in ui
     assert "label_${m.code}.pdf" in ui
     assert "'🏷️ ملصق': '🏷️ Label'" in ui
-    # الكاش رُفع إلى v6 (شل مجزّأ: الصفحة + app.css + app.js + manifest + الأيقونة)
-    sw = client.get("/ui/sw.js").text
-    assert "hms-shell-v6" in sw
-    assert "/ui/app.js" in sw and "/ui/app.css" in sw
+    # الكاش رُفع إلى v8 ليضم الجذر وكل أصول الواجهة بلا بادئة /ui
+    sw = client.get("/sw.js").text
+    assert "hms-shell-v8" in sw
+    assert "'/app.js'" in sw and "'/app.css'" in sw
+    # الجذر داخل القشرة ليُخدم بلا اتصال بعد التثبيت.
+    assert "'/', '/app.css'" in sw
+    # لا بادئة /ui في القشرة بعد توحيد الواجهة على الجذر.
+    assert "/ui" not in sw

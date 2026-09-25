@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    Column, Integer, String, DateTime, Float, Boolean, Time, ForeignKey,
+    Column, Integer, String, Text, DateTime, Float, Boolean, Time, ForeignKey,
     Enum as SAEnum, Index, UniqueConstraint
 )
 from sqlalchemy.orm import relationship
@@ -177,8 +177,31 @@ class Staff(Base):
     email = Column(String, unique=True, nullable=False)
     hire_date = Column(DateTime, nullable=False)
     salary = Column(Float, nullable=True)
+    # ملف الموارد البشرية: الأقسام السبعة تُحفظ كـ JSON لتفادي كسر قواعد
+    # SQLite/PostgreSQL عند إضافة أعمدة جديدة. القيم الافتراضية تُملأ في الواجهة.
+    hr_profile = Column(Text, nullable=False, default="{}", server_default="{}")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    documents = relationship(
+        "StaffDocument", back_populates="staff", cascade="all, delete-orphan", lazy="selectin"
+    )
+
+
+class StaffDocument(Base):
+    """مرفق موظف: هوية/عقد/سيرة ذاتية/شهادة."""
+    __tablename__ = "staff_documents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    staff_id = Column(Integer, ForeignKey("staff.id", ondelete="CASCADE"), nullable=False, index=True)
+    doc_type = Column(String, nullable=False)
+    original_name = Column(String, nullable=False)
+    stored_name = Column(String, unique=True, nullable=False)
+    content_type = Column(String, nullable=False)
+    size_bytes = Column(Integer, nullable=False)
+    uploaded_at = Column(DateTime, server_default=func.now())
+
+    staff = relationship("Staff", back_populates="documents")
 
 
 # ===== الفواتير =====

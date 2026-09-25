@@ -225,7 +225,7 @@ def test_password_strength_validation(client):
 # ================= الواجهة: اللغة الإنجليزية + PWA =================
 def test_i18n_toggle_markers_in_ui(client):
     """زر تبديل اللغة + قاموس الترجمة + تبديل اتجاه LTR موجودان في الواجهة."""
-    html = client.get("/ui/").text + client.get("/ui/app.js").text
+    html = client.get("/").text + client.get("/app.js").text
     assert "toggleLang" in html
     assert "AR2EN" in html and "lang-btn" in html
     assert "applyI18n" in html and "localStorage.getItem('hms_lang')" in html
@@ -233,21 +233,25 @@ def test_i18n_toggle_markers_in_ui(client):
 
 def test_pwa_manifest_and_service_worker(client):
     """ملفات PWA تُقدَّم ومسجّلتها في الصفحة."""
-    m = client.get("/ui/manifest.json")
+    m = client.get("/manifest.json")
     assert m.status_code == 200
     data = m.json()
-    assert data["start_url"] == "/ui/" and data["display"] == "standalone"
+    # نقطة البداية هي جذر الخادم: يفتح المتصفح شاشة الدخول مباشرة.
+    assert data["start_url"] == "/" and data["scope"] == "/"
+    assert data["display"] == "standalone"
     assert data["theme_color"] == "#2c7be5"
-    assert data["icons"][0]["src"] == "/ui/icon.svg"
+    assert data["icons"][0]["src"] == "/icon.svg"
 
-    sw = client.get("/ui/sw.js")
+    sw = client.get("/sw.js")
     assert sw.status_code == 200
     assert "caches" in sw.text and "/appointments/queue" in sw.text
-    assert "serviceWorker.register('/ui/sw.js')" in (
-        client.get("/ui/").text + client.get("/ui/app.js").text)
-    assert client.get("/ui/app.js").status_code == 200
-    assert client.get("/ui/app.css").status_code == 200
-    assert client.get("/ui/icon.svg").status_code == 200
+    assert "navigator.serviceWorker.register('/sw.js', { scope: '/' })" in (
+        client.get("/").text + client.get("/app.js").text)
+    # نسخة الجذر تسمح للـ service worker بالتحكم في نطاق / كاملًا.
+    assert sw.headers["service-worker-allowed"] == "/"
+    assert client.get("/app.js").status_code == 200
+    assert client.get("/app.css").status_code == 200
+    assert client.get("/icon.svg").status_code == 200
 
 
 # ================= التقارير الإنجليزية (lang=en) =================
@@ -327,7 +331,7 @@ def test_restore_rejects_bad_files(client, admin):
 # ================= الواجهة: التقويم + إدارة المستخدمين =================
 def test_calendar_markers_in_ui(client):
     """تقويم المواعيد الشهري: دوال التبديل والتنقل والعرض في الواجهة."""
-    html = client.get("/ui/").text + client.get("/ui/app.js").text
+    html = client.get("/").text + client.get("/app.js").text
     for marker in ("renderCalendar", "calNav", "toggleCal",
                    "CAL_MONTHS", "cal-grid"):
         assert marker in html, marker
@@ -335,7 +339,7 @@ def test_calendar_markers_in_ui(client):
 
 def test_users_admin_view_markers_in_ui(client):
     """شاشة إدارة المستخدمين: الرابط + الدوال + زر استعادة النسخ."""
-    html = client.get("/ui/").text + client.get("/ui/app.js").text
+    html = client.get("/").text + client.get("/app.js").text
     for marker in ('data-view="users"', "async users(main)", "setRole",
                    "toggleUser", "saveUser", "restoreBackup"):
         assert marker in html, marker
@@ -542,7 +546,7 @@ def test_accounts_patient_statement(client, admin):
                       headers=admin).status_code == 404
     assert client.get(f"/accounts/statement/{pid}/pdf").status_code == 401
     assert "PDF الكشف" in (
-        client.get("/ui/").text + client.get("/ui/app.js").text)
+        client.get("/").text + client.get("/app.js").text)
 
 
 def test_accounts_payment_validation(client, admin):

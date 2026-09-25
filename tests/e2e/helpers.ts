@@ -1,7 +1,7 @@
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 
-/** مسار لوحة التحكم (الواجهة معلّقة على /ui) */
-export const APP = '/ui/';
+/** مسار لوحة التحكم (الواجهة معلّقة على جذر الخادم) */
+export const APP = '/';
 
 /** بيانات الدخول الافتراضية للبيئة التجريبية (تُتجاوز عبر HMS_USER / HMS_PASS) */
 export const USER = process.env.HMS_USER || 'admin';

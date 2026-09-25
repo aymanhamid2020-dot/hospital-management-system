@@ -136,7 +136,7 @@ def test_advanced_clinical_and_patient_portal_flow(client, admin):
 
 @pytest.mark.parametrize("service_type", [
     "care_sets", "dental", "physiotherapy", "emergency",
-    "home_health", "wellness", "nutrition",
+    "home_health", "wellness", "nutrition", "housekeeping",
 ])
 def test_all_service_request_types_flow(client, admin, service_type):
     suffix = _suffix()

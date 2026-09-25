@@ -59,11 +59,11 @@ print("== live server ==")
 c = httpx.Client(base_url="http://127.0.0.1:8001", timeout=30)
 tok = c.post("/auth/login", json={"username": "admin", "password": "admin123"}).json()
 H = {"Authorization": "Bearer " + tok["access_token"]}
-idx = c.get("/ui/")
-# بعد تجزئة الواجهة: JS صار في /ui/app.js — مؤشرات الدوال تفحص الملفين
-idx_js = c.get("/ui/app.js").content
+idx = c.get("/")
+# بعد تجزئة الواجهة: JS صار في /app.js — مؤشرات الدوال تفحص الملفين
+idx_js = c.get("/app.js").content
 checks = [
-    ("GET /ui/ يخدم الواجهة", idx.status_code == 200),
+    ("GET / يخدم الواجهة", idx.status_code == 200),
     ("الواجهة تحتوي عرض المبيعات",
      "async sales(main)".encode() in idx_js),
     ("الواجهة تحتوي قسم الحسابات",
@@ -115,7 +115,7 @@ checks = [
     ("PDF الكشف غير مسجّل ⇒ 401",
      c.get("/accounts/statement/1/pdf").status_code == 401),
     ("زر PDF الكشف في الواجهة",
-     "'⬇️ PDF الكشف'" in c.get("/ui/").text + c.get("/ui/app.js").text),
+     "'⬇️ PDF الكشف'" in c.get("/").text + c.get("/app.js").text),
 ]
 for name, ok in checks:
     bad += 0 if ok else 1

@@ -15,15 +15,80 @@ def test_health(client):
     assert r.json()["status"] == "healthy"
 
 
-def test_index_page_is_html(client):
-    r = client.get("/")
+def test_index_page_serves_dashboard_directly(client):
+    """/" تفتح لوحة التحكم نفسها على جذر الخادم بلا بادئة /ui."""
+    root = client.get("/")
+    assert root.status_code == 200
+    assert "text/html" in root.headers["content-type"]
+    assert "تسجيل الدخول" in root.text
+    # لا كاش حتى تظهر تعديلات الواجهة فورًا.
+    assert "no-store" in root.headers.get("cache-control", "")
+
+
+def test_root_serves_login_without_redirecting_to_ui(client):
+    """فتح جذر الخادم يعرض شاشة الدخول مباشرة بلا تحويل إلى /ui."""
+    root = client.get("/", follow_redirects=False)
+    assert root.status_code == 200
+    assert "location" not in root.headers
+    assert 'id="login-view"' in root.text
+    # روابط PWA على الجذر حتى يبدأ التطبيق المثبّت من شاشة الدخول.
+    assert 'rel="manifest" href="/manifest.json"' in root.text
+    manifest = client.get("/manifest.json")
+    assert manifest.status_code == 200
+    assert manifest.json()["start_url"] == "/"
+
+
+def test_service_worker_is_served_at_root_scope(client):
+    """service worker على الجذر مع السماح بتحكمه في نطاق / كاملة."""
+    sw = client.get("/sw.js")
+    assert sw.status_code == 200
+    assert sw.headers["service-worker-allowed"] == "/"
+    # نطاق التحكم كامل الجذر، فلا يذكر الملف مسارًا مثبّتًا لبادئة قديمة.
+    assert "/ui" not in sw.text
+
+
+def test_login_screen_gates_the_dashboard(client):
+    """لوحة التحكم لا تظهر قبل الدخول: #app-view مخفي والحقول غير معبّأة."""
+    html = client.get("/").text
+    assert 'id="app-view"' in html
+    # حقل كلمة المرور موجود ولا يحمل قيمة مملوءة مسبقًا.
+    pass_input = html.split('id="li-pass"')[1].split(">")[0]
+    assert "password" in pass_input
+    assert "value=" not in pass_input
+    user_input = html.split('id="li-user"')[1].split(">")[0]
+    assert "value=" not in user_input
+    # التطبيق مخفي افتراضيًا في CSS حتى تُستدعى enterApp بعد المصادقة.
+    css = client.get("/app.css").text
+    app_rule = css.split("#app-view")[1].split("}")[0]
+    assert "display: none" in app_rule
+
+    manifest = client.get("/manifest.json")
+    assert manifest.status_code == 200
+    data = manifest.json()
+    # التطبيق المثبّت يفتح شاشة الدخول على الجذر مباشرة.
+    assert data["start_url"] == "/"
+    assert data["scope"] == "/"
+
+
+def test_welcome_page_still_available(client):
+    r = client.get("/welcome")
     assert r.status_code == 200
-    assert "text/html" in r.headers["content-type"]
-    assert "نظام إدارة المستشفيات" in r.text
+    assert "System running" in r.text
+
+
+def test_root_dashboard_assets_resolve(client):
+    """أصول index.html بمسارات مطلقة على الجذر وتعمل عند الفتح من /."""
+    import re
+
+    html = client.get("/").text
+    assets = sorted(set(re.findall(r'(?:src|href)="(/[^"#]+)"', html)))
+    assert assets, "لم يُعثر على أصول مطلقة في index.html"
+    for asset in assets:
+        assert client.get(asset).status_code == 200, asset
 
 
 def test_ui_page_served(client):
-    r = client.get("/ui/")
+    r = client.get("/")
     assert r.status_code == 200
     assert "تسجيل الدخول" in r.text
 
@@ -219,7 +284,7 @@ def test_medical_record_doctor_scoping(client, admin):
 
     # إنشاء يُنسب له تلقائيًا
     r = client.post("/medical-records/", headers=h, json={
-        "patient_id": pat_id, "diagnosis": "自动ربط"})
+        "patient_id": pat_id, "diagnosis": "ربط تلقائي"})
     assert r.status_code == 200
     assert r.json()["doctor_id"] == doc_id
 

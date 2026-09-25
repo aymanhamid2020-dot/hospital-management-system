@@ -1,6 +1,6 @@
 /* PWA — قشرة التطبيق + شاشة الطابور للعمل دون اتصال */
-const CACHE = 'hms-shell-v6';
-const SHELL = ['/ui/', '/ui/app.css', '/ui/app.js', '/ui/patient-portal.html', '/ui/manifest.json', '/ui/icon.svg'];
+const CACHE = 'hms-shell-v8';
+const SHELL = ['/', '/app.css', '/app.js', '/patient-portal.html', '/manifest.json', '/icon.svg'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(
@@ -34,8 +34,8 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // ملفات الواجهة: الشبكة أولًا (أحدث نسخة دائمًا) ثم الكاش كاحتياط دون اتصال
-  if (url.pathname.startsWith('/ui/')) {
+  // ملفات الواجهة على الجذر — الشبكة أولًا (أحدث نسخة دائمًا) ثم الكاش كاحتياط دون اتصال
+  if (SHELL.includes(url.pathname)) {
     e.respondWith(
       fetch(e.request).then((r) => {
         const clone = r.clone();

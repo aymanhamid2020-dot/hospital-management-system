@@ -1,6 +1,6 @@
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, RedirectResponse
 from contextlib import asynccontextmanager
 from sqlalchemy.orm import Session
 import os
@@ -101,7 +101,7 @@ INDEX_HTML = """<!DOCTYPE html>
   <h1>🏥 نظام إدارة المستشفيات والعيادات</h1>
   <div class="version">FastAPI — الإصدار 1.0.0</div>
     <div class="links">
-    <a class="btn" href="/ui">🖥️ فتح لوحة التحكم</a>
+    <a class="btn" href="/">🖥️ فتح لوحة التحكم</a>
     <a class="btn" href="/api/docs">📖 توثيق Swagger</a>
     <a class="btn" href="/api/redoc">📄 توثيق ReDoc</a>
     <a class="btn" href="/health">💚 فحص الحالة</a>
@@ -121,9 +121,9 @@ INDEX_HTML = """<!DOCTYPE html>
 from fastapi.responses import HTMLResponse
 
 
-@app.get("/", tags=["عام"], response_class=HTMLResponse)
-async def root():
-    """صفحة ترحيب بروابط التوثيق"""
+@app.get("/welcome", tags=["عام"], response_class=HTMLResponse)
+async def welcome_page():
+    """صفحة ترحيب بروابط التوثيق (لوحة التحكم نفسها على /)"""
     return INDEX_HTML
 
 
@@ -137,8 +137,11 @@ async def health_check():
 
 
 @app.get("/status", tags=["عام"], summary="حالة النظام العامة (JSON للمراقبة)")
-async def system_status(db: Session = Depends(get_db)):
-    """فحص مراقبة **دون توكن**: الإصدار + محرك القاعدة واتصالها + عدد السجلات"""
+def system_status(db: Session = Depends(get_db)):
+    """فحص مراقبة **دون توكن**: الإصدار + محرك القاعدة واتصالها + عدد السجلات
+
+    دالة **متزامنة** عن قصد: تُنفَّذ في خيط التبادل (threadpool) فلا تؤخّر حلقة
+    الأحداث — وكانت سابقة أهم مسبب لتأخّر الطلبات المتزامنة (21–47ms/طلب)."""
     from datetime import date, datetime, time as _time, timedelta, timezone
     from sqlalchemy import func, text
     from app.config import (APP_NAME, APP_VERSION, REMINDER_HOURS_BEFORE,
@@ -346,6 +349,22 @@ class AuditMiddleware(BaseHTTPMiddleware):
 app.add_middleware(AuditMiddleware)
 
 
+# خدمة الواجهة الأمامية على جذر الخادم مباشرة
+_static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+
+
+def _is_static_path(path: str) -> bool:
+    """هل يشير المسار إلى ملف واجهة فعلي داخل مجلد static؟
+
+    الفحص بال existence لا بنمط المسار حتى لا يطال مسارات الـ API.
+    """
+    if path in ("/", "/welcome"):
+        return True
+    if ".." in path:
+        return False
+    return os.path.isfile(os.path.join(_static_dir, path.lstrip("/")))
+
+
 class NoCacheUIMiddleware:
     """يمنع كاش المتصفح لملفات الواجهة حتى تظهر أي تعديلات فورًا."""
 
@@ -353,7 +372,8 @@ class NoCacheUIMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or not scope.get("path", "").startswith("/ui"):
+        path = scope.get("path", "")
+        if scope["type"] != "http" or not _is_static_path(path):
             return await self.app(scope, receive, send)
 
         async def send_no_cache(message):
@@ -370,10 +390,40 @@ class NoCacheUIMiddleware:
 
 app.add_middleware(NoCacheUIMiddleware)
 
-# خدمة الواجهة الأمامية (SPA) على مسار /ui
-_static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+# المسارات الصريحة للواجهة على الجذر — تُطابَق قبل المونت الشامل في آخر الملف
 if os.path.isdir(_static_dir):
-    app.mount("/ui", StaticFiles(directory=_static_dir, html=True), name="ui")
+    @app.get("/sw.js", tags=["عام"], include_in_schema=False)
+    async def service_worker():
+        """service worker على الجذر حتى تتحكم القشرة بمسار / المفتوح عند التثبيت."""
+        from fastapi.responses import FileResponse
+
+        path = os.path.join(_static_dir, "sw.js")
+        if not os.path.isfile(path):
+            raise HTTPException(status_code=404, detail="ملف service worker غير موجود")
+        return FileResponse(
+            path,
+            media_type="application/javascript",
+            headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-store"},
+        )
+
+    @app.get("/manifest.json", tags=["عام"], include_in_schema=False)
+    async def web_manifest():
+        """مانيفست PWA على الجذر ليقبله المتصفح عند فتح المنفذ مباشرة."""
+        from fastapi.responses import FileResponse
+
+        path = os.path.join(_static_dir, "manifest.json")
+        if not os.path.isfile(path):
+            raise HTTPException(status_code=404, detail="ملف المانيفست غير موجود")
+        return FileResponse(path, media_type="application/manifest+json")
+
+    @app.get("/", tags=["عام"], include_in_schema=False)
+    async def app_root():
+        """لوحة التحكم على جذر الخادم مباشرة (الأصول بمسارات مطلقة /...)"""
+        from fastapi.responses import FileResponse
+        index_path = os.path.join(_static_dir, "index.html")
+        if not os.path.isfile(index_path):
+            return INDEX_HTML
+        return FileResponse(index_path, media_type="text/html")
 
 
 @app.get("/monitor", tags=["عام"], summary="لوحة المراقبة المرئية")
@@ -384,3 +434,58 @@ async def monitor_page():
     if not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="ملف اللوحة غير موجود")
     return FileResponse(path, media_type="text/html")
+
+
+def _collect_declared_paths(routes) -> set:
+    """يسطّح مسارات التطبيق، مع تجاوز أغلفة _IncludedRouter في FastAPI 0.141+.
+
+    ملاحظة: المسارات داخل original_router تحمل بادئة الراوتر مسبقًا،
+    لذلك تُجمع كما هي دون ضم prefix مرة أخرى.
+    """
+    collected: set = set()
+    for route in routes or []:
+        path = getattr(route, "path", None)
+        if isinstance(path, str):
+            collected.add(path)
+        inner = getattr(route, "original_router", None)
+        if inner is not None:
+            collected |= _collect_declared_paths(getattr(inner, "routes", []))
+    return collected
+
+
+# خدمة الملفات الثابتة على الجذر: المسار يطابق ملفًا داخل static فقط.
+# نستخدم معالجًا بدل app.mount("/") لأن المونت على الجذر يبتلع كل مسار
+# غير مطابق فيمنع تحويل الشرطة المائلة (307) ويحوّل 404 إلى 405.
+if os.path.isdir(_static_dir):
+    # تُحسب مرة واحدة عند الإقلاع؛ فحص app.routes لكل طلب مكلف ويعطل
+    # المسارات التي تغلّفها _IncludedRouter (لا تملك سمة path).
+    _declared_api_paths = _collect_declared_paths(app.routes)
+
+    @app.api_route(
+        "/{full_path:path}",
+        methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        include_in_schema=False,
+    )
+    async def static_fallback(request: Request, full_path: str):
+        """يخدم أصول الواجهة من الجذر، ويحافظ على سلوك 404/307 لباقي المسارات."""
+        rel = "/" + full_path
+        # نص الاستعلام يبقى مع التحويل 307 (سلوك Starlette نفسه) حتى لا تضيع
+        # الفلاتر مثل ?status=bogus عند الانتقال /prescriptions ← /prescriptions/.
+        qs = f"?{request.url.query}" if request.url.query else ""
+        if ".." in full_path:
+            raise HTTPException(status_code=404, detail="المسار غير موجود")
+        target = os.path.join(_static_dir, full_path)
+        if full_path and os.path.isfile(target):
+            return FileResponse(target)
+
+        # مسار واجهة بلا شرطة مائلة ⇒ تحويل 307 إلى النسخة التي تنتهي بشرطة.
+        if not full_path.endswith("/"):
+            with_slash = os.path.join(_static_dir, full_path, "index.html")
+            if os.path.isfile(with_slash):
+                return RedirectResponse(f"{rel}/{qs}", status_code=307)
+            # كذلك مسارات الـ API المعلنة بشرطة مائلة (مثل /prescriptions/):
+            # نعيد تحويل FastAPI الطبيعي 307 بدل ابتلاعه وإرجاع 404.
+            if f"{rel}/" in _declared_api_paths:
+                return RedirectResponse(f"{rel}/{qs}", status_code=307)
+
+        raise HTTPException(status_code=404, detail="المسار غير موجود")

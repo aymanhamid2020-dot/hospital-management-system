@@ -88,9 +88,9 @@ def main():
 
     # 1) الأمان والواجهة
     check("المسارات محمية بدون توكن (401)", c.get("/patients/").status_code == 401)
-    ui = c.get("/ui/")
-    # بعد تجزئة الواجهة: HTML في /ui/ والـ JS في /ui/app.js — المؤشرات تفحص الاثنين
-    ui_all = c.get("/ui/").text + c.get("/ui/app.js").text
+    ui = c.get("/")
+    # بعد تجزئة الواجهة: HTML في / والـ JS في /app.js — المؤشرات تفحص الاثنين
+    ui_all = c.get("/").text + c.get("/app.js").text
     check("الواجهة تُقدَّم (200 + تسجيل الدخول)",
           ui.status_code == 200 and "تسجيل الدخول" in ui_all)
     check("الواجهة فيها مسارات المفاقيد الأربع",

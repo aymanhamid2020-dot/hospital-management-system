@@ -3,7 +3,7 @@
 البناء (ويندوز):
     build_desktop.bat            →  dist\\HospitalMS.exe
 التشغيل:
-    dist\\HospitalMS.exe          →  يفتح http://127.0.0.1:8765/ui/
+    dist\\HospitalMS.exe          →  يفتح http://127.0.0.1:8765/
     HMS_DESKTOP_PORT=9000 dist\\HospitalMS.exe   (منفذ مخصّص)
 
 النسخة المجمّعة تضع قاعدة البيانات hospital.db والنسخ الاحتياطية بجانب
@@ -32,7 +32,7 @@ def _prepare_env():
 
 def _open_browser():
     time.sleep(2.5)
-    webbrowser.open(f"http://127.0.0.1:{PORT}/ui/")
+    webbrowser.open(f"http://127.0.0.1:{PORT}/")
 
 
 def main():
@@ -42,7 +42,7 @@ def main():
     import main as app_main
     import uvicorn
 
-    print(f"🏥 نظام إدارة المستشفيات — http://127.0.0.1:{PORT}/ui/")
+    print(f"🏥 نظام إدارة المستشفيات — http://127.0.0.1:{PORT}/")
     uvicorn.run(app_main.app, host="127.0.0.1", port=PORT, log_level="warning")
 
 

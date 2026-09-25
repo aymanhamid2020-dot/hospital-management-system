@@ -4,10 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>نظام إدارة المستشفيات — لوحة التحكم</title>
-<link rel="stylesheet" href="/ui/app.css">
-<link rel="manifest" href="/ui/manifest.json">
-<link rel="icon" href="/ui/icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="/ui/icon.svg">
+<link rel="stylesheet" href="/app.css">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon.svg">
 <meta name="theme-color" content="#2c7be5">
 <script>try{var t=localStorage.getItem('hms_theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
 </head>
@@ -19,8 +19,9 @@
     <h1>🏥 نظام إدارة المستشفيات</h1>
     <p>سجّل دخولك للوصول إلى لوحة التحكم</p>
     <div class="err" id="login-err"></div>
-    <div class="field"><label>اسم المستخدم</label><input id="li-user" autocomplete="username" value="admin"></div>
-    <div class="field"><label>كلمة المرور</label><input id="li-pass" type="password" autocomplete="current-password" value="admin123"></div>
+    <div class="field"><label>اسم المستخدم</label><input id="li-user" autocomplete="username" placeholder="اسم المستخدم"></div>
+    <div class="field"><label>كلمة المرور</label><input id="li-pass" type="password" autocomplete="current-password" placeholder="كلمة المرور"></div>
+    <label class="remember"><input type="checkbox" id="li-remember"> تذكرني (افتح لوحة التحكم مباشرة)</label>
     <button class="btn block" onclick="login()">تسجيل الدخول</button>
     <p style="margin-top:16px; font-size:12px;">admin / admin123 — طبيب: drsara / sara12345 — موظف: reception1 / rec12345</p>
     <div class="row2" style="margin-top:12px;display:flex;gap:8px">
@@ -45,17 +46,19 @@
       <a href="#" data-view="clinical">🏥 الرعاية والتشغيل</a>
       <a href="#" data-view="support">🛠️ الصيانة والتعقيم</a>
       <a href="#" data-view="governance">🛡️ الجودة والموارد</a>
-      <a href="/ui/patient-portal.html" target="_blank">👩‍⚕️ بوابة المريض</a>
+      <a href="/patient-portal.html" target="_blank">👩‍⚕️ بوابة المريض</a>
       <a href="#" data-view="attachments">📎 المرفقات</a>
       <a href="#" data-view="departments">🏢 الأقسام</a>
       <a href="#" data-view="beds">🛏️ الأسرّة</a>
-      <a href="#" data-view="invoices">💳 الفواتير</a>
+      <a href="#" data-view="invoices" data-tab="invoices">💳 الفواتير</a>
       <a href="#" data-view="staff">👥 الموظفون</a>
+      <a href="#" data-view="hr">🗂️ شؤون الموظفين</a>
       <a href="#" data-view="users">👤 المستخدمون</a>
-      <a href="#" data-view="sales">🛒 المبيعات</a>
+      <a href="#" data-view="accounting">💰 المحاسبة</a>
+      <a href="#" data-view="sales" data-tab="sales">🛒 المبيعات</a>
 
-      <a href="#" data-view="accounts">🧾 الحسابات</a>
-      <a href="#" data-view="payroll">💵 الرواتب</a>
+      <a href="#" data-view="accounts" data-tab="overview">🧾 الحسابات</a>
+      <a href="#" data-view="payroll" data-tab="payroll">💵 الرواتب</a>
       <a href="#" data-view="backup">💾 النسخ الاحتياطي</a>
       <a href="#" data-view="notifications">🔔 الإشعارات</a>
       <a href="#" data-view="audit">🧾 سجل التدقيق</a>
@@ -102,6 +105,6 @@
   </div>
 </div>
 
-<script src="/ui/app.js"></script>
+<script src="/app.js"></script>
 </body>
 </html>

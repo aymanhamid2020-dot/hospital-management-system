@@ -95,6 +95,6 @@ test.describe('وحدة الأطباء 🩺', () => {
     expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe('light');
     expect(await page.evaluate(() => localStorage.getItem('hms_theme'))).toBe('light');
     await expect(page.locator('#app-view')).toBeVisible();
-    expect(APP).toBe('/ui/');
+    expect(APP).toBe('/');
   });
 });

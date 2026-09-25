@@ -298,6 +298,16 @@ class AppointmentInDB(AppointmentBase):
 
 
 # ===== الموظفون =====
+class StaffDocumentInDB(ORMModel):
+    id: int
+    staff_id: int
+    doc_type: str
+    original_name: str
+    content_type: str
+    size_bytes: int
+    uploaded_at: datetime
+
+
 class StaffBase(BaseModel):
     full_name: str = Field(..., description="اسم الموظف الكامل")
     position: str = Field(..., description="المنصب/الوظيفة")
@@ -305,6 +315,8 @@ class StaffBase(BaseModel):
     email: EmailStr = Field(..., description="البريد الإلكتروني")
     hire_date: datetime = Field(..., description="تاريخ التعيين")
     salary: Optional[float] = Field(None, description="الراتب")
+    # البيانات الموسعة لشؤون الموظفين (يتم دمجها مع ملف JSON الموجود)
+    hr_profile: dict = Field(default_factory=dict, description="ملف الموارد البشرية الكامل")
 
 
 class StaffCreate(StaffBase):
@@ -317,12 +329,14 @@ class StaffUpdate(BaseModel):
     email: Optional[EmailStr] = None
     position: Optional[str] = None
     salary: Optional[float] = None
+    hr_profile: Optional[dict] = None
 
 
 class StaffInDB(StaffBase):
     id: int
     created_at: datetime
     updated_at: datetime
+    documents: List[StaffDocumentInDB] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 

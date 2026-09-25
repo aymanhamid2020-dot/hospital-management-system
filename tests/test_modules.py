@@ -289,7 +289,7 @@ def test_lab_order_result_pdf(client, admin):
 
 def test_lab_ui_markers(client):
     """مؤشرات واجهة المختبر: ورقة النتيجة + فلترة الحالة بالبحث."""
-    ui = client.get("/ui/app.js").text
+    ui = client.get("/app.js").text
     for marker in ("async lab(main)", "function filterLabRows(",
                    "f-lab-status", 'data-status="${o.status}"',
                    "/lab-orders/${o.id}/pdf", "ورقة النتيجة"):

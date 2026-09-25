@@ -11,7 +11,6 @@ class StrictModel(BaseModel):
 
 class ServiceRequestCreate(StrictModel):
     service_type: Literal["care_sets", "dental", "physiotherapy", "emergency", "home_health", "wellness", "nutrition", "housekeeping"]
-    service_type: Literal["care_sets", "dental", "physiotherapy", "emergency", "home_health", "wellness", "nutrition"]
     patient_id: int = Field(gt=0)
     title: str = Field(min_length=2, max_length=160)
     details: Optional[str] = Field(None, max_length=1000)
@@ -186,6 +185,16 @@ class CarePlanExecutionCreate(StrictModel):
     outcome: Literal["completed", "failed"] = "completed"
     notes: Optional[str] = Field(None, max_length=1000)
 
+class CarePlanExecutionOut(StrictModel):
+    """سجل تنفيذ فعلي لبند الرعاية (يُعرض في واجهة «خطط الرعاية»)."""
+    id: int
+    item_id: int
+    executed_at: datetime
+    performed_by: str
+    outcome: str
+    notes: Optional[str] = None
+    model_config = ConfigDict(from_attributes=True)
+
 class CarePlanItemOut(StrictModel):
     id: int
     plan_id: int
@@ -198,6 +207,7 @@ class CarePlanItemOut(StrictModel):
     status: str
     completed_at: Optional[datetime] = None
     cancelled_at: Optional[datetime] = None
+    executions: list[CarePlanExecutionOut] = Field(default_factory=list)
     model_config = ConfigDict(from_attributes=True)
 
 class CarePlanOut(StrictModel):

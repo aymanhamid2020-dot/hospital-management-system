@@ -80,6 +80,10 @@ PENDING_COLUMNS = {
         # تنبيه الوصفات المعلّقة: ربط الإشعار بالوصفة لمنع التكرار
         "prescription_id": "INTEGER",
     },
+    "staff": {
+        # ملف الموارد البشرية يُحفظ JSON نصيًا ليعمل SQLite وPostgreSQL معًا
+        "hr_profile": "TEXT NOT NULL DEFAULT '{}'",
+    },
 }
 
 # إعادة بناء جدول الفواتير مع مفاتيح FK سليمة (ALTER TABLE لا يدعم REFERENCES في SQLite)
@@ -193,6 +197,7 @@ INDEXES = {
     "prescriptions": ["patient_id", "status", "doctor_id"],
     "prescription_items": ["prescription_id", "medication_id"],
     "payroll": ["staff_id", "period"],
+    "staff_documents": ["staff_id", "uploaded_at"],
     "audit_logs": ["created_at", "username"],
     "patients": ["national_id"],
     "service_requests": ["service_type", "patient_id", "status", "created_at"],

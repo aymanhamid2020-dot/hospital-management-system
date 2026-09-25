@@ -2,6 +2,12 @@
 const OP_GROUPS = {
   clinical: [
     ['service-requests','مجموعات الرعاية والوحدات','🧑‍⚕️','service_pending'],
+    ['physiotherapy','العلاج الطبيعي','🦵','service_pending'],
+    ['nutrition','التغذية السريرية','🥗','service_pending'],
+    ['emergency','الطوارئ','🚑','service_pending'],
+    ['home-health','الرعاية الصحية المنزلية','🏠','service_pending'],
+    ['wellness','برامج العافية','🧘','service_pending'],
+    ['housekeeping','النظافة والتدبير المنزلي','🧹','service_pending'],
     ['nursing-tasks','خطة التمريض','🩺','nursing_pending'],
     ['surgeries','مسرح العمليات','🏥','surgeries_active'],
     ['admissions','التنويم الداخلي','🛏️','admitted']],
@@ -23,7 +29,7 @@ const OP_FIELDS = {
   wellness:[['patient_id','المريض','number'],['program_name','اسم البرنامج'],['goal','الهدف'],['baseline_metrics','المؤشرات الأساسية'],['progress_notes','ملاحظات التقدم'],['next_review_at','موعد المراجعة','datetime']],
   housekeeping:[['room_number','رقم الغرفة'],['task_type','نوع المهمة','select',['cleaning','laundry','sanitation','linen','other']],['priority','الأولوية','select',['low','normal','high','critical']],['assigned_to','المسؤول'],['notes','ملاحظات']],
   'nursing-tasks':[['patient_id','المريض','number'],['department_id','القسم','number'],['title','المهمة'],['instructions','التعليمات'],['shift','الوردية','select',['day','evening','night']],['priority','الأولوية','select',['low','normal','high','critical']]],
-  surgeries:[['patient_id','المريض','number'],['surgeon_id','الجراح','number'],['procedure_name','العملية'],['theater','المسرح'],['priority','الأولوية','select',['emergency','urgent','elective']],'scheduled_at','الموعد','datetime'],
+  surgeries:[['patient_id','المريض','number'],['surgeon_id','الجراح','number'],['procedure_name','العملية'],['theater','المسرح'],['priority','الأولوية','select',['emergency','urgent','elective']],['scheduled_at','الموعد','datetime']],
   admissions:[['patient_id','المريض','number'],['bed_id','السرير','number'],['department_id','القسم','number'],['admission_date','وقت الدخول','datetime'],['diagnosis','التشخيص'],['notes','ملاحظات']],
   'blood-bank':[['unit_number','رقم الوحدة'],['donor_name','المتبرع'],['blood_group','فصيلة الدم'],['component','المكون','select',['whole_blood','platelets','plasma','red_cells']],['quantity_ml','الكمية مل','number'],['expiry_date','الصلاحية','datetime']],
   maintenance:[['asset_name','الجهاز'],['serial_number','الرقم التسلسلي'],['location','الموقع'],['issue','العطل'],['priority','الأولوية','select',['low','normal','high','critical']]],
@@ -36,15 +42,25 @@ const OP_STATUS = {
   'service-requests':['in_progress','completed','cancelled'],'nursing-tasks':['in_progress','completed','cancelled'],
   surgeries:['in_progress','completed','cancelled'],admissions:['discharged','transferred'],
   'blood-bank':['reserved','issued','quarantined','discarded'],maintenance:['in_progress','completed','cancelled'],
-  sterilization:['passed','failed'],'safety-events':['investigating','resolved','closed'],assets:['maintenance','retired']
+  sterilization:['passed','failed'],'safety-events':['investigating','resolved','closed'],assets:['maintenance','retired'],
+  physiotherapy:['in_treatment','suspended','completed','cancelled'],nutrition:['active','suspended','completed','cancelled'],
+  emergency:['under_treatment','discharged','closed','cancelled'],'home-health':['active','on_hold','completed','cancelled'],
+  wellness:['active','paused','completed','cancelled'],housekeeping:['in_progress','completed','cancelled']
 };
+// الوحدات التشغيلية تعمل تحت /service-units، وبقية الموارد تحت /clinical.
+const OP_UNIT_PATHS = ['physiotherapy','nutrition','emergency','home-health','wellness','housekeeping'];
+function opUrl(path, id) {
+  return OP_UNIT_PATHS.includes(path)
+    ? `/service-units/${path}${id ? `/${id}/status` : ''}`
+    : `/clinical/${path}${id ? `/status/${id}` : ''}`;
+}
 
 let OP_PATH = '';
 function opLabel(r) {
   return esc(r.title || r.procedure_name || r.issue || r.load_description || r.unit_number || r.asset_name || r.name || `${r.department || ''} ${r.category || ''}`);
 }
 function opStatus(path,id,status) {
-  api(`/clinical/${path}/status/${id}`,{method:'POST',body:JSON.stringify({status})})
+  api(opUrl(path,id),{method:'POST',body:JSON.stringify({status})})
     .then(()=>{toast('تم تحديث الحالة ✅');return navigate(CURRENT_VIEW);})
     .catch(e=>toast(e.message,true));
 }
@@ -60,7 +76,7 @@ function opSubmit() {
     const value = V('op-'+name);
     if (value !== '' && value != null) data[name] = type==='number' ? Number(value) : value;
   });
-  api('/clinical/'+OP_PATH,{method:'POST',body:JSON.stringify(data)})
+  api(opUrl(OP_PATH),{method:'POST',body:JSON.stringify(data)})
     .then(()=>{closeModal();toast('تمت الإضافة ✅');return navigate(CURRENT_VIEW);})
     .catch(e=>toast(e.message,true));
 }
@@ -72,7 +88,7 @@ async function renderOps(main, group) {
       <div class="num">${key ? Number(ov[key] || 0).toLocaleString() : ''}</div><div class="lbl">${icon} ${title}</div>
     </button>`).join('');
   const current = OP_GROUPS[group].find(x => x[0] === OP_PATH) || OP_GROUPS[group][0];
-  const rows = await api('/clinical/'+OP_PATH);
+  const rows = await api(opUrl(OP_PATH));
   main.innerHTML = `<div class="stats">${cards}</div><div class="card">
     <div class="toolbar"><h3 style="margin:0">${current[2]} ${current[1]}</h3>
       ${isAdmin()||isDoctor()?'<button class="btn success" onclick="opForm()">➕ إضافة</button>':''}

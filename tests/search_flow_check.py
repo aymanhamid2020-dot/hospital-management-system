@@ -184,9 +184,9 @@ ok("limit=1 يكبح كل نوع",
             if x["type"] == "patient"]) <= 1)
 
 # =====6) مؤشرات الواجهة =====
-html = c.get("/ui/").text
-js = c.get("/ui/app.js").text
-css = c.get("/ui/app.css").text
+html = c.get("/").text
+js = c.get("/app.js").text
+css = c.get("/app.css").text
 ok("الواجهة: عناصر النافذة",
    'id="gsearch-back"' in html and 'id="gsearch-input"' in html
    and 'id="gsearch-results"' in html)
