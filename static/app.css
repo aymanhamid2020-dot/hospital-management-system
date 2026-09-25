@@ -80,6 +80,72 @@
   .toolbar input, .toolbar select { padding: 9px 12px; border: 1.5px solid #ddd; border-radius: 8px; }
   .toolbar input { flex: 1; min-width: 180px; }
   details.addbox summary { cursor: pointer; color: #2c7be5; font-weight: bold; font-size: 14px; margin-bottom: 12px; user-select: none; }
+
+  /* ===== شريط التبويبات (شاشة المحاسبة) ===== */
+  .tabbar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; border-bottom: 2px solid #e3e8f0; }
+  .tabbar .tab { background: #f4f7fb; border: 1.5px solid #e3e8f0; border-bottom: none;
+    border-radius: 10px 10px 0 0; padding: 9px 15px; font-size: 13.5px; font-weight: 600;
+    color: #4b5b73; cursor: pointer; margin-bottom: -2px; font-family: inherit; }
+  .tabbar .tab:hover { background: #eef4ff; color: #2c7be5; }
+  .tabbar .tab.active { background: #2c7be5; border-color: #2c7be5; color: #fff; }
+  .tabbar .tab:focus-visible { outline: 2px solid #8ab4ff; outline-offset: 1px; }
+
+  /* ===== شؤون الموظفين: دليل جانبي وملف بتبويبات ===== */
+  .hr-shell { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 18px; align-items: start; }
+  .hr-directory { position: sticky; top: 94px; max-height: calc(100vh - 120px); overflow: hidden; padding: 16px; }
+  .hr-directory .toolbar { margin-bottom: 10px; }
+  #hr-list { max-height: calc(100vh - 205px); overflow-y: auto; }
+  .hr-person { width: 100%; display: grid; grid-template-columns: 40px 1fr auto; gap: 9px; align-items: center;
+    text-align: start; border: 1px solid transparent; background: #f7f9fc; border-radius: 10px; padding: 10px; margin: 5px 0; color: #334155; }
+  .hr-person:hover, .hr-person.active { background: #eef4ff; border-color: #7db0f5; color: #174f98; }
+  .hr-person .avatar { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%;
+    background: #2c7be5; color: white; font-weight: bold; }
+  .hr-person b, .hr-person small { display: block; }
+  .hr-person small, .hr-person i { font-size: 11px; color: #6b7280; }
+  .hr-person i { font-style: normal; }
+  .hr-card { min-width: 0; }
+  .hr-profile-head { display: flex; justify-content: space-between; gap: 14px; align-items: center; margin-bottom: 18px; }
+  .hr-profile-head h3 { margin: 0 0 5px; font-size: 20px; }
+  .hr-profile-head p { color: #777; font-size: 13px; }
+  .hr-card .tabbar { position: sticky; top: 70px; z-index: 3; background: #fff; padding-top: 8px; }
+  .section-title { color: #2c7be5; font-size: 14px; font-weight: bold; margin: 22px 0 12px;
+    padding-inline-start: 10px; border-inline-start: 4px solid #2c7be5; }
+  .section-title:first-child { margin-top: 0; }
+  .hr-upload { display: flex; gap: 9px; flex-wrap: wrap; padding: 14px; border: 1px dashed #a9c7ed; border-radius: 10px; background: #f8fbff; }
+  .hr-upload select, .hr-upload input { padding: 9px; border: 1.5px solid #d6e1ef; border-radius: 8px; }
+  .hr-upload input { flex: 1; min-width: 190px; }
+  .hr-docs { margin-top: 12px; display: grid; gap: 8px; }
+  .hr-doc { display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px; align-items: center;
+    padding: 9px 11px; border: 1px solid #e1e8f1; border-radius: 8px; font-size: 13px; }
+  .hr-doc small, .muted { color: #7a8699; }
+  @media (max-width: 850px) {
+    .hr-shell { grid-template-columns: 1fr; }
+    .hr-directory { position: static; max-height: none; }
+    #hr-list { max-height: 300px; }
+    .hr-profile-head, .hr-doc { grid-template-columns: 1fr; display: grid; }
+  }
+
+  /* ===== شؤون الموظفين: ملف موظف شامل ===== */
+  .hr-shell { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 18px; align-items: start; }
+  .hr-directory { position: sticky; top: 92px; max-height: calc(100vh - 115px); overflow: auto; }
+  .hr-person { width: 100%; display: grid; grid-template-columns: 38px 1fr auto; gap: 10px; align-items: center;
+    border: 1px solid #e3e8f0; background: #fff; border-radius: 10px; padding: 10px; margin-top: 8px; text-align: start; color: #334155; }
+  .hr-person:hover, .hr-person.active { border-color: #2c7be5; background: #f2f7ff; }
+  .hr-person .avatar { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 50%;
+    color: #fff; background: linear-gradient(135deg,#2c7be5,#667eea); font-weight: bold; }
+  .hr-person b, .hr-person small { display: block; } .hr-person small, .hr-person i { color: #6b7280; font-size: 11px; font-style: normal; }
+  .hr-card { min-width: 0; }
+  .hr-profile-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 15px; }
+  .hr-profile-head h3 { margin-bottom: 4px; } .hr-profile-head p { color: #64748b; font-size: 13px; }
+  .hr-card .tabbar { position: sticky; top: 70px; z-index: 3; background: #fff; }
+  .section-title { color: #1769aa; font-size: 14px; font-weight: bold; margin: 20px 0 12px; padding-inline-start: 9px; border-inline-start: 4px solid #2c7be5; }
+  .hr-upload { display: flex; gap: 9px; flex-wrap: wrap; align-items: center; }
+  .hr-upload select, .hr-upload input { padding: 9px; border: 1px solid #dbe2ea; border-radius: 8px; }
+  .hr-doc { display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px; align-items: center; padding: 9px 0; border-bottom: 1px dashed #dbe2ea; }
+  .hr-doc small, .muted { color: #7b8794; }
+  .pill.active { background: #d4edda; color: #155724; }
+  @media (max-width: 850px) { .hr-shell { grid-template-columns: 1fr; } .hr-directory { position: static; max-height: 280px; } .hr-doc { grid-template-columns: 1fr auto; } }
+
   .toast { position: fixed; bottom: 24px; inset-inline-end: 24px; background: #1e2a3a; color: #fff; padding: 13px 20px;
     border-radius: 10px; font-size: 14px; z-index: 99; opacity: 0; transition: .3s; pointer-events: none; }
   .toast.show { opacity: 1; }

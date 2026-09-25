@@ -1,5 +1,6 @@
 # تدفق حي كامل لتطوير الصيدلية: رفض المنتهي → سلة الصرف الجماعية → الإرجاع
 # → الإتلاف → الإحصاءات/اقتراحات الطلب → الوصفات → التقارير الجديدة → الواجهة
+import re
 import time
 
 import httpx
@@ -392,7 +393,7 @@ if mlow:
     ok("الصنف المنخفض ضمن CSV الطلب", mlow["code"] in csv_text)
 
 # ===== 11) مؤشرات الواجهة =====
-ui = c.get("/ui/").text + c.get("/ui/app.js").text
+ui = c.get("/").text + c.get("/app.js").text
 ok("رابط القائمة pharmacy", 'data-view="pharmacy"' in ui)
 ok("عرض الصيدلية في الواجهة", "async pharmacy(main)" in ui)
 ok("السلة: basket-rows", "basket-rows" in ui)
@@ -421,7 +422,10 @@ ok("زر طباعة الوصفة", "/prescriptions/${r.id}/pdf" in ui)
 ok("فلتر حالة الوصفات", "f-rx-status" in ui
    and "function filterRxRows(" in ui)
 ok("زر اقتراحات الطلب CSV", "section=reorder" in ui)
-ok("الكاش v6 كما هو", "hms-shell-v6" in c.get("/ui/sw.js").text)
+_sw = c.get("/sw.js").text
+_m = re.search(r"const CACHE = '(hms-shell-v[^']*)'", _sw)
+ok("اسم الكاش hms-shell-v* (يتحدّث مع كل قشرة)", bool(_m),
+   _m.group(1) if _m else "غير معروف")
 
 # ===== 12) ملصقات الباركود + ورقة نتيجة المختبر + تنبيه المعلّقة =====
 r = c.get("/inventory/labels")

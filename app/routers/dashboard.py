@@ -17,8 +17,8 @@ router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
 
 @router.get("/stats", response_model=DashboardStats, summary="إحصائيات لوحة التحكم")
-async def get_stats(db = Depends(get_db), _ = Depends(get_current_user)):
-    """إحصائيات شاملة للنظام"""
+def get_stats(db = Depends(get_db), _ = Depends(get_current_user)):
+    """إحصائيات شاملة للنظام — متزامنة لتُنفَّذ في threadpool فلا تؤخّر حلقة الأحداث"""
     total_patients = db.query(func.count(Patient.id)).scalar() or 0
     total_doctors = db.query(func.count(Doctor.id)).scalar() or 0
     total_appointments = db.query(func.count(Appointment.id)).scalar() or 0
@@ -165,7 +165,7 @@ def _doctor_stats(db: Session, doctor: Doctor) -> DashboardStats:
 
 
 @router.get("/report/pdf", summary="تقرير إحصائي PDF")
-async def download_stats_report(
+def download_stats_report(
     month: Optional[str] = Query(None, description="الشهر YYYY-MM (اختياري — افتراضي: الفترة الحالية"),
     lang: str = Query("ar", description="لغة التقرير: ar أو en"),
     db = Depends(get_db),
@@ -191,7 +191,7 @@ async def download_stats_report(
 
     role = get_user_role(current_user)
     if role == "admin":
-        stats = await get_stats(db=db, _=None)
+        stats = get_stats(db=db, _=None)
         label = month_label
     elif role == "doctor":
         doctor = db.query(Doctor).filter(Doctor.email == current_user.email).first()

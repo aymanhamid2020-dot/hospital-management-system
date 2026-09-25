@@ -11,13 +11,13 @@ router = APIRouter(prefix="/patients", tags=["Patients"])
 
 
 @router.get("/", response_model=List[PatientInDB], summary="عرض قائمة المرضى")
-async def list_patients(
+def list_patients(
     search: Optional[str] = Query(None, description="بحث بالاسم أو رقم الهاتف"),
     blood_type: Optional[str] = Query(None, description="فلترة حسب مجموعة الدم"),
     db = Depends(get_db),
     _ = Depends(get_current_user),
 ):
-    """جلب المرضى مع إمكانية البحث والفلترة"""
+    """جلب المرضى مع إمكانية البحث والفلترة — متزامن (threadpool) لأجل استجابة أسرع"""
     q = db.query(Patient)
     if search:
         q = q.filter(

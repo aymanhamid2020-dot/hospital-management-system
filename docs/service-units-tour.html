@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🎓 جولة تفاعلية — الوحدات التشغيلية وخطط الرعاية | نظام إدارة المستشفيات</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", Tahoma, Arial, sans-serif; background: #f4f6fa; color: #1e293b; line-height: 1.85; }
+  header.hero { background: linear-gradient(135deg, #0f766e, #2c7be5); color: #fff; padding: 42px 20px 34px; text-align: center; }
+  header.hero h1 { font-size: 30px; margin-bottom: 8px; }
+  header.hero p { opacity: .93; font-size: 16px; max-width: 880px; margin: 0 auto; }
+  header.hero .badges { margin-top: 14px; }
+  header.hero .badges .badge { background: rgba(255,255,255,.2); color: #fff; }
+  nav.toc { background: #fff; border-bottom: 1px solid #e2e8f0; padding: 12px 16px; text-align: center; position: sticky; top: 0; z-index: 50; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+  nav.toc a { display: inline-block; margin: 4px 7px; padding: 6px 14px; border-radius: 20px; background: #eef4ff; color: #2c7be5; text-decoration: none; font-size: 14px; font-weight: 600; }
+  nav.toc a:hover { background: #2c7be5; color: #fff; }
+  nav.toc a.on { background: #0f766e; color: #fff; }
+  main { max-width: 1100px; margin: 30px auto 0; padding: 0 18px 50px; }
+  section.step { background: #fff; border-radius: 14px; box-shadow: 0 4px 16px rgba(0,0,0,.06); padding: 28px 30px; margin-bottom: 34px; scroll-margin-top: 74px; }
+  h2 { font-size: 23px; margin-bottom: 12px; color: #0f172a; }
+  h2 .n { display: inline-block; background: #0f766e; color: #fff; width: 40px; height: 40px; border-radius: 50%; text-align: center; line-height: 40px; font-size: 18px; margin-left: 10px; vertical-align: middle; }
+  h3 { font-size: 17px; margin: 18px 0 8px; color: #0f766e; }
+  p, li { margin-bottom: 9px; font-size: 16px; }
+  ul, ol { padding-right: 24px; margin-bottom: 8px; }
+  img.shot { width: 100%; border: 1px solid #dbe3f0; border-radius: 10px; margin-top: 14px; box-shadow: 0 8px 22px rgba(0,0,0,.12); display: block; }
+  .cap { text-align: center; color: #64748b; font-size: 14px; margin-top: 8px; }
+  .badge { display: inline-block; padding: 2px 11px; border-radius: 13px; font-size: 13px; font-weight: 600; margin: 0 3px 6px 0; }
+  .b-ui   { background: #fef9c3; color: #a16207; }
+  .b-api  { background: #dcfce7; color: #15803d; }
+  .b-task { background: #e0f2fe; color: #0369a1; }
+  .b-new  { background: #fee2e2; color: #b91c1c; }
+  code { background: #f1f5f9; padding: 2px 7px; border-radius: 6px; font-size: 14px; direction: ltr; display: inline-block; unicode-bidi: embed; }
+  .note { background: #fff7ed; border-right: 4px solid #f97316; padding: 12px 16px; border-radius: 8px; margin-top: 14px; font-size: 15px; }
+  .tip  { background: #f0fdf4; border-right: 4px solid #22c55e; padding: 12px 16px; border-radius: 8px; margin-top: 14px; font-size: 15px; }
+  table.roles { width: 100%; border-collapse: collapse; margin: 10px 0 4px; }
+  table.roles th, table.roles td { border: 1px solid #e2e8f0; padding: 8px 12px; text-align: right; font-size: 15px; }
+  table.roles th { background: #f8fafc; font-weight: 700; }
+  table.roles tr:nth-child(even) td { background: #fafcff; }
+  .flow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
+  .flow span { background: #eef4ff; border: 1px solid #dbe3f0; color: #1d4ed8; border-radius: 16px; padding: 3px 12px; font-size: 14px; font-weight: 600; }
+  .flow i { color: #94a3b8; font-style: normal; }
+  /* متصفّح الجولة السفلي: سابق/تالي + تلقائي */
+  .pager { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; align-items: center; background: #0f172a; color: #fff; border-radius: 999px; padding: 7px 10px; box-shadow: 0 8px 24px rgba(0,0,0,.28); z-index: 60; font-size: 14px; }
+  .pager button { border: 0; background: #1e293b; color: #fff; border-radius: 999px; padding: 6px 14px; font-size: 14px; font-weight: 700; cursor: pointer; font-family: inherit; }
+  .pager button:hover { background: #2c7be5; }
+  .pager button.play.on { background: #0f766e; }
+  .pager .pos { min-width: 52px; text-align: center; direction: ltr; color: #cbd5e1; }
+  footer { text-align: center; padding: 30px 16px 74px; color: #64748b; font-size: 14px; }
+  footer a { color: #2c7be5; text-decoration: none; font-weight: 600; margin: 0 8px; }
+  @media (max-width: 700px) { section.step { padding: 18px 16px; } header.hero h1 { font-size: 23px; } .pager { font-size: 13px; } }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <h1>🎓 جولة تفاعلية: الوحدات التشغيلية وخطط الرعاية</h1>
+  <p>من طلب الخدمة الموحد إلى تنفيذ بند الرعاية — لقطات حيّة من البيئة التجريبية، مع جداول API
+     ومسارات الحالة لكل وحدة. استعمل المتصفّح أسفل الشاشة (أو <b>الأسهم ←→</b>) للتنقل بين الخطوات.</p>
+  <div class="badges"><span class="badge b-new">جديد</span><span class="badge b-ui">واجهة</span><span class="badge b-api">API</span></div>
+</header>
+
+<nav class="toc" id="toc">
+  <a href="#s1">1️⃣ البداية</a>
+  <a href="#s2">2️⃣ طلبات الخدمة</a>
+  <a href="#s3">3️⃣ خطط الرعاية</a>
+  <a href="#s4">4️⃣ الوحدات الست</a>
+  <a href="#s5">5️⃣ طب الأسنان 🦷</a>
+  <a href="#s6">6️⃣ المحاسبة 💰</a>
+  <a href="#s7">7️⃣ جداول API</a>
+  <a href="#s8">8️⃣ الاختبارات</a>
+</nav>
+
+<main>
+
+  <!-- ============ 1 ============ -->
+  <section class="step" id="s1">
+    <h2><span class="n">1</span> البداية: الوصول إلى الشاشة 🚀</h2>
+    <span class="badge b-ui">الرعاية والتشغيل</span>
+    <p>سجّل الدخول على <code>/</code> (الواجهة صارت على جذر الخادم مباشرة — بلا بادئة <code>/ui</code>)
+       ثم افتح <b>«الرعاية والتشغيل»</b> من الشريط الجانبي. أول ما يظهر:</p>
+    <ul>
+      <li>🔢 <b>عدّادات حيّة</b> أعلى الشاشة من <code>GET /clinical/overview</code>:
+          طلبات معلّقة، خطط رعاية نشطة، مهام تمريض، عمليات مجدولة، تنويمات، بنوك دم، صيانة، تعقيم…
+          (انقر أي بطاقة للانتقال إلى محاورها مباشرة).</li>
+      <li>🧭 <b>أحد عشر محورًا</b>: مجموعات الرعاية، خطط الرعاية، العلاج الطبيعي، التغذية، الطوارئ،
+          الرعاية المنزلية، العافية، النظافة، التمريض، المسرح، التنويم — ومحور «طلبات الخدمة» هو الافتراضي.</li>
+      <li>➕ <b>زر إضافة</b> على كل محور (للمدير/الطبيب) يفتح نموذجًا مبنيًا على حقول المحور نفسه،
+          وبعده أزرار <b>تعديل</b> و<b>حالة</b> على كل صف.</li>
+    </ul>
+    <div class="tip">💡 التبويبات لا تُعيد بناء الشاشة: النقر بين المحاور يبدّل الجدول فقط، فيبقى مكانك وعدّادك مرئيين.</div>
+  </section>
+
+  <!-- ============ 2 ============ -->
+  <section class="step" id="s2">
+    <h2><span class="n">2</span> طلبات الخدمة الموحدة 🧑‍⚕️</h2>
+    <span class="badge b-api">GET/POST /clinical/service-requests</span><span class="badge b-ui">واجهة</span>
+    <p>نقطة واحدة تجمع كل طلبات الرعاية عبر أنواعها الثمانية، فتُقرأ من بطاقة واحدة بدل تشتّت الشاشات:</p>
+    <div class="flow">
+      <span>care_sets</span><i>·</i><span>dental</span><i>·</i><span>physiotherapy</span><i>·</i>
+      <span>emergency</span><i>·</i><span>home_health</span><i>·</i><span>wellness</span><i>·</i>
+      <span>nutrition</span><i>·</i><span>housekeeping</span>
+    </div>
+    <p>حالة الطلب تتحرّك على مسار واحد فقط:</p>
+    <div class="flow"><span>pending</span><i>→</i><span>in_progress</span><i>→</i><span>completed</span><i>أو</i><span>cancelled</span></div>
+    <ul>
+      <li>الحقول: المريض، النوع، العنوان، التفاصيل، الأولوية، موعد التنفيذ، المسؤول، النتيجة.</li>
+      <li>حالة تلقائية عند الإكمال: <code>completed_at</code> تُملأ تلقائيًا فيُصحّ التقرير الزمني.</li>
+      <li>الحالة السابقة غير المتاحة ⇒ <b>422</b> مع ذكر المسموح في الرسالة.</li>
+    </ul>
+    <img class="shot" src="screenshots/service-units/01-service-requests.png" alt="محور طلبات الخدمة داخل الرعاية والتشغيل">
+    <div class="cap">«الرعاية والتشغيل» ← مجموعات الرعاية والوحدات — طلبات مزروعة بكل الأنواع والحالات</div>
+    <div class="note">🔎 في اللقطة: الطلبات الستة المعلّقة تظهر في عدّاد البطاقة، وتبعتها خطة رعاية قلبية
+      (نوع <code>care_sets</code>) قيد التنفيذ وزيارة منزلية مؤجَّلة — كلها قابلة للتنفيذ من الواجهة نفسها.</div>
+  </section>
+
+  <!-- ============ 3 ============ -->
+  <section class="step" id="s3">
+    <h2><span class="n">3</span> خطط الرعاية والتقييم 🗺️</h2>
+    <span class="badge b-api">GET/POST /clinical/care-plans</span><span class="badge b-ui">واجهة</span><span class="badge b-new">جديد</span>
+    <p>خطة رعاية = <b>عنوان + أهداف + بنود</b>، وكل بند يُنفَّذ ويُوثّق بسجل تنفيذ مستقل
+       (التنفيذ لا يُلغى بعد إتمامه — قاعدة تفرّد على <code>(item_id, executed_at)</code>).</p>
+    <h3>من الشاشة:</h3>
+    <ul>
+      <li>بطاقة لكل خطة (وفق إجراءها، ومفتوحة تلقائيًا إن كانت واحدة) + شريط <b>نسبة الإنجاز %</b>.</li>
+      <li>جدول البنود: الفئة، المسؤول، التعليمات، الحالة، آخر إجراء، و<b>عدد التنفيذات</b>.</li>
+      <li>أزرار: <b>«تسجيل تنفيذ»</b> لكل بند مفتوح · <b>«إكمال الخطة»</b> (يرفض إن بقي بند غير منفَّذ)
+          · <b>«إلغاء الخطة»</b> (يُلغي بنودها المفتوحة).</li>
+      <li>حقل بحث فوري فوق البطاقات <code>filterCarePlans()</code>.</li>
+    </ul>
+    <h3>مسارات الحالة:</h3>
+    <div class="flow"><span>active</span><i>→</i><span>completed</span><i>أو</i><span>cancelled</span></div>
+    <div class="flow"><span>البند: pending</span><i>→</i><span>completed / failed</span><i>أو</i><span>cancelled</span></div>
+    <img class="shot" src="screenshots/service-units/02-care-plans.png" alt="شاشة خطط الرعاية">
+    <div class="cap">خطط الرعاية — ثلاث خطة (نشطتان + مكتملة) وبنودها مع أزرار التنفيذ</div>
+    <div class="tip">💡 النسبة تُحسب في الخادم: <code>completion_percentage = منجز × 100 ÷ البنود</code>
+      (صفر عند لا بنود) — فالبطاقة تعكس الحقيقة حتى لو فُتحت من متصفّح آخر.</div>
+  </section>
+
+  <!-- ============ 4 ============ -->
+  <section class="step" id="s4">
+    <h2><span class="n">4</span> الوحدات التشغيلية الست 🦵🥗🚑🏠🧘🧹</h2>
+    <span class="badge b-api">/service-units/*</span><span class="badge b-ui">واجهة</span>
+    <p>كل وحدة جدول مستقل بمسار حالات خاص بها (التغيير عبر <code>POST /…/status</code> فقط —
+       الحقول الأخرى تُحدَّث بـ <code>PUT</code>):</p>
+    <table class="roles">
+      <tr><th>الوحدة</th><th>المسار</th><th>مسار الحالات</th></tr>
+      <tr><td>🦵 العلاج الطبيعي</td><td><code>/service-units/physiotherapy</code></td><td>assessed → in_treatment → completed / cancelled</td></tr>
+      <tr><td>🥗 التغذية السريرية</td><td><code>/service-units/nutrition</code></td><td>assessed → active → completed / suspended</td></tr>
+      <tr><td>🚑 الطوارئ</td><td><code>/service-units/emergency</code></td><td>arrived → triaged → under_treatment → discharged / closed</td></tr>
+      <tr><td>🏠 الرعاية المنزلية</td><td><code>/service-units/home-health</code></td><td>referred → scheduled → active → completed / cancelled</td></tr>
+      <tr><td>🧘 برامج العافية</td><td><code>/service-units/wellness</code></td><td>planned → active → paused → completed / cancelled</td></tr>
+      <tr><td>🧹 النظافة والتدبير</td><td><code>/service-units/housekeeping</code></td><td>pending → in_progress → completed / cancelled</td></tr>
+    </table>
+    <ul>
+      <li><b>الطوارئ</b> تضيف <b>الفرز</b> (triage): <code>resuscitation · emergent · urgent · less_urgent · non_urgent · standard</code>
+          مع وقت الوصول والوجهة.</li>
+      <li><b>النظافة</b> لا تحتاج مريضًا: رقم الغرفة + نوع المهمة + الأولوية
+          (<code>low · normal · high · critical</code>) والمسؤول.</li>
+      <li>أي حالة خارج المسار ⇒ <b>422</b> تسرد المسموح بها بالضبط.</li>
+    </ul>
+    <img class="shot" src="screenshots/service-units/03-physiotherapy.png" alt="وحدة العلاج الطبيعي">
+    <div class="cap">وحدة العلاج الطبيعي — الحالة، التقييم، والخطة العلاجية لكل مريض</div>
+    <img class="shot" src="screenshots/service-units/04-housekeeping.png" alt="وحدة النظافة والتدبير المنزلي">
+    <div class="cap">وحدة النظافة — أبعاد المريض غير مطلوبة: الغرفة والمهمة والأولوية فقط</div>
+    <img class="shot" src="screenshots/service-units/05-emergency.png" alt="وحدة الطوارئ">
+    <div class="cap">وحدة الطوارئ — مستوى الفرز ووقت الوصول والوجهة على كل حالة</div>
+    <div class="note">🔎 كل الوحدات الست مزروعة الآن عبر <code>seed_demo.py</code> (وظيفة
+      <code>seed_units()</code>) — آمنة التكرار: تتخطّى الجداول المملوءة فلا يُضاعف البذر
+      عند إعادة التشغيل.</div>
+  </section>
+
+  <!-- ============ 5 ============ -->
+  <section class="step" id="s5">
+    <h2><span class="n">5</span> طب الأسنان 🦷</h2>
+    <span class="badge b-api">/dental/*</span><span class="badge b-task">مخطط + خطة + إجراءات</span>
+    <p>ثلاث طبقات مترابطة:</p>
+    <ol>
+      <li><b>مخطط الأسنان</b> <code>/dental/charts</code> — حساسية ومريض مزمن وآخر فحص وملاحظات (لكل مريض سجل واحد يُحدَّث بالـ PUT).</li>
+      <li><b>خطة العلاج</b> <code>/dental/plans</code> — الشكوى الرئيسية + التشخيص + الطبيب + الحالة
+          (<code>active → completed / cancelled</code>).</li>
+      <li><b>الإجراءات</b> <code>POST /dental/plans/{id}/procedures</code> — رقم السنّ، نوع الإجراء
+          (<code>root_canal · crown · filling · extraction …</code>)، حالة
+          (<code>planned → performed</code>)، المادة والتكلفة.</li>
+    </ol>
+    <ul>
+      <li>التفرّد يمنع تكرار الجلسة نفسها: <code>(plan_id, tooth_number, procedure_type, performed_at)</code> ⇒ <b>409</b> عند المحاولة مرتين.</li>
+      <li>يُزرع مع البذر: مخطط أسنان + خطة علاج بأربعة إجراءات (حشوة، علاج عصب، تاج، خلع) —
+          فتظهر في <code>/dental/plans</code> من أول تشغيل.</li>
+      <li>النوع <code>dental</code> متاح أيضًا كنوع طلب خدمة داخل «طلبات الخدمة» — لربط المخطط بمسار الرعاية الموحد.</li>
+    </ul>
+  </section>
+
+  <!-- ============ 6 ============ -->
+  <section class="step" id="s6">
+    <h2><span class="n">6</span> شاشة المحاسبة: سبعة تبويبات 💰</h2>
+    <span class="badge b-new">جديد</span><span class="badge b-ui">واجهة</span>
+    <p>قُسِّمت شاشة المحاسبة الكبيرة إلى <b>سبعة تبويبات</b>، كل تبويب يجمع كل ما يرتبط به:</p>
+    <table class="roles">
+      <tr><th>التبويب</th><th>محتواه</th></tr>
+      <tr><td>📊 نظرة عامة</td><td>الملخّص المالي الستّي + منحنى الإيراد (يومي/شهري) + توزيع طرق الدفع + أقسام مرتبطة</td></tr>
+      <tr><td>🛒 المبيعات</td><td>فلاتر (فترة/طريقة/حالة/مريض/موظف) + سجل العمليات + التسديد والسدّاد الكل</td></tr>
+      <tr><td>🧾 المدينون</td><td>كشف حساب المريض (طباعة/PDF) + ذمم المرضى بجدول وإجماليات</td></tr>
+      <tr><td>🧾 الفواتير</td><td>قائمة الفواتير وحالاتها ودفعاتها</td></tr>
+      <tr><td>📒 الدفتر العام</td><td>القيود ودليل الحسابات وميزان المراجعة وترحيل العمليات</td></tr>
+      <tr><td>📄 التقارير</td><td>مبيعات PDF/CSV · كشف حساب مريض · الإحصائي · الرواتب · المختبر والصيدلية</td></tr>
+      <tr><td>💵 الرواتب</td><td>كشف الرواتب وإضافة قيد راتب</td></tr>
+    </table>
+    <ul>
+      <li>اختصارات القائمة (المبيعات/الحسابات/الرواتب/الفواتير) تفتح الشاشة على تبويبها مباشرة،
+          ورابط <b>«المحاسبة»</b> يبدأ من «نظرة عامة».</li>
+      <li>التبديل بين التبويبات لا يعيد بناء الشاشة، والمحتوى يُرسم في حاوية معزولة ثم يُنقل —
+          فلا يكتب تبويب متأخّر محتواه فوق الأحدث.</li>
+      <li>التمرير بين التبويبات لا يفقد الفلاتر: حالة الفلاتر محفوظة في <code>ACC</code>.</li>
+    </ul>
+    <img class="shot" src="screenshots/service-units/06-accounting-tabs.png" alt="شاشة المحاسبة بتبويباتها">
+    <div class="cap">المحاسبة ← «نظرة عامة»: ست بطاقات مالية + المنحنى + طرق الدفع + أقسام مرتبطة</div>
+  </section>
+
+  <!-- ============ 7 ============ -->
+  <section class="step" id="s7">
+    <h2><span class="n">7</span> جداول API في سطور 🔌</h2>
+    <table class="roles">
+      <tr><th>المسار</th><th>الوظيفة</th><th>الصلاحية</th></tr>
+      <tr><td><code>GET /clinical/overview</code></td><td>عدّادات المحاور العشرة</td><td>مسجّل الدخول</td></tr>
+      <tr><td><code>GET|POST /clinical/service-requests</code></td><td>قائمة/إنشاء طلب خدمة موحّد</td><td>الإنشاء: مدير/طبيب</td></tr>
+      <tr><td><code>POST /clinical/service-requests/status/{id}</code></td><td>تبديل حالة الطلب</td><td>مدير/طبيب · 422 للحالة الخاطئة</td></tr>
+      <tr><td><code>GET|POST /clinical/care-plans</code></td><td>خطط الرعاية وبنودها</td><td>الإنشاء: مدير/طبيب</td></tr>
+      <tr><td><code>POST /clinical/care-plan-items/{id}/execute</code></td><td>تسجيل تنفيذ بند</td><td>خطة نشطة فقط · تكرار ⇒ 409</td></tr>
+      <tr><td><code>POST /clinical/care-plans/{id}/complete|cancel</code></td><td>إكمال/إلغاء خطة</td><td>بنود مفتوحة تمنع الإكمال</td></tr>
+      <tr><td><code>GET|POST /service-units/&lt;وحدة&gt;</code></td><td>الوحدات الست</td><td>الحالة عبر <code>…/status</code></td></tr>
+      <tr><td><code>GET /dental/charts · /dental/plans</code></td><td>مخطط وخطط الأسنان</td><td>مسجّل الدخول</td></tr>
+      <tr><td><code>POST /dental/plans/{id}/procedures</code></td><td>إضافة إجراء سنّ</td><td>مدير/طبيب · تفرّد الجلسة 409</td></tr>
+    </table>
+    <div class="tip">💡 كل المسارات محمية بـ <code>Authorization: Bearer …</code> (بلا توكن ⇒ <b>401</b>)
+      · التوثيق الحيّ على <code>/api/docs</code> · جرّبها من هناك قبل كتابة أي كود.</div>
+  </section>
+
+  <!-- ============ 8 ============ -->
+  <section class="step" id="s8">
+    <h2><span class="n">8</span> كيف تتحقق بنفسك 🎓</h2>
+    <ul>
+      <li>🧪 <code>pytest</code> — وحدات وتكامل (بما فيها <code>test_advanced_modules.py</code> لخطط الرعاية والوحدات).</li>
+      <li>🔍 <code>python tests/stack_check.py</code> — الفحص الموحد الحيّ (مؤشرات الواجهة + المسارات).</li>
+      <li>🌐 <code>npx playwright test</code> — E2E ثلاثية المتصفحات (يتضمّن
+          <code>accounting.spec.ts</code>: خمسة اختبارات لتبويبات المحاسبة).</li>
+      <li>📸 <code>node scripts/capture-service-units-shots.js</code> — إعادة التقاط لقطات هذه الجولة.</li>
+    </ul>
+    <p>هذه الجولة نفسها مصدرها في المستودع:
+      <code>docs/service-units-tour.html</code> — عدّلها مع أي تغيير في هذه الشاشات.</p>
+  </section>
+
+</main>
+
+<div class="pager" id="pager">
+  <button type="button" id="pPrev">▸ السابق</button>
+  <span class="pos" id="pPos">1/8</span>
+  <button type="button" id="pNext">التالي ◂</button>
+  <button type="button" class="play" id="pPlay" title="تشغيل/إيقاف الجولة التلقائية">▶ تلقائي</button>
+</div>
+
+<footer>
+  نظام إدارة المستشفيات والعيادات — FastAPI · SQLite/Postgres · Docker · PWA<br>
+  <a href="user-guide.html">📘 دليل المستخدم</a>
+  <a href="pharmacy-tour.html">💊 جولة الصيدلية</a>
+  <a href="doctors-tour.html">🩺 جولة الأطباء</a>
+  <a href="https://github.com/aymanhamid2020-dot/hospital-management-system">🐙 GitHub</a>
+  <a href="../">🏠 التطبيق</a>
+</footer>
+
+<script>
+  /* تتبّع القسم الظاهر + تمييله في الفهرس العلوي */
+  const sections = [...document.querySelectorAll('main section.step[id]')];
+  const links = [...document.querySelectorAll('#toc a')];
+  const pos = document.getElementById('pPos');
+  let current = 0;
+
+  function setCurrent(i) {
+    current = Math.max(0, Math.min(sections.length - 1, i));
+    pos.textContent = `${current + 1}/${sections.length}`;
+    const id = sections[current].id;
+    links.forEach(a => a.classList.toggle('on', a.getAttribute('href') === '#' + id));
+  }
+
+  const io = new IntersectionObserver(entries => {
+    const seen = entries.filter(e => e.isIntersecting)
+      .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+    if (seen) setCurrent(sections.indexOf(seen.target));
+  }, { rootMargin: '-70px 0px -55% 0px', threshold: 0 });
+  sections.forEach(s => io.observe(s));
+
+  const go = i => sections[i].scrollIntoView({ behavior: 'smooth', block: 'start' });
+  document.getElementById('pPrev').onclick = () => { stop(); go(current - 1); };
+  document.getElementById('pNext').onclick = () => { stop(); go(current + 1); };
+
+  /* الجولة التلقائية: خطوة كل 9 ثوانٍ حتى أول نقر */
+  let timer = null;
+  const play = document.getElementById('pPlay');
+  function stop() { if (timer) { clearInterval(timer); timer = null; play.classList.remove('on'); play.textContent = '▶ تلقائي'; } }
+  play.onclick = () => {
+    if (timer) return stop();
+    play.classList.add('on');
+    play.textContent = '⏸ إيقاف';
+    timer = setInterval(() => {
+      if (current >= sections.length - 1) return stop();
+      go(current + 1);
+    }, 9000);
+  };
+
+  /* أسهم لوحة المفاتيح */
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowLeft') { stop(); go(current + 1); }   /* RTL: اليسار = التالي */
+    if (e.key === 'ArrowRight') { stop(); go(current - 1); }
+  });
+
+  setCurrent(0);
+</script>
+
+</body>
+</html>

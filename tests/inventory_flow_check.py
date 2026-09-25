@@ -1,4 +1,5 @@
 # تدفق حي كامل لقسم المخزون: ملخص → أصناف وحالات → توريد → جرد → حركات → تقارير
+import re
 import time
 
 import httpx
@@ -174,7 +175,7 @@ ok("PDF مخزون %PDF", pdf.status_code == 200 and pdf.content[:4] == b"%PDF",
    str(pdf.status_code))
 
 # ===== 10) مؤشرات الواجهة =====
-ui = c.get("/ui/").text + c.get("/ui/app.js").text
+ui = c.get("/").text + c.get("/app.js").text
 ok("رابط القائمة inventory", 'data-view="inventory"' in ui)
 ok("عرض inventory في الواجهة", "async inventory(main)" in ui)
 ok("عنوان الشاشة المخزون", "inventory: 'المخزون'" in ui)
@@ -182,7 +183,10 @@ ok("بطاقات الملخص في العرض", "/inventory/summary" in ui)
 ok("دفتر الحركات في العرض", "/inventory/movements" in ui)
 ok("زر الجرد موجود", "function adjustStock(" in ui)
 ok("التوريد عبر /inventory", "'/inventory/' + id + '/restock'" in ui)
-ok("الكاش v6", "hms-shell-v6" in c.get("/ui/sw.js").text)
+_sw = c.get("/sw.js").text
+_m = re.search(r"const CACHE = '(hms-shell-v[^']*)'", _sw)
+ok("اسم الكاش hms-shell-v* (يتحدّث مع كل قشرة)", bool(_m),
+   _m.group(1) if _m else "غير معروف")
 
 print(f"\n== INVENTORY FLOW RESULT: {len(fails) == 0} — failed: {len(fails)} ==")
 raise SystemExit(1 if fails else 0)

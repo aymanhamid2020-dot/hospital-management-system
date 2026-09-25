@@ -44,9 +44,9 @@ def main():
           and r.json().get("status") == "healthy"
           and r.json().get("service") == "hospital-management-system",
           r.text[:120])
-    ui = c.get("/ui/")
-    # بعد تجزئة الواجهة: JS صار في /ui/app.js — المؤشرات تفحص HTML + JS معًا
-    ui_all = ui.text + c.get("/ui/app.js").text
+    ui = c.get("/")
+    # بعد تجزئة الواجهة: JS صار في /app.js — المؤشرات تفحص HTML + JS معًا
+    ui_all = ui.text + c.get("/app.js").text
     check("UI served", ui.status_code == 200)
     check("UI has export button", "export.csv" in ui_all)
     check("UI has complete-appointment button", "completed')" in ui_all)
@@ -491,10 +491,10 @@ def main():
     check("PDF كشف الحساب لغة خاطئة ⇒ 400", rr.status_code == 400, str(rr.status_code))
     rr = c.get("/accounts/statement/1/pdf")
     check("PDF كشف الحساب بدون توكن ⇒ 401", rr.status_code == 401, str(rr.status_code))
-    rr = c.get("/ui/")
-    # بعد التجزئة: JS في /ui/app.js — يُفحص مع HTML
-    rr_all = rr.content + c.get("/ui/app.js").content
-    check("واجهة المبيعات والحسابات في /ui",
+    rr = c.get("/")
+    # بعد التجزئة: JS في /app.js — يُفحص مع HTML
+    rr_all = rr.content + c.get("/app.js").content
+    check("واجهة المبيعات والحسابات على الجذر",
           b"async sales(main)" in rr_all
           and b"async accounts(main)" in rr_all
           and 'data-view="sales"'.encode() in rr_all
@@ -502,36 +502,38 @@ def main():
     check("إيصال + كشف حساب في الواجهة",
           b"function openReceipt(" in rr_all
           and b"async function showStatement(" in rr_all)
-    check("نافذة التسديد في /ui", b'id="modal-back"' in rr_all
+    check("نافذة التسديد على الجذر", b'id="modal-back"' in rr_all
           and b"function submitPay(" in rr_all and b"function payAll(" in rr_all)
     check("منع كاش الواجهة (no-cache)",
           "no-cache" in (rr.headers.get("cache-control") or ""),
           str(rr.headers.get("cache-control")))
-    check("واجهة المخزون في /ui",
+    check("واجهة المخزون على الجذر",
           b"async inventory(main)" in rr_all
           and b"/inventory/summary" in rr_all
           and b"function adjustStock(" in rr_all)
-    rr = c.get("/ui/sw.js")
-    check("عامل الخدمة network-first + إصدار الكاش v5",
-          b"hms-shell-v6" in rr.content
+    rr = c.get("/sw.js")
+    check("عامل الخدمة network-first + إصدار الكاش hms-shell-v*",
+          b"const CACHE = 'hms-shell-v" in rr.content
           and "الشبكة أولًا".encode() in rr.content)
     rr = c.get("/")
-    check("صفحة الجذر CSS سليم (بدون {{)", b"body { font-family" in rr.content
-          and b"body {{" not in rr.content)
+    css = c.get("/app.css")
+    check("صفحة الجذر تربط ورقة الأنماط والـ CSS سليم (بدون {{)",
+          b'href="/app.css"' in rr.content and b"body { font-family" in css.content
+          and b"body {{" not in css.content)
 
     # ===== 15) PWA + واجهة إنجليزية =====
-    r = c.get("/ui/")
-    # بعد التجزئة: toggleLang/register/renderCalendar صارت في /ui/app.js
-    r_all = r.text + c.get("/ui/app.js").text
+    r = c.get("/")
+    # بعد التجزئة: toggleLang/register/renderCalendar صارت في /app.js
+    r_all = r.text + c.get("/app.js").text
     check("UI i18n toggle + PWA markers", r.status_code == 200
           and all(s in r_all for s in ("toggleLang", "manifest.json",
                                         "serviceWorker.register",
                                         "renderCalendar",
                                         'data-view="users"')),
           str(r.status_code))
-    r = c.get("/ui/manifest.json")
-    check("PWA manifest start_url=/ui/", r.status_code == 200
-          and r.json().get("start_url") == "/ui/", str(r.status_code))
+    r = c.get("/manifest.json")
+    check("PWA manifest start_url=/", r.status_code == 200
+          and r.json().get("start_url") == "/", str(r.status_code))
 
     # ===== 16) صلابة النسخ: حالة/فحص/تنظيف =====
     rs = c.get("/backup/status", headers=h)
@@ -559,7 +561,7 @@ def main():
     check("/status يكشف عدد النسخ وحجمها",
           rs2.status_code == 200 and "files" in bkp and "total_mb" in bkp,
           str(rs2.status_code))
-    ru = c.get("/ui/app.js")
+    ru = c.get("/app.js")
     check("أزرار فحص/تنظيف في الواجهة",
           b"verifyBackups" in ru.content and b"pruneNow" in ru.content
           and "فحص السلامة".encode() in ru.content)
@@ -700,7 +702,7 @@ def main():
           str(r_dc.status_code))
 
     # علامات الواجهة الجديدة في app.js
-    ru2 = c.get("/ui/app.js")
+    ru2 = c.get("/app.js")
     check("واجهة الأطباء: بحث/فلاتر + تعديل + تقرير + مقارنة + نوبات + ثيم",
           b"filterDoctors" in ru2.content and b"toggleDoctorAvail" in ru2.content
           and b"editDoctor" in ru2.content and b"doctorReport" in ru2.content

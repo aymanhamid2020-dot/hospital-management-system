@@ -1,6 +1,17 @@
 const API = '';
-let TOKEN = localStorage.getItem('hms_token') || '';
-let USER = JSON.parse(localStorage.getItem('hms_user') || 'null');
+// الجلسة الافتراضية في الذاكرة فقط: فتح الموقع يعرض شاشة الدخول دائمًا.
+// "تذكرني" وحده ينقل الجلسة إلى localStorage لتُستأنف بعد إعادة التشغيل.
+let TOKEN = '';
+let USER = null;
+try {
+  if (localStorage.getItem('hms_remember') === '1') {
+    TOKEN = localStorage.getItem('hms_token') || '';
+    USER = JSON.parse(localStorage.getItem('hms_user') || 'null');
+  } else {
+    TOKEN = sessionStorage.getItem('hms_token') || '';
+    USER = JSON.parse(sessionStorage.getItem('hms_user') || 'null');
+  }
+} catch (e) { TOKEN = ''; USER = null; }
 let CURRENT_VIEW = 'dashboard';
 
 /* ========== أدوات ========== */
@@ -143,6 +154,14 @@ const AR2EN = {
   'الأسرّة': 'Beds',
   'الفواتير': 'Invoices',
   'الموظفون': 'Staff',
+  'شؤون الموظفين': 'Employee Affairs',
+  'البيانات الشخصية والتعريفية': 'Personal & Identification Info',
+  'البيانات الوظيفية والإدارية': 'Employment & Job Info',
+  'البيانات المالية والرواتب': 'Salary & Payroll Info',
+  'الاستقطاعات والتأمينات والضرائب': 'Deductions & Taxes',
+  'الإجازات والدوام': 'Leave & Attendance',
+  'العهد العينية والعهد': 'Assets & Loans',
+  'مستحقات نهاية الخدمة والقيود': 'End of Service & Accounting Defaults',
   'الرواتب': 'Payroll',
   'النسخ الاحتياطي': 'Backup',
   'الإشعارات': 'Notifications',
@@ -603,7 +622,16 @@ const AR2EN = {
   'محاولات الدخول الفاشلة': 'Failed login attempts',
   'آخر 24 ساعة': 'Last 24 hours',
   'لا توجد محاولات فاشلة': 'No failed attempts',
-  'الإجمالي': 'Total'
+  'الإجمالي': 'Total',
+  /* شاشة المحاسبة (تبويباتها) */
+  'المحاسبة': 'Accounting',
+  'نظرة عامة': 'Overview',
+  'المدينون': 'Debtors',
+  'الدفتر العام': 'General Ledger',
+  'التقارير': 'Reports',
+  'اختر موظفًا لعرض ملفه': 'Select an employee to view their file',
+  'لا توجد مرفقات لهذا الموظف.': 'No documents for this employee.',
+  'حفظ ملف الموظف': 'Save Employee File'
 };
 const _enPairs = Object.entries(AR2EN).sort((a, b) => b[0].length - a[0].length);
 
@@ -696,7 +724,60 @@ async function downloadPayroll(kind) {
 let ACC = { period: '', method: '', status: '', patient: '', staff: '' };
 let accGroup = 'day';
 
-function setAccGroup(g) { accGroup = g; navigate('sales'); }
+/* --- شاشة المحاسبة: التبويب الحالي + تعريفات التبويبات واختصارات القائمة --- */
+let ACC_TAB = 'overview';
+const ACC_TAB_LIST = [
+  ['overview', '📊 نظرة عامة'],
+  ['sales', '🛒 المبيعات'],
+  ['debtors', '🧾 المدينون'],
+  ['invoices', '💳 الفواتير'],
+  ['ledger', '📒 الدفتر العام'],
+  ['reports', '📄 التقارير'],
+  ['payroll', '💵 الرواتب'],
+];
+/* أسماء الشاشات السابقة → التبويب المقابل (تعمل كاختصارات وعمق روابط) */
+const ACC_ALIAS = { sales: 'sales', accounts: 'overview', payroll: 'payroll', invoices: 'invoices' };
+/* مفتاح التبويب → اسم العرض المنفّذ داخل VIEWS (تبويب «نظرة عامة» = قسم الحسابات) */
+const ACC_VIEW = {
+  overview: 'accounts', sales: 'sales', debtors: 'debtors', invoices: 'invoices',
+  ledger: 'ledger', reports: 'reports', payroll: 'payroll',
+};
+
+function setAccGroup(g) { accGroup = g; setAccTab('overview'); }
+
+/* تمييل رابط القائمة المطابق للتبويب — وبقية الروابط تُطفأ */
+function highlightAccTab(tab) {
+  let hit = false;
+  document.querySelectorAll('.sidebar a').forEach(a => {
+    const on = a.dataset.tab === tab;
+    if (on) hit = true;
+    a.classList.toggle('active', on);
+  });
+  if (!hit) {
+    const acc = document.querySelector('.sidebar a[data-view="accounting"]');
+    if (acc) acc.classList.add('active');
+  }
+}
+
+/* الانتقال بين تبويبات المحاسبة دون إعادة بناء الشاشة كاملة.
+   المحتوى يُرسم أولاً في حاوية معزولة ثم يُنقل — فلا يكتب تبويب متأخر فوق الأحدث. */
+let ACC_SEQ = 0;
+async function setAccTab(tab) {
+  if (!ACC_TAB_LIST.some(([k]) => k === tab)) tab = 'overview';
+  ACC_TAB = tab;
+  document.querySelectorAll('#acc-tabs .tab').forEach(b =>
+    b.classList.toggle('active', b.dataset.tab === tab));
+  highlightAccTab(tab);
+  const body = document.getElementById('acc-body');
+  if (!body) return;
+  const seq = ++ACC_SEQ;
+  const stage = document.createElement('div');
+  stage.innerHTML = '<div class="empty">جارٍ التحميل…</div>';
+  try { await VIEWS[ACC_VIEW[tab] || tab](stage); }
+  catch (e) { stage.innerHTML = `<div class="empty" style="color:#dc3545">⚠️ ${esc(e.message)}</div>`; }
+  if (seq !== ACC_SEQ || !body.isConnected) return;   /* تبويب/شاشة أحدث تولّى العرض */
+  body.innerHTML = stage.innerHTML;
+}
 
 /* تحويل YYYY-MM إلى (من/إلى) — يرجع {} إذا كانت الفترة فارغة أو خاطئة */
 function periodRange(period) {
@@ -757,6 +838,13 @@ async function downloadAccounts(kind) {
   const p = (ACC.period || '').trim();
   await download('/reports/accounts/sales/' + kind + (p ? '?period=' + p : ''),
                  'accounts_sales.' + kind);
+}
+
+/* كشف حساب مريض PDF — تُقرأ رقم المريض من حقل تبويب «التقارير» */
+async function statementPdf() {
+  const pid = V('f-rep-patient');
+  if (!pid) return toast('أدخل رقم المريض أولًا', true);
+  await download('/accounts/statement/' + pid + '/pdf', 'patient_statement_' + pid + '.pdf');
 }
 
 /* تسديد دفعة لعملية بيع — نافذة منبثقة (مبلغ + طريقة + معاينة المتبقي) */
@@ -869,8 +957,15 @@ async function login() {
   try {
     const r = await api('/auth/login', { method: 'POST', body: JSON.stringify({ username: u, password: p }) });
     TOKEN = r.access_token; USER = r.user;
-    localStorage.setItem('hms_token', TOKEN);
-    localStorage.setItem('hms_user', JSON.stringify(USER));
+    const remember = document.getElementById('li-remember').checked;
+    localStorage.removeItem('hms_token');
+    localStorage.removeItem('hms_user');
+    sessionStorage.removeItem('hms_token');
+    sessionStorage.removeItem('hms_user');
+    const store = remember ? localStorage : sessionStorage;
+    store.setItem('hms_token', TOKEN);
+    store.setItem('hms_user', JSON.stringify(USER));
+    localStorage.setItem('hms_remember', remember ? '1' : '0');
     enterApp();
   } catch (e) { errBox.textContent = tr(e.message); errBox.style.display = 'block'; }
 }
@@ -879,6 +974,9 @@ function logout() {
   TOKEN = ''; USER = null;
   localStorage.removeItem('hms_token');
   localStorage.removeItem('hms_user');
+  localStorage.removeItem('hms_remember');
+  sessionStorage.removeItem('hms_token');
+  sessionStorage.removeItem('hms_user');
   document.getElementById('app-view').style.display = 'none';
   document.getElementById('login-view').style.display = 'flex';
 }
@@ -901,10 +999,10 @@ const TITLES = {
   dashboard: 'لوحة التحكم', patients: 'المرضى', doctors: 'الأطباء',
   appointments: 'المواعيد', records: 'السجلات الطبية', attachments: 'المرفقات',
   departments: 'الأقسام', beds: 'الأسرّة', invoices: 'الفواتير',
-  staff: 'الموظفون', users: 'المستخدمون', backup: 'النسخ الاحتياطي', notifications: 'الإشعارات',
+  staff: 'الموظفون', hr: 'شؤون الموظفين', users: 'المستخدمون', backup: 'النسخ الاحتياطي', notifications: 'الإشعارات',
   lab: 'المختبر والأشعة', pharmacy: 'الصيدلية', inventory: 'المخزون', payroll: 'الرواتب',
   clinical: 'الرعاية والتشغيل', support: 'الصيانة والتعقيم', governance: 'الجودة والموارد',
-  audit: 'سجل التدقيق', sales: 'المبيعات', accounts: 'الحسابات'
+  audit: 'سجل التدقيق', sales: 'المبيعات', accounts: 'الحسابات', accounting: 'المحاسبة'
 };
 
 async function refreshBell() {
@@ -930,6 +1028,10 @@ function navigate(view) {
 }
 
 async function renderView(view) {
+  /* اختصارات شاشة المحاسبة (المبيعات/الحسابات/الرواتب/الفواتير) تفتح تبويبها،
+     ورابط «المحاسبة» نفسه يبدأ من تبويب «نظرة عامة» */
+  if (ACC_ALIAS[view]) { ACC_TAB = ACC_ALIAS[view]; view = 'accounting'; }
+  else if (view === 'accounting') { ACC_TAB = 'overview'; }
   CURRENT_VIEW = view;
   document.querySelectorAll('.sidebar a').forEach(a => a.classList.toggle('active', a.dataset.view === view));
   document.getElementById('page-title').textContent = tr(TITLES[view] || '');
@@ -942,7 +1044,7 @@ async function renderView(view) {
 }
 
 const OP_GROUPS = {
-  clinical: [['service-requests','مجموعات الرعاية والوحدات','🧑‍⚕️','service_pending'],['care-plans','خطط الرعاية والتقييم','🗺️','care_plans_active'],['nursing-tasks','مهام التمريض','🩺','nursing_pending'],['surgeries','مسرح العمليات','🏥','surgeries_active'],['admissions','التنويم الداخلي','🛏️','admitted']],
+  clinical: [['service-requests','مجموعات الرعاية والوحدات','🧑‍⚕️','service_pending'],['care-plans','خطط الرعاية والتقييم','🗺️','care_plans_active'],['physiotherapy','العلاج الطبيعي','🦵','service_pending'],['nutrition','التغذية السريرية','🥗','service_pending'],['emergency','الطوارئ','🚑','service_pending'],['home-health','الرعاية الصحية المنزلية','🏠','service_pending'],['wellness','برامج العافية','🧘','service_pending'],['housekeeping','النظافة والتدبير المنزلي','🧹','service_pending'],['nursing-tasks','مهام التمريض','🩺','nursing_pending'],['surgeries','مسرح العمليات','🏥','surgeries_active'],['admissions','التنويم الداخلي','🛏️','admitted']],
   support: [['blood-bank','بنك الدم','🩸','blood_available'],['maintenance','صيانة الأجهزة','🔧','maintenance_open'],['sterilization','التعقيم','♨️','sterilization_running']],
   governance: [['safety-events','الجودة ومكافحة العدوى والحوادث','🛡️','safety_open'],['budgets','الميزانيات','📊','budget_total'],['assets','الأصول الثابتة','🏗️',''],['patient-portal-accounts','حسابات بوابة المريض','👤','']]
 };
@@ -965,17 +1067,26 @@ const OP_FIELDS = {
   assets: [['asset_code','رمز الأصل'],['name','الاسم'],['category','الفئة'],['department','القسم'],['purchase_cost','التكلفة','number'],['salvage_value','القيمة المتبقية','number'],['useful_life_years','العمر','number']],
   'patient-portal-accounts': [['patient_id','المريض','number'],['username','اسم المستخدم'],['password','كلمة المرور']]
 };
+const OP_UNIT_PATHS = ['physiotherapy','nutrition','emergency','home-health','wellness','housekeeping'];
 const OP_STATUS = {
   'service-requests':['in_progress','completed','cancelled'], 'nursing-tasks':['in_progress','completed','cancelled'], surgeries:['in_progress','completed','cancelled'], admissions:['discharged','transferred'],
-  'blood-bank':['reserved','issued','quarantined','discarded'], maintenance:['in_progress','completed','cancelled'], sterilization:['passed','failed'], 'safety-events':['investigating','resolved','closed'], assets:['maintenance','retired']
+  'blood-bank':['reserved','issued','quarantined','discarded'], maintenance:['in_progress','completed','cancelled'], sterilization:['passed','failed'], 'safety-events':['investigating','resolved','closed'], assets:['maintenance','retired'],
+  physiotherapy:['in_treatment','suspended','completed','cancelled'], nutrition:['active','suspended','completed','cancelled'], emergency:['under_treatment','discharged','closed','cancelled'],
+  'home-health':['active','on_hold','completed','cancelled'], wellness:['active','paused','completed','cancelled'], housekeeping:['in_progress','completed','cancelled']
 };
+// الوحدات التشغيلية تعمل تحت /service-units، وبقية الموارد تحت /clinical.
+function opUrl(path, id) {
+  return OP_UNIT_PATHS.includes(path)
+    ? `/service-units/${path}${id ? `/${id}/status` : ''}`
+    : `/clinical/${path}${id ? `/status/${id}` : ''}`;
+}
 let OP_PATH = '';
 async function renderOps(main, group) {
   const ov = await api('/clinical/overview'), defs = OP_GROUPS[group].filter(([p]) => p !== 'patient-portal-accounts' || isAdmin());
   const cards = defs.map(([p,t,i,k]) => `<button class="stat" style="cursor:pointer;border:2px solid ${OP_PATH===p?'#2c7be5':'transparent'}" onclick="selectOps('${p}')"><div class="num">${k ? Number(ov[k] || 0) : '∞'}</div><div class="lbl">${i} ${t}</div></button>`).join('');
   const [path,title,icon] = defs.find(x => x[0] === OP_PATH) || defs[0]; OP_PATH = path;
   if (path === 'care-plans') { await renderCarePlans(main, cards); return; }
-  const rows = await api('/clinical/' + path);
+  const rows = await api(opUrl(path));
   const canAdd = (isAdmin() || isDoctor()) && path !== 'patient-portal-accounts' && !(isDoctor() && ['budgets','assets'].includes(path));
   main.innerHTML = `<div class="stats">${cards}</div><div class="card"><div class="toolbar"><h3 style="margin:0">${icon} ${title}</h3>${canAdd?'<button class="btn success" onclick="opForm()">➕ إضافة</button>':''}<input oninput="filterTable('ops-table',this.value)" placeholder="🔍 بحث…"></div><div style="overflow-x:auto"><table id="ops-table"><thead><tr><th>#</th><th>التفاصيل</th><th>الحالة</th><th>التاريخ</th><th>الإجراء</th></tr></thead><tbody>${rows.map(r => `<tr><td>${r.id}</td><td>${esc(opLabel(r))}</td><td>${pill(r.status || 'نشط')}</td><td>${fmtDate(r.created_at || r.started_at || r.purchase_date || r.admission_date)}</td><td><div class="actions">${canAdd?(OP_STATUS[path] || []).map(s => `<button class="btn sm ghost" onclick="opStatus('${path}',${r.id},'${s}')">${s}</button>`).join(''):'—'}</div></td></tr>`).join('') || `<tr><td colspan="5" class="empty">لا توجد سجلات</td></tr>`}</tbody></table></div></div>`;
 async function renderCarePlans(main, cards) {
@@ -991,7 +1102,7 @@ async function renderCarePlans(main, cards) {
       return `<tr><td>${item.id}</td><td>${esc(item.title)}</td><td>${esc(item.category)}</td>
         <td>${esc(item.assigned_to || '—')}</td><td>${esc(item.instructions || '—')}</td>
         <td>${pill(item.status)}</td><td>${fmtDate(item.completed_at || item.cancelled_at || item.scheduled_at)}</td>
-        <td>${item.executions.length}<div class="actions">${execute}</div></td></tr>`;
+        <td>${(item.executions || []).length}<div class="actions">${execute}</div></td></tr>`;
     }).join('');
     return `<details class="care-plan" ${plans.length === 1 ? 'open' : ''}>
       <summary><strong>${esc(plan.title)}</strong> — المريض #${plan.patient_id} ${pill(plan.status)}
@@ -1051,7 +1162,7 @@ async function submitCarePlan() {
 }
 function opLabel(r) { return esc(r.title || r.procedure_name || r.issue || r.load_description || r.unit_number || r.asset_name || r.name || r.username || `${r.department || ''} ${r.category || ''}`); }
 function selectOps(path) { OP_PATH = path; navigate(CURRENT_VIEW); }
-async function opStatus(path,id,status) { try { await api(`/clinical/${path}/status/${id}`,{method:'POST',body:JSON.stringify({status})}); toast('تم تحديث الحالة ✅'); await navigate(CURRENT_VIEW); } catch(e) { toast(e.message,true); } }
+async function opStatus(path,id,status) { try { await api(opUrl(path,id),{method:'POST',body:JSON.stringify({status})}); toast('تم تحديث الحالة ✅'); await navigate(CURRENT_VIEW); } catch(e) { toast(e.message,true); } }
 function opForm() {
   const defs = OP_FIELDS[OP_PATH] || [];
   const fields = defs.map(([n,l,t,opts]) => `<div class="field"><label>${l}</label>${t==='select'?`<select id="op-${n}">${opts.map(o=>`<option>${o}</option>`).join('')}</select>`:`<input id="op-${n}" type="${t||'text'}" ${t==='number'?'step="any"':''}>`}</div>`).join('');
@@ -1059,7 +1170,7 @@ function opForm() {
 }
 async function submitOp() {
   const data = {}; (OP_FIELDS[OP_PATH] || []).forEach(([n,,t]) => { const v=V('op-'+n); if(v!=='' && v!=null) data[n]=t==='number'?Number(v):v; });
-  try { await api('/clinical/'+OP_PATH,{method:'POST',body:JSON.stringify(data)}); closeModal(); toast('تمت الإضافة ✅'); await navigate(CURRENT_VIEW); } catch(e) { toast(e.message,true); }
+  try { await api(opUrl(OP_PATH),{method:'POST',body:JSON.stringify(data)}); closeModal(); toast('تمت الإضافة ✅'); await navigate(CURRENT_VIEW); } catch(e) { toast(e.message,true); }
 }
 async function carePlanAction(action, planId, itemId) {
   try {
@@ -1106,7 +1217,7 @@ async function renderGeneralLedger(main) {
         <div class="toolbar"><h3 style="margin:0">🏛️ الدفتر العام والمحاسبة المؤسسية</h3>
           <span class="pill ${Math.abs(gl.trial_balance_difference) < 0.01 ? 'paid' : 'unpaid'}">
             فرق ميزان المراجعة: ${money(gl.trial_balance_difference)}</span>
-          <button class="btn ghost sm" onclick="navigate('accounts')">تحديث</button></div>
+          <button class="btn ghost sm" onclick="setAccTab('ledger')">تحديث</button></div>
         ${actions}
         <div class="stats" style="margin:16px 0">
           <div class="stat"><div class="num">${money(gl.cash)}</div><div class="lbl">النقدية والبنك</div></div>
@@ -1204,362 +1315,133 @@ async function ledgerAction(action) {
     }
     await api(path, { method: 'POST', body: JSON.stringify(payload) });
     toast('تم ترحيل العملية المحاسبية ✅');
-    await navigate('accounts');
+    await setAccTab('ledger');
   } catch (err) {
     toast(err.message || 'تعذر تنفيذ العملية المحاسبية', true);
   }
 }
 
 
+let HR_ROWS = [], HR_SELECTED = null, HR_TAB = 'personal', HR_ACCOUNTS = [];
+const HR_TABS = [
+  ['personal','البيانات الشخصية والتعريفية','🪪'], ['employment','البيانات الوظيفية والإدارية','🏢'],
+  ['salary','البيانات المالية والرواتب','💰'], ['deductions','الاستقطاعات والتأمينات والضرائب','🧮'],
+  ['attendance','الإجازات والدوام','🕒'], ['assets','العهد العينية والعهد','💻'],
+  ['end_service','مستحقات نهاية الخدمة والقيود','🏁']
+];
+const HR_DEFAULT = {
+  personal: { birth_date:'', gender:'', nationality:'', marital_status:'', national_id:'', passport_number:'', document_issue_date:'', document_expiry_date:'', phone:'', email:'', address:'' },
+  employment: { job_title:'', job_grade:'', department:'', branch:'', manager:'', contract_type:'', probation_period:'', status:'على رأس العمل' },
+  salary: { basic_salary:0, housing_allowance:0, transport_allowance:0, nature_of_work_allowance:0, communication_allowance:0, payment_method:'تحويل بنكي', bank_name:'', bank_account:'', iban:'', cost_center:'' },
+  deductions: { employee_social_rate:0, company_social_rate:0, income_tax_rule:'', tax_allowance:0, other_deductions:0 },
+  attendance: { annual_leave:0, sick_leave:0, special_leave:0, shift:'الوردية الصباحية', work_hours:'8', overtime_policy:'', absence_policy:'', late_policy:'' },
+  assets: { loan_amount:0, monthly_installment:0, remaining_loan:0, assets:'', custody_notes:'' },
+  end_service: { end_service_method:'مخصص الخدمة المتبقية', provision_rate:0, payroll_account:'', loan_account:'', end_service_account:'' }
+};
+function currentHR() { return HR_ROWS.find(x => x.id === HR_SELECTED) || null; }
+function hrProfile() { return Object.assign({}, HR_DEFAULT, currentHR()?.hr_profile || {}); }
+function hrField(group, key, label, type='text', options='') {
+  const v = hrProfile()[group]?.[key] ?? '';
+  const input = type === 'select' ? `<select data-hr="${group}.${key}">${options.map(o => `<option ${String(v)===o?'selected':''}>${esc(o)}</option>`).join('')}</select>`
+    : type === 'number' ? `<input data-hr="${group}.${key}" type="number" min="0" step="0.01" value="${esc(v)}">`
+    : `<input data-hr="${group}.${key}" type="${type}" value="${esc(v)}">`;
+  return `<div class="field"><label>${label}</label>${input}</div>`;
+}
+function hrDirectoryHTML(filter='') {
+  const list = HR_ROWS.filter(x => (x.full_name+' '+x.position).toLowerCase().includes(filter.toLowerCase()));
+  return list.map(x => `<button class="hr-person${x.id===HR_SELECTED?' active':''}" onclick="selectHR(${x.id})">
+    <span class="avatar">${esc((x.full_name||'?').trim().charAt(0))}</span><span><b>${esc(x.full_name)}</b><small>${esc(x.position)}</small></span>
+    <i>${esc(x.hr_profile?.employment?.status || 'على رأس العمل')}</i></button>`).join('') || '<div class="empty">لا توجد نتائج</div>';
+}
+function hrEditorHTML() {
+  const s = currentHR();
+  if (!s) return '<div class="card empty">اختر موظفًا لعرض ملفه</div>';
+  const p = hrProfile();
+  return `<div class="card hr-card">
+    <div class="hr-profile-head"><div><h3>${esc(s.full_name)}</h3><p>${esc(s.position)} · تعيين ${fmtDate(s.hire_date)}</p></div>
+      <div class="actions"><button class="btn success" onclick="saveHR()">💾 حفظ ملف الموظف</button><span class="pill active">${esc(p.employment.status || 'على رأس العمل')}</span></div></div>
+    <div class="tabbar" role="tablist">${HR_TABS.map(([k,l,i])=>`<button class="tab${HR_TAB===k?' active':''}" role="tab" aria-selected="${HR_TAB===k}" onclick="setHRTab('${k}')">${i} ${l}</button>`).join('')}</div>
+    <div id="hr-tab" class="hr-tab">${hrTabHTML()}</div></div>`;
+}
+function selectHR(id) { captureHRFields(); HR_SELECTED=id; document.getElementById('hr-list').innerHTML=hrDirectoryHTML(); document.getElementById('hr-editor').innerHTML=hrEditorHTML(); applyI18n(document.getElementById('hr-editor')); }
+function setHRTab(tab) { captureHRFields(); HR_TAB=tab; document.getElementById('hr-editor').innerHTML=hrEditorHTML(); applyI18n(document.getElementById('hr-editor')); }
+function filterHR(value) { document.getElementById('hr-list').innerHTML=hrDirectoryHTML(value); }
+function captureHRFields() {
+  const staff = currentHR();
+  if (!staff) return;
+  const profile = hrProfile();
+  document.querySelectorAll('#hr-tab [data-hr]').forEach(el => {
+    const [group, key] = el.dataset.hr.split('.');
+    profile[group] = profile[group] || {};
+    profile[group][key] = el.type === 'number' ? (el.value === '' ? 0 : Number(el.value)) : el.value;
+  });
+  staff.hr_profile = profile;
+}
+async function saveHR() {
+  captureHRFields();
+  const staff = currentHR();
+  if (!staff) return;
+  const p = hrProfile();
+  try {
+    await api(`/staff/${staff.id}`, { method: 'PUT', body: JSON.stringify({
+      position: p.employment.job_title || staff.position, phone: p.personal.phone,
+      email: p.personal.email, salary: Number(p.salary.basic_salary) || 0, hr_profile: p
+    }) });
+    toast('تم حفظ ملف الموظف ✅');
+    await navigate('hr');
+  } catch (e) { toast(e.message, true); }
+}
+async function uploadHRDocument(staffId) {
+  const input = document.getElementById('hr-doc-file');
+  if (!input?.files.length) return toast('اختر مستندًا أولًا', true);
+  const fd = new FormData();
+  fd.append('doc_type', document.getElementById('hr-doc-type').value);
+  fd.append('file', input.files[0]);
+  try {
+    const res = await fetch(API + `/staff/${staffId}/documents`, { method: 'POST', headers: { 'Authorization': 'Bearer ' + TOKEN }, body: fd });
+    if (!res.ok) { const body = await res.json().catch(() => ({})); throw new Error(body.detail || 'تعذر رفع المستند'); }
+    toast('تم رفع المستند ✅'); await navigate('hr');
+  } catch (e) { toast(e.message, true); }
+}
+function downloadStaffDoc(id) { download(`/staff/documents/${id}/file`, `staff-document-${id}`); }
+async function deleteStaffDoc(id) {
+  if (!confirm('حذف مستند الموظف نهائيًا؟')) return;
+  try { await api(`/staff/documents/${id}`, { method: 'DELETE' }); toast('تم حذف المستند ✅'); await navigate('hr'); }
+  catch (e) { toast(e.message, true); }
+}
+
+function hrTabHTML() {
+  const p = hrProfile(), s = currentHR();
+  if (HR_TAB === 'personal') return `<div class="section-title">🪪 البيانات الأساسية والوثائقية</div><div class="form-grid">
+    ${hrField('personal','birth_date','تاريخ الميلاد','date')}${hrField('personal','gender','الجنس','select',['ذكر','أنثى'])}${hrField('personal','nationality','الجنسية')}${hrField('personal','marital_status','الحالة الاجتماعية','select',['أعزب','متزوج','مطلق','أرمل'])}
+    ${hrField('personal','national_id','رقم الهوية / الرقم الوطني')}${hrField('personal','passport_number','رقم الجواز')}${hrField('personal','document_issue_date','تاريخ إصدار الوثائق','date')}${hrField('personal','document_expiry_date','تاريخ انتهاء الوثائق','date')}</div>
+    <div class="section-title">📞 بيانات الاتصال</div><div class="form-grid">${hrField('personal','phone','رقم الهاتف','tel')}${hrField('personal','email','البريد الإلكتروني','email')}${hrField('personal','address','عنوان السكن الفعلي')}</div>
+    <div class="section-title">📎 المرفقات</div><div class="hr-upload"><select id="hr-doc-type"><option value="id">صورة الرقم الوطني</option><option value="contract">العقد</option><option value="cv">السيرة الذاتية</option><option value="certificate">الشهادات</option><option value="other">أخرى</option></select><input id="hr-doc-file" type="file"><button class="btn" onclick="uploadHRDocument(${s.id})">⬆️ رفع مستند</button></div>
+    <div class="hr-docs">${(s.documents||[]).map(d=>`<div class="hr-doc"><span>📄 ${esc(d.original_name)}</span><small>${esc(d.doc_type)} · ${Math.round(d.size_bytes/1024)} KB</small><button class="btn sm ghost" onclick="downloadStaffDoc(${d.id})">تنزيل</button><button class="btn sm danger" onclick="deleteStaffDoc(${d.id})">حذف</button></div>`).join('') || '<small class="muted">لا توجد مرفقات لهذا الموظف.</small>'}</div>`;
+  if (HR_TAB === 'employment') return `<div class="section-title">🏢 المسمى الوظيفي والدرجة</div><div class="form-grid">${hrField('employment','job_title','المسمى المهني')}${hrField('employment','job_grade','المرفق الإداري / الدرجة الوظيفية')}</div><div class="section-title">🌳 التبعية الإدارية</div><div class="form-grid">${hrField('employment','department','القسم / الإدارة')}${hrField('employment','branch','الفرع')}${hrField('employment','manager','المدير المباشر')}</div><div class="section-title">📄 بيانات التعاقد</div><div class="form-grid">${hrField('employment','contract_type','نوع العقد','select',['محدد','غير محدد','دوام جزئي'])}${hrField('employment','probation_period','فترة التجربة')}${hrField('employment','status','حالة الموظف','select',['على رأس العمل','في إجازة','موقوف','نهيت خدماته'])}</div>`;
+  if (HR_TAB === 'salary') return `<div class="section-title">💵 الهيكل المالي</div><div class="form-grid">${hrField('salary','basic_salary','الراتب الأساسي','number')}${hrField('salary','housing_allowance','بدل سكن','number')}${hrField('salary','transport_allowance','بدل مواصلات','number')}${hrField('salary','nature_of_work_allowance','بدل طبيعة عمل','number')}${hrField('salary','communication_allowance','بدل اتصالات','number')}</div><div class="section-title">🏦 طريقة الصرف والحساب البنكي</div><div class="form-grid">${hrField('salary','payment_method','طريقة الصرف','select',['تحويل بنكي','شيك','نقداً'])}${hrField('salary','bank_name','اسم البنك')}${hrField('salary','bank_account','رقم الحساب')}${hrField('salary','iban','رقم IBAN')}${hrField('salary','cost_center','مركز التكلفة','select',['تكلفة الإنتاج','مصاريف إدارية عمومية','مصاريف تسويق'])}</div>`;
+  if (HR_TAB === 'deductions') return `<div class="section-title">🧮 التأمينات والضريبة</div><div class="form-grid">${hrField('deductions','employee_social_rate','نسبة خصم الموظف من التأمينات','number')}${hrField('deductions','company_social_rate','نسبة مشاركة الشركة','number')}${hrField('deductions','income_tax_rule','القاعدة الضريبية / شرائح ضريبة كسب العمل')}${hrField('deductions','tax_allowance','الخصم الإجمالي','number')}${hrField('deductions','other_deductions','استقطاعات ثابتة أخرى','number')}</div>`;
+  if (HR_TAB === 'attendance') return `<div class="section-title">🌴 أرصدة الإجازات</div><div class="form-grid">${hrField('attendance','annual_leave','رصيد الإجازة السنوية','number')}${hrField('attendance','sick_leave','رصيد الإجازة المرضية','number')}${hrField('attendance','special_leave','رصيد الإجازة الخاصة','number')}</div><div class="section-title">🕒 سياسة الدوام</div><div class="form-grid">${hrField('attendance','shift','وردية العمل')}${hrField('attendance','work_hours','ساعات الدوام','number')}${hrField('attendance','overtime_policy','سياسة احتساب الإضافي')}${hrField('attendance','absence_policy','سياسة الغياب')}${hrField('attendance','late_policy','سياسة التأخير')}</div>`;
+  if (HR_TAB === 'assets') return `<div class="section-title">💳 السلف والقروض</div><div class="form-grid">${hrField('assets','loan_amount','إجمالي السلفة','number')}${hrField('assets','monthly_installment','القسط الشهري','number')}${hrField('assets','remaining_loan','المتبقي','number')}</div><div class="section-title">💻 العهد العينية (Assets)</div>${hrField('assets','assets','الأجهزة المسلمة (لابتوب، سيارة، هاتف، أدوات)')}${hrField('assets','custody_notes','ملاحظات إبراء الذمة')}`;
+  return `<div class="section-title">🏁 مستحقات نهاية الخدمة</div><div class="form-grid">${hrField('end_service','end_service_method','طريقة الاحتساب','select',['مخصص الخدمة المتبقية','نصف شهر عن كل سنة','أجر شهر عن كل سنة'])}${hrField('end_service','provision_rate','نسبة التخصيص','number')}</div><div class="section-title">🔗 الربط المحاسبي (Posting Accounts)</div><div class="form-grid">${hrField('end_service','payroll_account','حساب مجمع رواتب الموظفين','select',HR_ACCOUNTS.map(a=>a.code+' — '+a.name))}${hrField('end_service','loan_account','حساب سلف الموظفين','select',HR_ACCOUNTS.map(a=>a.code+' — '+a.name))}${hrField('end_service','end_service_account','حساب مستحقات نهاية الخدمة','select',HR_ACCOUNTS.map(a=>a.code+' — '+a.name))}</div>`;
+}
+
 const VIEWS = {
-
-  /* --- الرعاية والتشغيل --- */
-  clinical(main) { return renderOps(main, 'clinical'); },
-  support(main) { return renderOps(main, 'support'); },
-  governance(main) { return renderOps(main, 'governance'); },
-
-  /* --- لوحة التحكم --- */
-  async dashboard(main) {
-    const s = await api('/dashboard/stats');
-    s.operations = await api('/clinical/overview');
-    const statuses = s.appointments_by_status || {};
-    const maxVal = Math.max(1, ...Object.values(statuses));
-    const stLabels = { pending: 'معلّقة', confirmed: 'مؤكدة', cancelled: 'ملغاة', completed: 'مكتملة' };
+  /* --- شاشة شؤون الموظفين: ملف موظف بتبويبات متكاملة --- */
+  async hr(main) {
+    if (!isAdmin()) { main.innerHTML = '<div class="empty">🔒 هذه الصفحة متاحة للمدير فقط</div>'; return; }
+    const [rows, accounts] = await Promise.all([api('/staff/'), api('/accounts/ledger/accounts')]);
+    HR_ROWS = rows; HR_ACCOUNTS = accounts;
+    if (!HR_SELECTED && rows.length) HR_SELECTED = rows[0].id;
+    if (!rows.some(x => x.id === HR_SELECTED)) HR_SELECTED = rows[0]?.id || null;
     main.innerHTML = `
-      <div class="stats">
-        <div class="stat"><div class="num">${s.total_patients}</div><div class="lbl">المرضى</div></div>
-        <div class="stat green"><div class="num">${s.total_doctors}</div><div class="lbl">الأطباء</div></div>
-        <div class="stat amber"><div class="num">${s.appointments_today}</div><div class="lbl">مواعيد اليوم</div></div>
-        <div class="stat red"><div class="num">${s.pending_appointments}</div><div class="lbl">مواعيد معلّقة</div></div>
-        <div class="stat"><div class="num">${s.beds_occupied}/${s.beds_total}</div><div class="lbl">أسرّة مشغولة</div></div>
-        <div class="stat green"><div class="num">${s.revenue_paid.toLocaleString()}</div><div class="lbl">إيرادات محصّلة (ر.س)</div></div>
-        <div class="stat red"><div class="num">${s.revenue_unpaid.toLocaleString()}</div><div class="lbl">مستحقات غير محصّلة</div></div>
-        <div class="stat"><div class="num">${s.total_departments}</div><div class="lbl">الأقسام</div></div>
-        <div class="stat amber"><div class="num">${s.operations.nursing_pending || 0}</div><div class="lbl">مهام تمريض مفتوحة</div></div>
-        <div class="stat red"><div class="num">${s.operations.surgeries_active || 0}</div><div class="lbl">عمليات نشطة</div></div>
-        <div class="stat"><div class="num">${s.operations.safety_open || 0}</div><div class="lbl">حوادث تحتاج متابعة</div></div>
-        <div class="stat green"><div class="num">${s.operations.maintenance_open || 0}</div><div class="lbl">أوامر صيانة</div></div>
-      </div>
-      <div class="card">
-        <h3>توزيع المواعيد حسب الحالة</h3>
-        ${isAdmin() || isDoctor() ? `<div style="margin-bottom:14px"><button class="btn ghost" onclick="downloadReport()">📄 تحميل تقرير PDF</button></div>` : ''}
-        <div class="bars">
-          ${Object.keys(statuses).length ? Object.entries(statuses).map(([k, v]) => `
-            <div class="bar-wrap">
-              <div class="val">${v}</div>
-              <div class="bar" style="height:${Math.round(v / maxVal * 110)}px"></div>
-              <div class="lbl">${stLabels[k] || k}</div>
-            </div>`).join('') : '<div class="empty">لا توجد مواعيد بعد</div>'}
+      <div class="hr-shell">
+        <div class="card hr-directory">
+          <div class="toolbar"><h3 style="margin:0">دليل الموظفين</h3>
+            <input oninput="filterHR(this.value)" placeholder="🔍 بحث باسم الموظف…"></div>
+          <div id="hr-list">${hrDirectoryHTML()}</div>
         </div>
-      </div>`;
-  },
-
-  /* --- المرضى --- */
-  async patients(main) {
-    const rows = await api('/patients/');
-    const form = isAdmin() || !isDoctor() ? `
-      <details class="addbox"><summary>➕ إضافة مريض جديد</summary>
-      <div class="form-grid">
-        <div class="field"><label>الاسم الكامل *</label><input id="f-name"></div>
-        <div class="field"><label>تاريخ الميلاد *</label><input id="f-dob" type="date"></div>
-        <div class="field"><label>النوع *</label><select id="f-gender"><option>ذكر</option><option>أنثى</option></select></div>
-        <div class="field"><label>الهاتف *</label><input id="f-phone"></div>
-        <div class="field"><label>البريد الإلكتروني *</label><input id="f-email" type="email"></div>
-        <div class="field"><label>العنوان</label><input id="f-addr"></div>
-        <div class="field"><label>مجموعة الدم</label><select id="f-blood"><option value="">—</option><option>O+</option><option>O-</option><option>A+</option><option>A-</option><option>B+</option><option>B-</option><option>AB+</option><option>AB-</option></select></div>
-        <div class="field"><label>الهوية الوطنية</label><input id="f-nat" placeholder="رقم الهوية/الإقامة"></div>
-        <div class="field"><label>شركة التأمين</label><input id="f-ins" placeholder="اختياري"></div>
-        <div class="field"><label>رقم وثيقة التأمين</label><input id="f-pol"></div>
-      </div>
-      <button class="btn success" style="margin-top:12px" onclick="addPatient()">حفظ المريض</button>
-      </details>` : '';
-    main.innerHTML = `
-      <div class="card">
-        <h3>المرضى (${rows.length})</h3>
-        <div class="toolbar">
-          <input id="q" placeholder="🔍 بحث بالاسم أو الهاتف أو الهوية…" oninput="filterTable('tbl', this.value)">
-          <button class="btn ghost" onclick="download('/patients/export.csv','patients.csv')">⬆️ تصدير CSV</button>
-          ${form ? `<label class="btn ghost" style="cursor:pointer;margin:0">⬇️ استيراد CSV<input type="file" accept=".csv,text/csv" style="display:none" onchange="importPatients(this)"></label>` : ''}
-        </div>
-        ${form}
-        <div style="overflow-x:auto"><table id="tbl">
-          <thead><tr><th>#</th><th>الاسم</th><th>النوع</th><th>الهاتف</th><th>البريد</th><th>الدم</th><th>الهوية</th><th>أُضيف</th><th></th></tr></thead>
-          <tbody>${rows.map(p => `<tr>
-            <td>${p.id}</td><td><strong>${esc(p.full_name)}</strong></td><td>${esc(p.gender)}</td>
-            <td>${esc(p.phone)}</td><td>${esc(p.email)}</td><td>${esc(p.blood_type || '-')}</td>
-            <td>${esc(p.national_id || '-')}${p.insurer ? `<br><small>🏢 ${esc(p.insurer)}</small>` : ''}</td>
-            <td>${fmtDate(p.created_at)}</td>
-            <td class="actions">
-              <button class="btn sm ghost" onclick="download('/patients/${p.id}/pdf','patient_${p.id}_file.pdf')">📄 الملف PDF</button>
-              ${isAdmin() ? `<button class="btn sm danger" onclick="del('patients',${p.id},'patients')">حذف</button>` : ''}
-            </td>
-          </tr>`).join('') || '<tr><td colspan="9" class="empty">لا يوجد مرضى</td></tr>'}</tbody>
-        </table></div>
-      </div>`;
-  },
-
-  /* --- الأطباء --- */
-  async doctors(main) {
-    const [rows, depts, stats] = await Promise.all([
-      api('/doctors/'), api('/departments/'),
-      api('/doctors/stats').catch(() => null)]);
-    DOCTORS_CACHE = rows; DOCTORS_DEPTS = depts;
-    const form = isAdmin() ? `
-      <details class="addbox"><summary>➕ إضافة طبيب جديد</summary>
-      <div class="form-grid">
-        <div class="field"><label>الاسم الكامل *</label><input id="f-name"></div>
-        <div class="field"><label>التخصص *</label><input id="f-spec"></div>
-        <div class="field"><label>رقم الترخيص *</label><input id="f-lic"></div>
-        <div class="field"><label>الهاتف *</label><input id="f-phone"></div>
-        <div class="field"><label>البريد الإلكتروني *</label><input id="f-email" type="email"></div>
-        <div class="field"><label>العنوان</label><input id="f-addr"></div>
-        <div class="field"><label>القسم</label><select id="f-dept"><option value="">—</option>
-          ${depts.map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join('')}</select></div>
-      </div>
-      <button class="btn success" style="margin-top:12px" onclick="addDoctor()">حفظ الطبيب</button>
-      </details>` : '';
-    const statCards = stats ? `
-      <div class="stats" style="margin-bottom:16px">
-        <div class="stat"><div class="num">${stats.total}</div><div class="lbl">إجمالي الأطباء</div></div>
-        <div class="stat green"><div class="num">${stats.available}</div><div class="lbl">أطباء متاحون</div></div>
-        <div class="stat amber"><div class="num">${stats.unavailable}</div><div class="lbl">غير متاحين</div></div>
-        <div class="stat"><div class="num">${stats.specialties}</div><div class="lbl">تخصصات</div></div>
-        <div class="stat"><div class="num">${stats.appointments}</div><div class="lbl">مواعيد مرتبطة</div></div>
-      </div>` : '';
-    const canToggle = d => isAdmin() || (isDoctor() && USER && d.email === USER.email);
-    main.innerHTML = `
-      ${statCards}
-      <div class="card">
-        <h3>الأطباء (${rows.length})</h3>
-        <div class="toolbar">
-          <input id="q" placeholder="🔍 بحث بالاسم/التخصص/الترخيص…" oninput="filterDoctors()">
-          <select id="flt-dept" onchange="filterDoctors()"><option value="">كل الأقسام</option>
-            ${depts.map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join('')}
-            <option value="none">بدون قسم</option></select>
-          <select id="flt-avail" onchange="filterDoctors()"><option value="">كل الحالات</option>
-            <option value="1">✅ متاح</option><option value="0">⛔ غير متاح</option></select>
-          <button class="btn ghost" onclick="doctorsPerformance()">📊 أداء الشهر</button>
-        </div>
-        ${form}
-        <div style="overflow-x:auto"><table id="tbl">
-          <thead><tr><th>#</th><th>الاسم</th><th>التخصص</th><th>الترخيص</th><th>الهاتف</th><th>القسم</th><th>متاح</th><th></th></tr></thead>
-          <tbody>${rows.map(d => `<tr data-dept="${d.department_id == null ? 'none' : d.department_id}" data-avail="${d.is_available ? '1' : '0'}">
-            <td>${d.id}</td><td><strong>${esc(d.full_name)}</strong></td><td>${esc(d.specialty)}</td>
-            <td>${esc(d.license_number)}</td><td>${esc(d.phone)}</td>
-            <td>${esc(d.department ? d.department.name : '-')}</td>
-            <td>${d.is_available ? '✅' : '⛔'}</td>
-            <td>
-              ${isAdmin() ? `<button class="btn sm ghost" onclick="editDoctor(${d.id})">✏️ تعديل</button>` : ''}
-              <button class="btn sm ghost" onclick="doctorReport(${d.id})">📈 تقرير</button>
-              ${canToggle(d) ? `<button class="btn sm ghost" onclick="doctorSchedule(${d.id})" title="نوبات العمل">🗓️</button>` : ''}
-              ${canToggle(d) ? `<button class="btn sm ghost" onclick="toggleDoctorAvail(${d.id},${d.is_available})">${d.is_available ? '⛔ تعطيل' : '✅ تمكين'}</button>` : ''}
-              ${isAdmin() ? `<button class="btn sm danger" onclick="del('doctors',${d.id},'doctors')">حذف</button>` : ''}
-            </td>
-          </tr>`).join('') || '<tr><td colspan="8" class="empty">لا يوجد أطباء</td></tr>'}</tbody>
-        </table></div>
-      </div>`;
-  },
-
-  /* --- المواعيد --- */
-  async appointments(main) {
-    const [rows, patients, doctors] = await Promise.all([
-      api('/appointments/'), api('/patients/'), api('/doctors/')]);
-    CAL_MODE = false;
-    main.innerHTML = `
-      <div class="card">
-        <h3>المواعيد (${rows.length})</h3>
-        <div class="toolbar">
-          <input type="date" id="flt-date" onchange="loadAppts()">
-          <select id="flt-status" onchange="loadAppts()">
-            <option value="">كل الحالات</option><option value="pending">معلّقة</option>
-            <option value="confirmed">مؤكدة</option><option value="completed">مكتملة</option>
-            <option value="cancelled">ملغاة</option>
-          </select>
-          <button class="btn ghost" id="cal-btn" onclick="toggleCal()">🗓️ تقويم</button>
-        </div>
-        <div id="cal-box" style="display:none;margin-top:12px"></div>
-        <div id="queue-box" style="margin:12px 0"></div>
-        <details class="addbox"><summary>➕ حجز موعد جديد</summary>
-        <div class="form-grid">
-          <div class="field"><label>المريض *</label><select id="f-pat">
-            ${patients.map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join('')}</select></div>
-          <div class="field"><label>الطبيب *</label><select id="f-doc">
-            ${doctors.map(d => `<option value="${d.id}">${esc(d.full_name)}</option>`).join('')}</select></div>
-          <div class="field"><label>التاريخ والوقت *</label><input id="f-date" type="datetime-local"></div>
-          <div class="field"><label>السبب</label><input id="f-reason"></div>
-        </div>
-        <button class="btn success" style="margin-top:12px" onclick="addAppt()">حجز الموعد</button>
-        </details>
-        <div id="appt-table" style="overflow-x:auto"><table id="tbl">
-          <thead><tr><th>#</th><th>التاريخ</th><th>المريض</th><th>الطبيب</th><th>السبب</th><th>الحالة</th><th>الطابور</th><th></th></tr></thead>
-          <tbody id="appt-body"></tbody>
-        </table></div>
-      </div>`;
-    window._apptCache = { patients, doctors };
-    await loadAppts();
-  },
-
-  /* --- السجلات الطبية --- */
-  async records(main) {
-    const [rows, patients, doctors, atts] = await Promise.all([
-      api('/medical-records/'), api('/patients/'), api('/doctors/'), api('/attachments/')]);
-    // مرفقات كل سجل
-    const attMap = {};
-    atts.forEach(a => { if (a.record_id) (attMap[a.record_id] = attMap[a.record_id] || []).push(a); });
-    const fmtSize = b => b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.round(b / 1024) + ' KB';
-    main.innerHTML = `
-      <div class="card">
-        <h3>السجلات الطبية (${rows.length})</h3>
-        <details class="addbox"><summary>➕ إضافة سجل طبي</summary>
-        <div class="form-grid">
-          <div class="field"><label>المريض *</label><select id="f-pat">
-            ${patients.map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join('')}</select></div>
-          ${isDoctor() ? '' : `<div class="field"><label>الطبيب</label><select id="f-doc">
-            <option value="">—</option>${doctors.map(d => `<option value="${d.id}">${esc(d.full_name)}</option>`).join('')}</select></div>`}
-          <div class="field" style="grid-column:1/-1"><label>التشخيص *</label><input id="f-dx"></div>
-          <div class="field" style="grid-column:1/-1"><label>الوصفة الطبية</label><textarea id="f-rx" rows="2"></textarea></div>
-          <div class="field" style="grid-column:1/-1"><label>ملاحظات</label><textarea id="f-notes" rows="2"></textarea></div>
-        </div>
-        <button class="btn success" style="margin-top:12px" onclick="addRecord()">حفظ السجل</button>
-        </details>
-        <div style="overflow-x:auto"><table>
-          <thead><tr><th>#</th><th>التاريخ</th><th>المريض</th><th>الطبيب</th><th>التشخيص</th><th></th></tr></thead>
-          <tbody>${rows.map(r => `
-          <tr>
-            <td>${r.id}</td><td>${fmtDate(r.created_at)}</td>
-            <td>${esc(r.patient.full_name)}</td><td>${esc(r.doctor ? r.doctor.full_name : '-')}</td>
-            <td>${esc(r.diagnosis)}</td>
-            <td class="actions">
-              ${(attMap[r.id] || []).length ? `<button class="btn sm ghost" onclick="toggleRecordAtts(${r.id})">📎 ${attMap[r.id].length}</button>` : ''}
-              <button class="btn sm ghost" onclick="download('/medical-records/${r.id}/pdf','record_${r.id}.pdf')">📄 PDF</button>
-              ${(isAdmin() || (isDoctor() && r.doctor && USER.email === r.doctor.email)) ? `<button class="btn sm danger" onclick="del('medical-records',${r.id},'records')">حذف</button>` : ''}
-            </td>
-          </tr>
-          <tr id="att-row-${r.id}" style="display:none"><td colspan="6" style="background:#f8fafd">
-            <strong>📎 مرفقات هذا السجل:</strong>
-            ${(attMap[r.id] || []).map(a => `<div style="margin:6px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-              <span>${a.content_type.includes('image') ? '🖼️' : '📄'} ${esc(a.original_name)}</span>
-              <small>(${fmtSize(a.size_bytes)})</small>
-              <button class="btn sm ghost" onclick="previewAtt(${a.id})">👁️ معاينة</button>
-              <button class="btn sm ghost" onclick="download('/attachments/${a.id}/file','${esc(a.original_name)}')">⬇️ تنزيل</button>
-            </div>`).join('') || '<em>لا مرفقات</em>'}
-          </td></tr>`).join('') || '<tr><td colspan="6" class="empty">لا توجد سجلات</td></tr>'}</tbody>
-        </table></div>
-      </div>`;
-  },
-
-  /* --- الأقسام --- */
-  async departments(main) {
-    const rows = await api('/departments/');
-    const form = isAdmin() ? `
-      <details class="addbox"><summary>➕ إضافة قسم</summary>
-      <div class="form-grid">
-        <div class="field"><label>اسم القسم *</label><input id="f-name"></div>
-        <div class="field"><label>الدور</label><input id="f-floor"></div>
-        <div class="field"><label>الوصف</label><input id="f-desc"></div>
-      </div>
-      <button class="btn success" style="margin-top:12px" onclick="addDept()">حفظ القسم</button>
-      </details>` : '';
-    main.innerHTML = `
-      <div class="card">
-        <h3>الأقسام (${rows.length})</h3>
-        ${form}
-        <div style="overflow-x:auto"><table>
-          <thead><tr><th>#</th><th>الاسم</th><th>الدور</th><th>الوصف</th><th>الأسرّة</th>${isAdmin() ? '<th></th>' : ''}</tr></thead>
-          <tbody>${rows.map(d => `<tr>
-            <td>${d.id}</td><td><strong>${esc(d.name)}</strong></td><td>${esc(d.floor || '-')}</td>
-            <td>${esc(d.description || '-')}</td><td>${d.beds.length}</td>
-            ${isAdmin() ? `<td><button class="btn sm danger" onclick="del('departments',${d.id},'departments')">حذف</button></td>` : ''}
-          </tr>`).join('') || '<tr><td colspan="6" class="empty">لا توجد أقسام</td></tr>'}</tbody>
-        </table></div>
-      </div>`;
-  },
-
-  /* --- الأسرّة --- */
-  async beds(main) {
-    const [rows, depts, patients] = await Promise.all([
-      api('/beds/'), api('/departments/'), api('/patients/')]);
-    const stLabel = { available: 'متاح', occupied: 'مشغول', maintenance: 'صيانة' };
-    const form = isAdmin() ? `
-      <details class="addbox"><summary>➕ إضافة سرير</summary>
-      <div class="form-grid">
-        <div class="field"><label>رقم السرير *</label><input id="f-num"></div>
-        <div class="field"><label>القسم *</label><select id="f-dept">
-          ${depts.map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join('')}</select></div>
-      </div>
-      <button class="btn success" style="margin-top:12px" onclick="addBed()">حفظ السرير</button>
-      </details>` : '';
-    main.innerHTML = `
-      <div class="card">
-        <h3>الأسرّة (${rows.length})</h3>
-        ${form}
-        <div style="overflow-x:auto"><table>
-          <thead><tr><th>#</th><th>السرير</th><th>القسم</th><th>الحالة</th><th>المريض</th><th>إجراء</th>${isAdmin() ? '<th></th>' : ''}</tr></thead>
-          <tbody>${rows.map(b => `<tr>
-            <td>${b.id}</td><td><strong>${esc(b.bed_number)}</strong></td>
-            <td>${esc(depts.find(d => d.id === b.department_id)?.name || '-')}</td>
-            <td>${pill(b.status)}</td>
-            <td>${esc(patients.find(p => p.id === b.patient_id)?.full_name || '—')}</td>
-            <td>
-              <select onchange="updateBed(${b.id}, this.value)" style="padding:5px;border-radius:6px;border:1px solid #ddd">
-                ${Object.entries(stLabel).map(([k, v]) => `<option value="${k}" ${b.status === k ? 'selected' : ''}>${v}</option>`).join('')}
-              </select>
-            </td>
-            ${isAdmin() ? `<td><button class="btn sm danger" onclick="del('beds',${b.id},'beds')">حذف</button></td>` : ''}
-          </tr>`).join('') || '<tr><td colspan="7" class="empty">لا توجد أسرّة</td></tr>'}</tbody>
-        </table></div>
-      </div>`;
-  },
-
-  /* --- الفواتير --- */
-  async invoices(main) {
-    const [rows, patients, appts, recs] = await Promise.all([
-      api('/invoices/'), api('/patients/'), api('/appointments/'), api('/medical-records/')]);
-    const stLabel = { unpaid: 'غير مدفوعة', paid: 'مدفوعة', partial: 'جزئية' };
-    const optAppts = appts.map(a =>
-      `<option value="${a.id}">#${a.id} — ${esc(a.patient.full_name)} — ${fmtDate(a.appointment_date)}</option>`).join('');
-    const optRecs = recs.map(r =>
-      `<option value="${r.id}">#${r.id} — ${esc(r.patient.full_name)} — ${esc(r.diagnosis)}</option>`).join('');
-    main.innerHTML = `
-      <div class="card">
-        <h3>الفواتير (${rows.length})</h3>
-        <div class="toolbar" style="margin-bottom:6px">
-          <button class="btn ghost" onclick="download('/invoices/export.csv','invoices.csv')">⬆️ تصدير CSV</button>
-        </div>
-        <details class="addbox"><summary>➕ إنشاء فاتورة</summary>
-        <div class="form-grid">
-          <div class="field"><label>المريض *</label><select id="f-pat">
-            ${patients.map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join('')}</select></div>
-          <div class="field"><label>المبلغ (ر.س) *</label><input id="f-amt" type="number" step="0.01" min="1"></div>
-          <div class="field"><label>الخصم (ر.س)</label><input id="f-disc" type="number" step="0.01" min="0" value="0"></div>
-          <div class="field"><label>الضريبة %</label><input id="f-tax" type="number" step="0.1" min="0" max="100" value="0"></div>
-          <div class="field"><label>الحالة</label><select id="f-st">
-            <option value="unpaid">غير مدفوعة</option><option value="paid">مدفوعة</option><option value="partial">جزئية</option></select></div>
-          <div class="field"><label>الوصف *</label><input id="f-desc"></div>
-          <div class="field"><label>🔗 ربط بموعد</label><select id="f-appt"><option value="">—</option>${optAppts}</select></div>
-          <div class="field"><label>🔗 ربط بسجل طبي</label><select id="f-rec"><option value="">—</option>${optRecs}</select></div>
-          <div class="field"><label>🏢 شركة التأمين</label><input id="f-ins" placeholder="اختياري — مطلوب للدفع بالتأمين"></div>
-          <div class="field"><label>📄 رقم الوثيقة</label><input id="f-pol"></div>
-        </div>
-        <button class="btn success" style="margin-top:12px" onclick="addInvoice()">إنشاء الفاتورة</button>
-        </details>
-        <div style="overflow-x:auto"><table>
-          <thead><tr><th>#</th><th>التاريخ</th><th>المريض</th><th>الوصف</th><th>الإجمالي</th><th>الحالة</th><th>الدفع</th><th></th></tr></thead>
-          <tbody>${rows.map(i => `<tr>
-            <td>${i.id}${i.appointment_id ? ' 🔗' : ''}${i.record_id ? ' 📋' : ''}</td>
-            <td>${fmtDate(i.created_at)}</td><td>${esc(i.patient.full_name)}</td>
-            <td>${esc(i.description)}${i.insurer ? `<br><small>🏢 ${esc(i.insurer)}${i.policy_number ? ' — #' + esc(i.policy_number) : ''}</small>` : ''}</td>
-            <td><strong>${(i.total != null ? i.total : i.amount).toLocaleString()} ر.س</strong>${(i.discount || i.tax_rate) ? `<br><small>أساسي ${i.amount.toLocaleString()}${i.discount ? ' − خصم ' + i.discount.toLocaleString() : ''}${i.tax_rate ? ' + ضريبة ' + i.tax_rate + '%' : ''}</small>` : ''}${i.paid_amount ? `<br><small style="color:#28a745">مدفوع ${i.paid_amount.toLocaleString()}</small>` : ''}</td>
-            <td>${pill(i.status)}</td>
-            <td>${i.paid_at ? `${esc(i.payment_method || '-')} · ${fmtDate(i.paid_at)}` : '—'}</td>
-            <td class="actions">
-              ${i.status !== 'paid' ? `<button class="btn sm success" onclick="payInvoice(${i.id})">💰 دفع</button>` : ''}
-              <button class="btn sm ghost" onclick="printInvoice(${i.id})">🖨️ طباعة</button>
-              <button class="btn sm ghost" onclick="download('/invoices/${i.id}/pdf','invoice_${i.id}.pdf')">📄 PDF</button>
-              ${isAdmin() ? `<button class="btn sm danger" onclick="del('invoices',${i.id},'invoices')">حذف</button>` : ''}
-            </td>
-          </tr>`).join('') || '<tr><td colspan="8" class="empty">لا توجد فواتير</td></tr>'}</tbody>
-        </table></div>
+        <div class="hr-editor" id="hr-editor">${hrEditorHTML()}</div>
       </div>`;
   },
 
@@ -1961,6 +1843,41 @@ const VIEWS = {
       api('/inventory/?' + qs.toString()),
       api('/inventory/summary?expiring_days=' + INV.days),
       api('/inventory/movements?limit=50')]);
+function saveHR() {
+  const s = currentHR(); if (!s) return;
+  const profile = hrProfile();
+  document.querySelectorAll('#hr-editor [data-hr]').forEach(el => {
+    const [group, key] = el.dataset.hr.split('.');
+    profile[group][key] = el.type === 'number' ? Number(el.value || 0) : el.value;
+  });
+  const personal = profile.personal, employment = profile.employment;
+  const body = {
+    full_name: s.full_name, position: employment.job_title || s.position, phone: personal.phone,
+    email: personal.email, hire_date: s.hire_date, salary: profile.salary.basic_salary,
+    hr_profile: profile
+  };
+  api('/staff/' + s.id, { method: 'PUT', body: JSON.stringify(body) }).then(r => {
+    Object.assign(s, r); toast('تم حفظ ملف الموظف ✅'); navigate('hr');
+  }).catch(e => toast(e.message, true));
+}
+function setHRTab(tab) { HR_TAB = tab; const b = document.getElementById('hr-editor'); if (b) b.innerHTML = hrEditorHTML(); }
+function selectHR(id) { HR_SELECTED = id; HR_TAB = 'personal'; document.getElementById('hr-list').innerHTML = hrDirectoryHTML(); const b = document.getElementById('hr-editor'); if (b) b.innerHTML = hrEditorHTML(); }
+function filterHR(value) { const b = document.getElementById('hr-list'); if (b) b.innerHTML = hrDirectoryHTML(value); }
+async function uploadHRDocument(staffId) {
+  const file = document.getElementById('hr-doc-file').files[0];
+  if (!file) return toast('اختر ملف المستند أولًا', true);
+  const form = new FormData(); form.append('staff_id', staffId); form.append('doc_type', document.getElementById('hr-doc-type').value); form.append('file', file);
+  try {
+    await api('/staff-documents/', { method: 'POST', body: form });
+    const docs = await api('/staff-documents/?staff_id=' + staffId);
+    const s = currentHR(); if (s) s.documents = docs; toast('تم رفع المستند ✅'); navigate('hr');
+  } catch(e) { toast(e.message, true); }
+}
+async function deleteStaffDoc(id) {
+  if (!confirm('حذف هذا المستند؟')) return;
+  try { await api('/staff-documents/' + id, { method: 'DELETE' }); toast('تم حذف المستند'); navigate('hr'); } catch(e) { toast(e.message, true); }
+}
+
     const stPill = { ok: 'confirmed', low: 'lowstock', out: 'unpaid',
                      expiring: 'pending', expired: 'cancelled' };
     const stLbl = { ok: 'سليم', low: 'منخفض', out: 'نافد',
@@ -2044,7 +1961,7 @@ const VIEWS = {
       </div>`;
   },
 
-  /* --- المبيعات: السجل + التسديد + المنحنى --- */
+  /* --- تبويب «المبيعات»: السجل + الفلاتر + التسديد --- */
   async sales(main) {
     const f = ACC;
     const p = periodRange(f.period);
@@ -2054,38 +1971,11 @@ const VIEWS = {
     if (f.status) q.set('status', f.status);
     if (f.patient) q.set('patient_id', f.patient);
     if (f.staff) q.set('staff', f.staff);
-    const periodQ = f.period ? '?period=' + encodeURIComponent(f.period)
-      : (p.from ? '?from_date=' + p.from + '&to_date=' + encodeURIComponent(p.to) : '');
-    const [sum, sales, rev] = await Promise.all([
-      api('/accounts/summary' + periodQ),
-      api('/accounts/sales' + (q.toString() ? '?' + q.toString() : '')),
-      api('/accounts/revenue' + (periodQ ? periodQ + '&group=' + accGroup : '?group=' + accGroup))]);
+    /* جدول المبيعات فقط — الملخّص والمنحنى في تبويب «نظرة عامة» */
+    const sales = await api('/accounts/sales' + (q.toString() ? '?' + q.toString() : ''));
     ACC_ROWS = sales;
     const unpaidCount = sales.filter(x => x.status !== 'PAID').length;
-    const maxRev = Math.max(1, ...rev.map(r => r.sales));
     main.innerHTML = `
-      <div class="stats">
-        <div class="stat"><div class="num">${sum.total_sales.toLocaleString()} ر.س</div><div class="lbl">إجمالي المبيعات</div></div>
-        <div class="stat green"><div class="num">${sum.total_paid.toLocaleString()} ر.س</div><div class="lbl">المحصّل</div></div>
-        <div class="stat red"><div class="num">${(sum.total_outstanding || 0).toLocaleString()} ر.س</div><div class="lbl">المتبقي (مدين)</div></div>
-        <div class="stat amber"><div class="num">${sum.count}</div><div class="lbl">عدد العمليات</div></div>
-      </div>
-      <div class="card">
-        <div class="toolbar" style="margin-bottom:6px">
-          <h3 style="margin:0">📈 منحنى الإيراد (${rev.length} ${rev.length && rev[0] && rev[0].date.length === 7 ? 'شهرًا' : 'يومًا'})</h3>
-          <button class="btn ghost sm" onclick="setAccGroup('day')" ${accGroup === 'day' ? 'disabled' : ''}>يومي</button>
-          <button class="btn ghost sm" onclick="setAccGroup('month')" ${accGroup === 'month' ? 'disabled' : ''}>شهري</button>
-        </div>
-        <div class="bars">
-          ${rev.length ? rev.map(r => `
-            <div class="bar-wrap" title="${r.date}: ${r.sales.toLocaleString()} ر.س (${r.count} عملية)">
-              <div class="val">${Math.round(r.sales)}</div>
-              <div class="bar" style="height:${Math.max(4, Math.round(r.sales / maxRev * 110))}px;
-                background:linear-gradient(180deg,#28a745,#85ce8f)"></div>
-              <div class="lbl">${accGroup === 'month' ? r.date : r.date.slice(5)}</div>
-            </div>`).join('') : '<div class="empty">لا يوجد إيراد في هذه الفترة</div>'}
-        </div>
-      </div>
       <div class="card">
         <div class="toolbar"><h3 style="margin:0">سجل المبيعات (${sales.length})</h3>
           <input id="f-acc-period" placeholder="YYYY-MM (كل الفترات)" value="${esc(f.period || '')}" style="max-width:170px">
@@ -2136,58 +2026,81 @@ const VIEWS = {
       </div>`;
   },
 
-  /* --- الحسابات: الأرصدة + المدينون + كشف الحساب + التقارير --- */
+  /* --- تبويب «نظرة عامة» (قسم الحسابات): الملخّص المالي + المنحنى + طرق الدفع --- */
   async accounts(main) {
     const f = ACC;
     const p = periodRange(f.period);
     const periodQ = f.period ? '?period=' + encodeURIComponent(f.period)
       : (p.from ? '?from_date=' + p.from + '&to_date=' + encodeURIComponent(p.to) : '');
-    const [sum, debtors, revMonth] = await Promise.all([
+    const [sum, debtors, rev] = await Promise.all([
       api('/accounts/summary' + periodQ),
       api('/accounts/debtors' + periodQ),
-      api('/accounts/revenue?group=month' + (periodQ ? '&' + periodQ.slice(1) : ''))]);
+      api('/accounts/revenue' + (periodQ ? periodQ + '&group=' + accGroup : '?group=' + accGroup))]);
     const pm = Object.entries(sum.by_payment_method || {});
     const outstanding = sum.total_outstanding || 0;
     const totalDues = debtors.reduce((a, d) => a + d.outstanding, 0);
-    const maxM = Math.max(1, ...revMonth.map(r => r.sales));
+    const maxRev = Math.max(1, ...rev.map(r => r.sales));
     main.innerHTML = `
       <div class="stats">
         <div class="stat"><div class="num">${sum.total_sales.toLocaleString()} ر.س</div><div class="lbl">إجمالي المبيعات</div></div>
         <div class="stat green"><div class="num">${sum.total_paid.toLocaleString()} ر.س</div><div class="lbl">المحصّل</div></div>
         <div class="stat red"><div class="num">${outstanding.toLocaleString()} ر.س</div><div class="lbl">المتبقي (مدين)</div></div>
-        <div class="stat amber"><div class="num">${debtors.length}</div><div class="lbl">عدد المدينين</div></div>
+        <div class="stat amber"><div class="num">${sum.count}</div><div class="lbl">عدد العمليات</div></div>
+        <div class="stat"><div class="num">${debtors.length}</div><div class="lbl">عدد المدينين</div></div>
+        <div class="stat red"><div class="num">${totalDues.toLocaleString()} ر.س</div><div class="lbl">مستحقات المدينين</div></div>
       </div>
       <div class="card">
-        <div class="toolbar">
-          <h3 style="margin:0">🧾 كشف حساب مريض</h3>
-          <input id="f-stmt-patient" type="number" min="1" placeholder="رقم المريض" style="max-width:150px">
-          <button class="btn" onclick="showStatement()">عرض الكشف</button>
-          ${isAdmin() ? `<button class="btn ghost" onclick="downloadAccounts('pdf')">📄 تقرير المبيعات PDF</button>` : ''}
-          ${isAdmin() ? `<button class="btn ghost" onclick="downloadAccounts('csv')">⬇️ تقرير المبيعات CSV</button>` : ''}
+        <div class="toolbar" style="margin-bottom:6px">
+          <h3 style="margin:0">📈 منحنى الإيراد (${rev.length} ${rev.length && rev[0] && rev[0].date.length === 7 ? 'شهرًا' : 'يومًا'})</h3>
+          <button class="btn ghost sm" onclick="setAccGroup('day')" ${accGroup === 'day' ? 'disabled' : ''}>يومي</button>
+          <button class="btn ghost sm" onclick="setAccGroup('month')" ${accGroup === 'month' ? 'disabled' : ''}>شهري</button>
+          ${isAdmin() ? `<button class="btn ghost sm" onclick="downloadAccounts('pdf')">📄 تقرير المبيعات PDF</button>
+            <button class="btn ghost sm" onclick="downloadAccounts('csv')">⬇️ تقرير المبيعات CSV</button>` : ''}
         </div>
-        <div id="stmt-out"><div class="empty">أدخل رقم المريض لعرض كشف حسابه (مبيعات + فواتير + الرصيد)</div></div>
+        <div class="bars">
+          ${rev.length ? rev.map(r => `
+            <div class="bar-wrap" title="${r.date}: ${r.sales.toLocaleString()} ر.س (${r.count} عملية)">
+              <div class="val">${Math.round(r.sales)}</div>
+              <div class="bar" style="height:${Math.max(4, Math.round(r.sales / maxRev * 110))}px;
+                background:linear-gradient(180deg,#28a745,#85ce8f)"></div>
+              <div class="lbl">${accGroup === 'month' ? r.date : r.date.slice(5)}</div>
+            </div>`).join('') : '<div class="empty">لا يوجد إيراد في هذه الفترة</div>'}
+        </div>
       </div>
       ${pm.length ? `<div class="card"><h3>توزيع طرق الدفع</h3>
         <div class="toolbar">${pm.map(([k, v]) =>
           `<span class="pill ${k === 'cash' ? 'paid' : (k === 'card' ? 'completed' : 'in_progress')}">${k === 'cash' ? 'نقدًا' : (k === 'card' ? 'بطاقة' : 'تأمين')}: ${Number(v).toLocaleString()} ر.س</span>`).join('')}</div>
       </div>` : ''}
       <div class="card">
-        <div class="toolbar" style="margin-bottom:6px">
-          <h3 style="margin:0">📊 الإيراد الشهري (${revMonth.length} شهرًا)</h3>
-          <span class="pill paid">إجمالي المدينين: ${totalDues.toLocaleString()} ر.س</span>
+        <div class="toolbar"><h3 style="margin:0">🔗 أقسام مرتبطة</h3>
+          <button class="btn sm" onclick="setAccTab('sales')">🛒 سجل المبيعات</button>
+          <button class="btn sm" onclick="setAccTab('debtors')">🧾 المدينون</button>
+          <button class="btn sm ghost" onclick="setAccTab('ledger')">📒 الدفتر العام</button>
+          <button class="btn sm ghost" onclick="setAccTab('reports')">📄 التقارير</button>
         </div>
-        <div class="bars">
-          ${revMonth.length ? revMonth.map(r => `
-            <div class="bar-wrap" title="${r.date}: ${r.sales.toLocaleString()} ر.س">
-              <div class="val">${Math.round(r.sales)}</div>
-              <div class="bar" style="height:${Math.max(4, Math.round(r.sales / maxM * 110))}px;
-                background:linear-gradient(180deg,#2c7be5,#7aa8f5)"></div>
-              <div class="lbl">${r.date}</div>
-            </div>`).join('') : '<div class="empty">لا يوجد إيراد</div>'}
+      </div>`;
+  },
+
+  /* --- تبويب «المدينون»: كشف حساب المريض + ذمم المرضى --- */
+  async debtors(main) {
+    const f = ACC;
+    const p = periodRange(f.period);
+    const periodQ = f.period ? '?period=' + encodeURIComponent(f.period)
+      : (p.from ? '?from_date=' + p.from + '&to_date=' + encodeURIComponent(p.to) : '');
+    const debtors = await api('/accounts/debtors' + periodQ);
+    const totalDues = debtors.reduce((a, d) => a + d.outstanding, 0);
+    main.innerHTML = `
+      <div class="card">
+        <div class="toolbar">
+          <h3 style="margin:0">🧾 كشف حساب مريض</h3>
+          <input id="f-stmt-patient" type="number" min="1" placeholder="رقم المريض" style="max-width:150px">
+          <button class="btn" onclick="showStatement()">عرض الكشف</button>
         </div>
+        <div id="stmt-out"><div class="empty">أدخل رقم المريض لعرض كشف حسابه (مبيعات + فواتير + الرصيد)</div></div>
       </div>
       <div class="card">
-        <h3>🧾 المدينون (${debtors.length})</h3>
+        <div class="toolbar"><h3 style="margin:0">🧾 المدينون (${debtors.length})</h3>
+          <span class="pill unpaid">إجمالي المستحقات: ${totalDues.toLocaleString()} ر.س</span></div>
         <div style="overflow-x:auto"><table>
           <thead><tr><th>المريض</th><th>عمليات غير مسدّدة</th><th>إجمالي مستحقاتهم</th><th>مدفوع</th><th>المتبقي</th><th></th></tr></thead>
           <tbody>${debtors.map(d => `<tr>
@@ -2209,7 +2122,46 @@ const VIEWS = {
           </tr></tfoot>` : ''}
         </table></div>
       </div>`;
+  },
+
+  /* --- تبويب «الدفتر العام»: القيود ودليل الحسابات وميزان المراجعة --- */
+  async ledger(main) {
+    main.innerHTML = '';
     await renderGeneralLedger(main);
+  },
+
+  /* --- تبويب «التقارير»: مركز تنزيل تقارير المحاسبة وما يتصل بها --- */
+  async reports(main) {
+    main.innerHTML = `
+      <div class="card">
+        <h3>💰 التقارير المالية</h3>
+        <div class="toolbar">
+          <input id="f-rep-patient" type="number" min="1" placeholder="رقم المريض" style="max-width:150px">
+          <button class="btn" onclick="statementPdf()">⬇️ كشف حساب مريض PDF</button>
+          ${isAdmin() ? `<button class="btn ghost" onclick="downloadAccounts('pdf')">📄 تقرير المبيعات PDF</button>
+          <button class="btn ghost" onclick="downloadAccounts('csv')">⬇️ تقرير المبيعات CSV</button>
+          <button class="btn ghost" onclick="downloadReport()">📊 التقرير الإحصائي PDF</button>` : ''}
+        </div>
+        <p style="margin:10px 0 0;color:#7a8699;font-size:13px">
+          تُصدَّر التقارير بلغة الواجهة الحالية، ويستهدف تقرير المبيعات الفترة المختارة في تبويب المبيعات.</p>
+      </div>
+      <div class="card">
+        <h3>💵 الرواتب</h3>
+        <div class="toolbar">
+          <input id="f-rpp" placeholder="YYYY-MM (كل الفترات)" style="max-width:170px">
+          <button class="btn ghost" onclick="downloadPayroll('pdf')">📄 كشف الرواتب PDF</button>
+          <button class="btn ghost" onclick="downloadPayroll('csv')">⬇️ كشف الرواتب CSV</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>🏥 تقارير التشغيل المرتبطة</h3>
+        <div class="toolbar">
+          ${isAdmin() || isDoctor() ? `<button class="btn ghost" onclick="download('/reports/lab/pdf','lab_report.pdf')">📄 تقرير المختبر PDF</button>
+          <button class="btn ghost" onclick="download('/reports/lab/csv','lab_orders.csv')">⬇️ طلبات المختبر CSV</button>` : ''}
+          ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/pdf','pharmacy_report.pdf')">📄 تقرير الصيدلية PDF</button>
+          <button class="btn ghost" onclick="download('/reports/pharmacy/stats/pdf','pharmacy_stats.pdf')">📊 إحصاءات الصيدلية PDF</button>` : ''}
+        </div>
+      </div>`;
   },
 
   /* --- الرواتب --- */
@@ -2378,7 +2330,369 @@ const VIEWS = {
           </tr>`).join('') || '<tr><td colspan="5" class="empty">لا توجد نسخ بعد</td></tr>'}</tbody>
         </table></div>
       </div>`;
-  }
+  },
+
+  /* --- شاشة المحاسبة: شريط التبويبات + حاوية المحتوى --- */
+  async accounting(main) {
+    main.innerHTML = `
+      <div class="tabbar" id="acc-tabs" role="tablist">
+        ${ACC_TAB_LIST.map(([k, label]) => `<button type="button" role="tab"
+          class="tab${k === ACC_TAB ? ' active' : ''}" data-tab="${k}"
+          aria-selected="${k === ACC_TAB}" onclick="setAccTab('${k}')">${tr(label)}</button>`).join('')}
+      </div>
+      <div id="acc-body"><div class="empty">جارٍ التحميل…</div></div>`;
+    await setAccTab(ACC_TAB);
+  },
+
+  /* --- الرعاية والتشغيل --- */
+  clinical(main) { return renderOps(main, 'clinical'); },
+  support(main) { return renderOps(main, 'support'); },
+  governance(main) { return renderOps(main, 'governance'); },
+
+  /* --- لوحة التحكم --- */
+  async dashboard(main) {
+    const s = await api('/dashboard/stats');
+    s.operations = await api('/clinical/overview');
+    const statuses = s.appointments_by_status || {};
+    const maxVal = Math.max(1, ...Object.values(statuses));
+    const stLabels = { pending: 'معلّقة', confirmed: 'مؤكدة', cancelled: 'ملغاة', completed: 'مكتملة' };
+    main.innerHTML = `
+      <div class="stats">
+        <div class="stat"><div class="num">${s.total_patients}</div><div class="lbl">المرضى</div></div>
+        <div class="stat green"><div class="num">${s.total_doctors}</div><div class="lbl">الأطباء</div></div>
+        <div class="stat amber"><div class="num">${s.appointments_today}</div><div class="lbl">مواعيد اليوم</div></div>
+        <div class="stat red"><div class="num">${s.pending_appointments}</div><div class="lbl">مواعيد معلّقة</div></div>
+        <div class="stat"><div class="num">${s.beds_occupied}/${s.beds_total}</div><div class="lbl">أسرّة مشغولة</div></div>
+        <div class="stat green"><div class="num">${s.revenue_paid.toLocaleString()}</div><div class="lbl">إيرادات محصّلة (ر.س)</div></div>
+        <div class="stat red"><div class="num">${s.revenue_unpaid.toLocaleString()}</div><div class="lbl">مستحقات غير محصّلة</div></div>
+        <div class="stat"><div class="num">${s.total_departments}</div><div class="lbl">الأقسام</div></div>
+        <div class="stat amber"><div class="num">${s.operations.nursing_pending || 0}</div><div class="lbl">مهام تمريض مفتوحة</div></div>
+        <div class="stat red"><div class="num">${s.operations.surgeries_active || 0}</div><div class="lbl">عمليات نشطة</div></div>
+        <div class="stat"><div class="num">${s.operations.safety_open || 0}</div><div class="lbl">حوادث تحتاج متابعة</div></div>
+        <div class="stat green"><div class="num">${s.operations.maintenance_open || 0}</div><div class="lbl">أوامر صيانة</div></div>
+      </div>
+      <div class="card">
+        <h3>توزيع المواعيد حسب الحالة</h3>
+        ${isAdmin() || isDoctor() ? `<div style="margin-bottom:14px"><button class="btn ghost" onclick="downloadReport()">📄 تحميل تقرير PDF</button></div>` : ''}
+        <div class="bars">
+          ${Object.keys(statuses).length ? Object.entries(statuses).map(([k, v]) => `
+            <div class="bar-wrap">
+              <div class="val">${v}</div>
+              <div class="bar" style="height:${Math.round(v / maxVal * 110)}px"></div>
+              <div class="lbl">${stLabels[k] || k}</div>
+            </div>`).join('') : '<div class="empty">لا توجد مواعيد بعد</div>'}
+        </div>
+      </div>`;
+  },
+
+  /* --- المرضى --- */
+  async patients(main) {
+    const rows = await api('/patients/');
+    const form = isAdmin() || !isDoctor() ? `
+      <details class="addbox"><summary>➕ إضافة مريض جديد</summary>
+      <div class="form-grid">
+        <div class="field"><label>الاسم الكامل *</label><input id="f-name"></div>
+        <div class="field"><label>تاريخ الميلاد *</label><input id="f-dob" type="date"></div>
+        <div class="field"><label>النوع *</label><select id="f-gender"><option>ذكر</option><option>أنثى</option></select></div>
+        <div class="field"><label>الهاتف *</label><input id="f-phone"></div>
+        <div class="field"><label>البريد الإلكتروني *</label><input id="f-email" type="email"></div>
+        <div class="field"><label>العنوان</label><input id="f-addr"></div>
+        <div class="field"><label>مجموعة الدم</label><select id="f-blood"><option value="">—</option><option>O+</option><option>O-</option><option>A+</option><option>A-</option><option>B+</option><option>B-</option><option>AB+</option><option>AB-</option></select></div>
+        <div class="field"><label>الهوية الوطنية</label><input id="f-nat" placeholder="رقم الهوية/الإقامة"></div>
+        <div class="field"><label>شركة التأمين</label><input id="f-ins" placeholder="اختياري"></div>
+        <div class="field"><label>رقم وثيقة التأمين</label><input id="f-pol"></div>
+      </div>
+      <button class="btn success" style="margin-top:12px" onclick="addPatient()">حفظ المريض</button>
+      </details>` : '';
+    main.innerHTML = `
+      <div class="card">
+        <h3>المرضى (${rows.length})</h3>
+        <div class="toolbar">
+          <input id="q" placeholder="🔍 بحث بالاسم أو الهاتف أو الهوية…" oninput="filterTable('tbl', this.value)">
+          <button class="btn ghost" onclick="download('/patients/export.csv','patients.csv')">⬆️ تصدير CSV</button>
+          ${form ? `<label class="btn ghost" style="cursor:pointer;margin:0">⬇️ استيراد CSV<input type="file" accept=".csv,text/csv" style="display:none" onchange="importPatients(this)"></label>` : ''}
+        </div>
+        ${form}
+        <div style="overflow-x:auto"><table id="tbl">
+          <thead><tr><th>#</th><th>الاسم</th><th>النوع</th><th>الهاتف</th><th>البريد</th><th>الدم</th><th>الهوية</th><th>أُضيف</th><th></th></tr></thead>
+          <tbody>${rows.map(p => `<tr>
+            <td>${p.id}</td><td><strong>${esc(p.full_name)}</strong></td><td>${esc(p.gender)}</td>
+            <td>${esc(p.phone)}</td><td>${esc(p.email)}</td><td>${esc(p.blood_type || '-')}</td>
+            <td>${esc(p.national_id || '-')}${p.insurer ? `<br><small>🏢 ${esc(p.insurer)}</small>` : ''}</td>
+            <td>${fmtDate(p.created_at)}</td>
+            <td class="actions">
+              <button class="btn sm ghost" onclick="download('/patients/${p.id}/pdf','patient_${p.id}_file.pdf')">📄 الملف PDF</button>
+              ${isAdmin() ? `<button class="btn sm danger" onclick="del('patients',${p.id},'patients')">حذف</button>` : ''}
+            </td>
+          </tr>`).join('') || '<tr><td colspan="9" class="empty">لا يوجد مرضى</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+  },
+
+  /* --- الأطباء --- */
+  async doctors(main) {
+    const [rows, depts, stats] = await Promise.all([
+      api('/doctors/'), api('/departments/'),
+      api('/doctors/stats').catch(() => null)]);
+    DOCTORS_CACHE = rows; DOCTORS_DEPTS = depts;
+    const form = isAdmin() ? `
+      <details class="addbox"><summary>➕ إضافة طبيب جديد</summary>
+      <div class="form-grid">
+        <div class="field"><label>الاسم الكامل *</label><input id="f-name"></div>
+        <div class="field"><label>التخصص *</label><input id="f-spec"></div>
+        <div class="field"><label>رقم الترخيص *</label><input id="f-lic"></div>
+        <div class="field"><label>الهاتف *</label><input id="f-phone"></div>
+        <div class="field"><label>البريد الإلكتروني *</label><input id="f-email" type="email"></div>
+        <div class="field"><label>العنوان</label><input id="f-addr"></div>
+        <div class="field"><label>القسم</label><select id="f-dept"><option value="">—</option>
+          ${depts.map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join('')}</select></div>
+      </div>
+      <button class="btn success" style="margin-top:12px" onclick="addDoctor()">حفظ الطبيب</button>
+      </details>` : '';
+    const statCards = stats ? `
+      <div class="stats" style="margin-bottom:16px">
+        <div class="stat"><div class="num">${stats.total}</div><div class="lbl">إجمالي الأطباء</div></div>
+        <div class="stat green"><div class="num">${stats.available}</div><div class="lbl">أطباء متاحون</div></div>
+        <div class="stat amber"><div class="num">${stats.unavailable}</div><div class="lbl">غير متاحين</div></div>
+        <div class="stat"><div class="num">${stats.specialties}</div><div class="lbl">تخصصات</div></div>
+        <div class="stat"><div class="num">${stats.appointments}</div><div class="lbl">مواعيد مرتبطة</div></div>
+      </div>` : '';
+    const canToggle = d => isAdmin() || (isDoctor() && USER && d.email === USER.email);
+    main.innerHTML = `
+      ${statCards}
+      <div class="card">
+        <h3>الأطباء (${rows.length})</h3>
+        <div class="toolbar">
+          <input id="q" placeholder="🔍 بحث بالاسم/التخصص/الترخيص…" oninput="filterDoctors()">
+          <select id="flt-dept" onchange="filterDoctors()"><option value="">كل الأقسام</option>
+            ${depts.map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join('')}
+            <option value="none">بدون قسم</option></select>
+          <select id="flt-avail" onchange="filterDoctors()"><option value="">كل الحالات</option>
+            <option value="1">✅ متاح</option><option value="0">⛔ غير متاح</option></select>
+          <button class="btn ghost" onclick="doctorsPerformance()">📊 أداء الشهر</button>
+        </div>
+        ${form}
+        <div style="overflow-x:auto"><table id="tbl">
+          <thead><tr><th>#</th><th>الاسم</th><th>التخصص</th><th>الترخيص</th><th>الهاتف</th><th>القسم</th><th>متاح</th><th></th></tr></thead>
+          <tbody>${rows.map(d => `<tr data-dept="${d.department_id == null ? 'none' : d.department_id}" data-avail="${d.is_available ? '1' : '0'}">
+            <td>${d.id}</td><td><strong>${esc(d.full_name)}</strong></td><td>${esc(d.specialty)}</td>
+            <td>${esc(d.license_number)}</td><td>${esc(d.phone)}</td>
+            <td>${esc(d.department ? d.department.name : '-')}</td>
+            <td>${d.is_available ? '✅' : '⛔'}</td>
+            <td>
+              ${isAdmin() ? `<button class="btn sm ghost" onclick="editDoctor(${d.id})">✏️ تعديل</button>` : ''}
+              <button class="btn sm ghost" onclick="doctorReport(${d.id})">📈 تقرير</button>
+              ${canToggle(d) ? `<button class="btn sm ghost" onclick="doctorSchedule(${d.id})" title="نوبات العمل">🗓️</button>` : ''}
+              ${canToggle(d) ? `<button class="btn sm ghost" onclick="toggleDoctorAvail(${d.id},${d.is_available})">${d.is_available ? '⛔ تعطيل' : '✅ تمكين'}</button>` : ''}
+              ${isAdmin() ? `<button class="btn sm danger" onclick="del('doctors',${d.id},'doctors')">حذف</button>` : ''}
+            </td>
+          </tr>`).join('') || '<tr><td colspan="8" class="empty">لا يوجد أطباء</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+  },
+
+  /* --- المواعيد --- */
+  async appointments(main) {
+    const [rows, patients, doctors] = await Promise.all([
+      api('/appointments/'), api('/patients/'), api('/doctors/')]);
+    CAL_MODE = false;
+    main.innerHTML = `
+      <div class="card">
+        <h3>المواعيد (${rows.length})</h3>
+        <div class="toolbar">
+          <input type="date" id="flt-date" onchange="loadAppts()">
+          <select id="flt-status" onchange="loadAppts()">
+            <option value="">كل الحالات</option><option value="pending">معلّقة</option>
+            <option value="confirmed">مؤكدة</option><option value="completed">مكتملة</option>
+            <option value="cancelled">ملغاة</option>
+          </select>
+          <button class="btn ghost" id="cal-btn" onclick="toggleCal()">🗓️ تقويم</button>
+        </div>
+        <div id="cal-box" style="display:none;margin-top:12px"></div>
+        <div id="queue-box" style="margin:12px 0"></div>
+        <details class="addbox"><summary>➕ حجز موعد جديد</summary>
+        <div class="form-grid">
+          <div class="field"><label>المريض *</label><select id="f-pat">
+            ${patients.map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join('')}</select></div>
+          <div class="field"><label>الطبيب *</label><select id="f-doc">
+            ${doctors.map(d => `<option value="${d.id}">${esc(d.full_name)}</option>`).join('')}</select></div>
+          <div class="field"><label>التاريخ والوقت *</label><input id="f-date" type="datetime-local"></div>
+          <div class="field"><label>السبب</label><input id="f-reason"></div>
+        </div>
+        <button class="btn success" style="margin-top:12px" onclick="addAppt()">حجز الموعد</button>
+        </details>
+        <div id="appt-table" style="overflow-x:auto"><table id="tbl">
+          <thead><tr><th>#</th><th>التاريخ</th><th>المريض</th><th>الطبيب</th><th>السبب</th><th>الحالة</th><th>الطابور</th><th></th></tr></thead>
+          <tbody id="appt-body"></tbody>
+        </table></div>
+      </div>`;
+    window._apptCache = { patients, doctors };
+    await loadAppts();
+  },
+
+  /* --- السجلات الطبية --- */
+  async records(main) {
+    const [rows, patients, doctors, atts] = await Promise.all([
+      api('/medical-records/'), api('/patients/'), api('/doctors/'), api('/attachments/')]);
+    // مرفقات كل سجل
+    const attMap = {};
+    atts.forEach(a => { if (a.record_id) (attMap[a.record_id] = attMap[a.record_id] || []).push(a); });
+    const fmtSize = b => b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.round(b / 1024) + ' KB';
+    main.innerHTML = `
+      <div class="card">
+        <h3>السجلات الطبية (${rows.length})</h3>
+        <details class="addbox"><summary>➕ إضافة سجل طبي</summary>
+        <div class="form-grid">
+          <div class="field"><label>المريض *</label><select id="f-pat">
+            ${patients.map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join('')}</select></div>
+          ${isDoctor() ? '' : `<div class="field"><label>الطبيب</label><select id="f-doc">
+            <option value="">—</option>${doctors.map(d => `<option value="${d.id}">${esc(d.full_name)}</option>`).join('')}</select></div>`}
+          <div class="field" style="grid-column:1/-1"><label>التشخيص *</label><input id="f-dx"></div>
+          <div class="field" style="grid-column:1/-1"><label>الوصفة الطبية</label><textarea id="f-rx" rows="2"></textarea></div>
+          <div class="field" style="grid-column:1/-1"><label>ملاحظات</label><textarea id="f-notes" rows="2"></textarea></div>
+        </div>
+        <button class="btn success" style="margin-top:12px" onclick="addRecord()">حفظ السجل</button>
+        </details>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>#</th><th>التاريخ</th><th>المريض</th><th>الطبيب</th><th>التشخيص</th><th></th></tr></thead>
+          <tbody>${rows.map(r => `
+          <tr>
+            <td>${r.id}</td><td>${fmtDate(r.created_at)}</td>
+            <td>${esc(r.patient.full_name)}</td><td>${esc(r.doctor ? r.doctor.full_name : '-')}</td>
+            <td>${esc(r.diagnosis)}</td>
+            <td class="actions">
+              ${(attMap[r.id] || []).length ? `<button class="btn sm ghost" onclick="toggleRecordAtts(${r.id})">📎 ${attMap[r.id].length}</button>` : ''}
+              <button class="btn sm ghost" onclick="download('/medical-records/${r.id}/pdf','record_${r.id}.pdf')">📄 PDF</button>
+              ${(isAdmin() || (isDoctor() && r.doctor && USER.email === r.doctor.email)) ? `<button class="btn sm danger" onclick="del('medical-records',${r.id},'records')">حذف</button>` : ''}
+            </td>
+          </tr>
+          <tr id="att-row-${r.id}" style="display:none"><td colspan="6" style="background:#f8fafd">
+            <strong>📎 مرفقات هذا السجل:</strong>
+            ${(attMap[r.id] || []).map(a => `<div style="margin:6px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+              <span>${a.content_type.includes('image') ? '🖼️' : '📄'} ${esc(a.original_name)}</span>
+              <small>(${fmtSize(a.size_bytes)})</small>
+              <button class="btn sm ghost" onclick="previewAtt(${a.id})">👁️ معاينة</button>
+              <button class="btn sm ghost" onclick="download('/attachments/${a.id}/file','${esc(a.original_name)}')">⬇️ تنزيل</button>
+            </div>`).join('') || '<em>لا مرفقات</em>'}
+          </td></tr>`).join('') || '<tr><td colspan="6" class="empty">لا توجد سجلات</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+  },
+
+  /* --- الأقسام --- */
+  async departments(main) {
+    const rows = await api('/departments/');
+    const form = isAdmin() ? `
+      <details class="addbox"><summary>➕ إضافة قسم</summary>
+      <div class="form-grid">
+        <div class="field"><label>اسم القسم *</label><input id="f-name"></div>
+        <div class="field"><label>الدور</label><input id="f-floor"></div>
+        <div class="field"><label>الوصف</label><input id="f-desc"></div>
+      </div>
+      <button class="btn success" style="margin-top:12px" onclick="addDept()">حفظ القسم</button>
+      </details>` : '';
+    main.innerHTML = `
+      <div class="card">
+        <h3>الأقسام (${rows.length})</h3>
+        ${form}
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>#</th><th>الاسم</th><th>الدور</th><th>الوصف</th><th>الأسرّة</th>${isAdmin() ? '<th></th>' : ''}</tr></thead>
+          <tbody>${rows.map(d => `<tr>
+            <td>${d.id}</td><td><strong>${esc(d.name)}</strong></td><td>${esc(d.floor || '-')}</td>
+            <td>${esc(d.description || '-')}</td><td>${d.beds.length}</td>
+            ${isAdmin() ? `<td><button class="btn sm danger" onclick="del('departments',${d.id},'departments')">حذف</button></td>` : ''}
+          </tr>`).join('') || '<tr><td colspan="6" class="empty">لا توجد أقسام</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+  },
+
+  /* --- الأسرّة --- */
+  async beds(main) {
+    const [rows, depts, patients] = await Promise.all([
+      api('/beds/'), api('/departments/'), api('/patients/')]);
+    const stLabel = { available: 'متاح', occupied: 'مشغول', maintenance: 'صيانة' };
+    const form = isAdmin() ? `
+      <details class="addbox"><summary>➕ إضافة سرير</summary>
+      <div class="form-grid">
+        <div class="field"><label>رقم السرير *</label><input id="f-num"></div>
+        <div class="field"><label>القسم *</label><select id="f-dept">
+          ${depts.map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join('')}</select></div>
+      </div>
+      <button class="btn success" style="margin-top:12px" onclick="addBed()">حفظ السرير</button>
+      </details>` : '';
+    main.innerHTML = `
+      <div class="card">
+        <h3>الأسرّة (${rows.length})</h3>
+        ${form}
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>#</th><th>السرير</th><th>القسم</th><th>الحالة</th><th>المريض</th><th>إجراء</th>${isAdmin() ? '<th></th>' : ''}</tr></thead>
+          <tbody>${rows.map(b => `<tr>
+            <td>${b.id}</td><td><strong>${esc(b.bed_number)}</strong></td>
+            <td>${esc(depts.find(d => d.id === b.department_id)?.name || '-')}</td>
+            <td>${pill(b.status)}</td>
+            <td>${esc(patients.find(p => p.id === b.patient_id)?.full_name || '—')}</td>
+            <td>
+              <select onchange="updateBed(${b.id}, this.value)" style="padding:5px;border-radius:6px;border:1px solid #ddd">
+                ${Object.entries(stLabel).map(([k, v]) => `<option value="${k}" ${b.status === k ? 'selected' : ''}>${v}</option>`).join('')}
+              </select>
+            </td>
+            ${isAdmin() ? `<td><button class="btn sm danger" onclick="del('beds',${b.id},'beds')">حذف</button></td>` : ''}
+          </tr>`).join('') || '<tr><td colspan="7" class="empty">لا توجد أسرّة</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+  },
+
+  /* --- الفواتير --- */
+  async invoices(main) {
+    const [rows, patients, appts, recs] = await Promise.all([
+      api('/invoices/'), api('/patients/'), api('/appointments/'), api('/medical-records/')]);
+    const stLabel = { unpaid: 'غير مدفوعة', paid: 'مدفوعة', partial: 'جزئية' };
+    const optAppts = appts.map(a =>
+      `<option value="${a.id}">#${a.id} — ${esc(a.patient.full_name)} — ${fmtDate(a.appointment_date)}</option>`).join('');
+    const optRecs = recs.map(r =>
+      `<option value="${r.id}">#${r.id} — ${esc(r.patient.full_name)} — ${esc(r.diagnosis)}</option>`).join('');
+    main.innerHTML = `
+      <div class="card">
+        <h3>الفواتير (${rows.length})</h3>
+        <div class="toolbar" style="margin-bottom:6px">
+          <button class="btn ghost" onclick="download('/invoices/export.csv','invoices.csv')">⬆️ تصدير CSV</button>
+        </div>
+        <details class="addbox"><summary>➕ إنشاء فاتورة</summary>
+        <div class="form-grid">
+          <div class="field"><label>المريض *</label><select id="f-pat">
+            ${patients.map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join('')}</select></div>
+          <div class="field"><label>المبلغ (ر.س) *</label><input id="f-amt" type="number" step="0.01" min="1"></div>
+          <div class="field"><label>الخصم (ر.س)</label><input id="f-disc" type="number" step="0.01" min="0" value="0"></div>
+          <div class="field"><label>الضريبة %</label><input id="f-tax" type="number" step="0.1" min="0" max="100" value="0"></div>
+          <div class="field"><label>الحالة</label><select id="f-st">
+            <option value="unpaid">غير مدفوعة</option><option value="paid">مدفوعة</option><option value="partial">جزئية</option></select></div>
+          <div class="field"><label>الوصف *</label><input id="f-desc"></div>
+          <div class="field"><label>🔗 ربط بموعد</label><select id="f-appt"><option value="">—</option>${optAppts}</select></div>
+          <div class="field"><label>🔗 ربط بسجل طبي</label><select id="f-rec"><option value="">—</option>${optRecs}</select></div>
+          <div class="field"><label>🏢 شركة التأمين</label><input id="f-ins" placeholder="اختياري — مطلوب للدفع بالتأمين"></div>
+          <div class="field"><label>📄 رقم الوثيقة</label><input id="f-pol"></div>
+        </div>
+        <button class="btn success" style="margin-top:12px" onclick="addInvoice()">إنشاء الفاتورة</button>
+        </details>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>#</th><th>التاريخ</th><th>المريض</th><th>الوصف</th><th>الإجمالي</th><th>الحالة</th><th>الدفع</th><th></th></tr></thead>
+          <tbody>${rows.map(i => `<tr>
+            <td>${i.id}${i.appointment_id ? ' 🔗' : ''}${i.record_id ? ' 📋' : ''}</td>
+            <td>${fmtDate(i.created_at)}</td><td>${esc(i.patient.full_name)}</td>
+            <td>${esc(i.description)}${i.insurer ? `<br><small>🏢 ${esc(i.insurer)}${i.policy_number ? ' — #' + esc(i.policy_number) : ''}</small>` : ''}</td>
+            <td><strong>${(i.total != null ? i.total : i.amount).toLocaleString()} ر.س</strong>${(i.discount || i.tax_rate) ? `<br><small>أساسي ${i.amount.toLocaleString()}${i.discount ? ' − خصم ' + i.discount.toLocaleString() : ''}${i.tax_rate ? ' + ضريبة ' + i.tax_rate + '%' : ''}</small>` : ''}${i.paid_amount ? `<br><small style="color:#28a745">مدفوع ${i.paid_amount.toLocaleString()}</small>` : ''}</td>
+            <td>${pill(i.status)}</td>
+            <td>${i.paid_at ? `${esc(i.payment_method || '-')} · ${fmtDate(i.paid_at)}` : '—'}</td>
+            <td class="actions">
+              ${i.status !== 'paid' ? `<button class="btn sm success" onclick="payInvoice(${i.id})">💰 دفع</button>` : ''}
+              <button class="btn sm ghost" onclick="printInvoice(${i.id})">🖨️ طباعة</button>
+              <button class="btn sm ghost" onclick="download('/invoices/${i.id}/pdf','invoice_${i.id}.pdf')">📄 PDF</button>
+              ${isAdmin() ? `<button class="btn sm danger" onclick="del('invoices',${i.id},'invoices')">حذف</button>` : ''}
+            </td>
+          </tr>`).join('') || '<tr><td colspan="8" class="empty">لا توجد فواتير</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+  },
 };
 
 /* --- تقويم المواعيد الشهري --- */
@@ -3295,7 +3609,7 @@ async function changePassword() {
 let gsTimer = null, gsItems = [], gsActive = 0;
 
 function openGSearch() {
-  if (!localStorage.getItem('hms_token')) return;
+  if (!TOKEN || !USER) return;
   const back = document.getElementById('gsearch-back');
   if (!back) return;
   back.style.display = 'flex';
@@ -3376,6 +3690,6 @@ document.addEventListener('keydown', (e) => {
 /* ========== بدء التشغيل ========== */
 initLang();
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('/ui/sw.js').catch(() => {}));
+  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {}));
 }
 if (TOKEN && USER) enterApp();

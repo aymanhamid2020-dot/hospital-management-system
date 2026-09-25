@@ -67,18 +67,19 @@ jobs:
           retention-days: 7
 
   e2e:
-    name: E2E (${{ matrix.browser }})
+    name: E2E (${{ matrix.browser }} · py${{ matrix.python-version }})
     runs-on: ubuntu-latest
     needs: pytest
     strategy:
       fail-fast: false
       matrix:
         browser: [chromium, firefox, webkit]
+        python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: ${{ matrix.python-version }}
           cache: pip
       - uses: actions/setup-node@v4
         with:
@@ -103,7 +104,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-results-${{ matrix.browser }}
+          name: playwright-results-${{ matrix.browser }}-py${{ matrix.python-version }}
           path: |
             test-results/
             playwright-report/
@@ -115,6 +116,36 @@ jobs:
     needs: pytest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # تاريخ كامل لمقارنة انسداد التوثيق (HTML ↔ PDF)
+      - name: فحص انسداد التوثيق (تغيّر docs/*.html دون تحديث PDF ⇒ فشل)
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          # أول دفع لفرع / سجل غير متاح ⇒ نرجع لآخر التزام متاح
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            BASE="$(git rev-parse HEAD~1 2>/dev/null || true)"
+          fi
+          if [ -z "$BASE" ]; then
+            echo "ℹ️ لا توجد نقطة مقارنة — يُتخطى فحص الانسداد"
+            exit 0
+          fi
+          HTML_CHANGED="$(git diff --name-only "$BASE" "$GITHUB_SHA" -- docs | grep -E '\.html$' || true)"
+          PDF_CHANGED="$(git diff --name-only "$BASE" "$GITHUB_SHA" -- docs/user-guide.pdf || true)"
+          if [ -n "$HTML_CHANGED" ] && [ -z "$PDF_CHANGED" ]; then
+            echo "::error title=انسداد التوثيق::تغيّرت ملفات HTML داخل docs/ دون إعادة توليد docs/user-guide.pdf"
+            echo "الملفات المتغيّرة:"
+            printf '%s\n' "$HTML_CHANGED"
+            echo "أعد التوليد محليًا ثم أعد الالتزام:"
+            echo "  node scripts/gen-user-guide-pdf.js"
+            exit 1
+          fi
+          echo "✅ التوثيق غير مسدود ($(printf '%s\n' "${HTML_CHANGED:-}" | grep -c . || true) ملف HTML متغيّر)"
       - uses: actions/setup-node@v4
         with:
           node-version: "22"

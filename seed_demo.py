@@ -15,10 +15,198 @@ from app.models import (
     Department, Bed, Doctor, Patient, Staff, Appointment, Invoice,
     MedicalRecord, Attachment, Report, User,
     Gender, UserRole, AppointmentStatus, InvoiceStatus, BedStatus,
+    # الوحدات الجديدة (طلبات الرعاية/خطط الرعاية/الأسنان/الوحدات التشغيلية)
+    ServiceRequest, CarePlan, CarePlanItem, CarePlanExecution,
+    DentalChart, DentalTreatmentPlan, DentalProcedure,
+    PhysiotherapyCase, NutritionCase, EmergencyCase,
+    HomeHealthCase, WellnessProgram, HousekeepingTask,
 )
 
 DEMO_DOMAIN = "@hospital-demo.com"  # .local محجوز في التحقق من صحة البريد (EmailStr)
 PASSWORD = "demo12345"
+
+
+def seed_units(db):
+    """تغذية الوحدات الجديدة: طلبات الخدمة الموحدة، خطط الرعاية، مخططات الأسنان،
+    والوحدات التشغيلية (علاج طبيعي/تغذية/طوارئ/رعاية منزلية/عافية/نظافة).
+
+    آمنة التكرار: كل مجموعة تُزرع مرة واحدة فقط وتُتخطى إن كانت موجودة،
+    فتعمل بعد أي تشغيل — سواء كانت القاعدة نظيفة أو محمّلة بالبيانات الأساسية."""
+    patients = db.query(Patient).order_by(Patient.id).all()
+    doctors = db.query(Doctor).order_by(Doctor.id).all()
+    if not patients:
+        print("⚠️  الوحدات الجديدة: لا يوجد مرضى — يُتخطى التغذية")
+        return
+    now = datetime.now()
+    p = lambda i: patients[i % len(patients)].id
+    d = lambda i: doctors[i % len(doctors)].id if doctors else None
+    planted = []
+
+    # 1) طلبات الخدمة الموحدة (مجموعات الرعاية + الوحدات)
+    if db.query(ServiceRequest).count() == 0:
+        for i, (stype, title, prio, st, delta) in enumerate([
+            ("care_sets", "مجموعة رعاية قلبية — 4 أسابيع", "high", "in_progress", -2),
+            ("dental", "فحص وتنظيف أسنان دوري", "normal", "pending", 3),
+            ("physiotherapy", "جلسات علاج طبيعي للركبة", "normal", "in_progress", 1),
+            ("home_health", "زيارة رعاية منزلية بعد الخروج", "low", "pending", 5),
+            ("nutrition", "خطة تغذية لمريض السكري", "normal", "completed", -7),
+            ("housekeeping", "تعقيم غرفة 204 بعد خروج المريض", "high", "pending", 0),
+            ("emergency", "إحالة من الطوارئ للمتابعة", "urgent", "completed", -1),
+            ("wellness", "برنامج عافية — إيقاف التدخين", "low", "in_progress", 2),
+        ]):
+            db.add(ServiceRequest(
+                service_type=stype, patient_id=p(i), title=title,
+                details="طلب تجريبي — seed_demo", priority=prio, status=st,
+                scheduled_at=now + timedelta(days=delta),
+                assigned_to="admin", created_by="admin",
+                completed_at=(now + timedelta(days=delta)) if st == "completed" else None,
+            ))
+        planted.append("طلبات الخدمة (8)")
+
+    # 2) خطط الرعاية + بنودها + تنفيذات
+    if db.query(CarePlan).count() == 0:
+        plans_spec = [
+            ("خطة رعاية مريض جراحة — بعد العملية", "التعافي خلال 10 أيام بلا مضاعفات",
+             "active", -1, [
+                 ("تمريض", "تغيير الضماد اليومي", "completed"),
+                 ("علاج طبيعي", "تمارين المشي المحدود", "pending"),
+                 ("تغذية", "نظام غذائي عالي البروتين", "pending")]),
+            ("خطة رعاية مزمنة — ضغط وسكري", "ضغط مستقر خلال شهر",
+             "active", -12, [
+                 ("تمريض", "قياس الضغط صباحًا ومساءً", "completed"),
+                 ("دواء", "الالتزام بجرعة الأنسولين", "completed"),
+                 ("متابعة", "مراجعة المختبر بعد أسبوعين", "pending")]),
+            ("خطة رعاية مكتملة — طفل بعد التهاب رئوي", "استعادة الوزن والنشاط",
+             "completed", -25, [
+                 ("تمريض", "مراقبة الحرارة كل 6 ساعات", "completed"),
+                 ("تغذية", "زيادة الوجبات الصغيرة", "completed")]),
+        ]
+        for pi, (title, goals, st, delta, items) in enumerate(plans_spec):
+            plan = CarePlan(
+                patient_id=p(pi), title=title, goals=goals, status=st,
+                started_at=now + timedelta(days=delta), created_by="admin",
+                coordinator="أ. منسق الرعاية", responsible_doctor_id=d(pi),
+                notes="خطة تجريبية — seed_demo")
+            db.add(plan)
+            db.flush()
+            for ci, (cat, ititle, ist) in enumerate(items):
+                item = CarePlanItem(
+                    plan_id=plan.id, category=cat, title=ititle, status=ist,
+                    instructions="تعليمات تجريبية", assigned_to="م. تمريض",
+                    scheduled_at=now + timedelta(days=delta + ci),
+                    verification_method="إقرار المريض")
+                db.add(item)
+                db.flush()
+                if ist == "completed":
+                    db.add(CarePlanExecution(
+                        item_id=item.id, executed_at=now + timedelta(days=delta + ci),
+                        performed_by="م. تمريض", outcome="completed"))
+            if st == "completed":
+                plan.completed_at = now
+        planted.append(f"خطط الرعاية ({len(plans_spec)} + بنودها)")
+
+    # 3) مخطط الأسنان + خطة علاج + إجراءات
+    if db.query(DentalChart).count() == 0:
+        for i, (al, cond, note) in enumerate([
+            ("بنسلين", "ارتفاع ضغط الدم", "تجنّب البنسلين عند وصف المضادات الحيوية"),
+            ("لا توجد حساسية معروفة", "لا يوجد", "حالة الفم جيدة — نظافة متوسطة"),
+        ]):
+            db.add(DentalChart(
+                patient_id=p(i), allergies=al, medical_conditions=cond,
+                last_exam_at=now - timedelta(days=10), notes=note, updated_by="admin"))
+        planted.append("مخططات الأسنان (2)")
+    if db.query(DentalTreatmentPlan).count() == 0:
+        dplan = DentalTreatmentPlan(
+            patient_id=p(0), dentist_id=d(0), title="علاج عصب الضرس 36 وتلميعه",
+            chief_complaint="ألم حاد عند المضغ منذ أسبوعين",
+            diagnosis="التهاب لب مزمن — الضرس 36", status="active",
+            started_at=now - timedelta(days=3), created_by="admin",
+            notes="خطة علاج تجريبية — seed_demo")
+        db.add(dplan)
+        db.flush()
+        for tooth, ptype, st, cost, material in [
+            (36, "root_canal", "performed", 750.0, "جوتا بيرشا"),
+            (36, "crown", "planned", 1200.0, "زيركون"),
+            (26, "filling", "planned", 400.0, "كومبوزيت"),
+            (46, "extraction", "planned", 300.0, None),
+        ]:
+            db.add(DentalProcedure(
+                plan_id=dplan.id, dentist_id=d(0), tooth_number=tooth,
+                procedure_type=ptype, status=st, cost=cost, material=material,
+                created_by="admin",
+                performed_at=(now - timedelta(days=2)) if st == "performed" else None,
+                scheduled_at=(now + timedelta(days=2)) if st == "planned" else None))
+        planted.append("خطة علاج أسنان (4 إجراءات)")
+
+    # 4) الوحدات التشغيلية الست
+    if db.query(PhysiotherapyCase).count() == 0:
+        for i, (title, st) in enumerate([
+            ("إعادة تأهيل الجهة الأمامية للركبة", "in_treatment"),
+            ("علاج آلام الظهر المزمنة", "assessed"),
+        ]):
+            db.add(PhysiotherapyCase(
+                patient_id=p(i), therapist_id=d(i), title=title,
+                assessment="تقييم أولي تجريبي — قوة العضلات 4/5",
+                plan="3 جلسات أسبوعيًا لمدة 6 أسابيع",
+                status=st, created_by="admin"))
+        planted.append("العلاج الطبيعي (2)")
+    if db.query(NutritionCase).count() == 0:
+        for i, (title, st) in enumerate([
+            ("خطة تغذية لمرضى السكري", "active"),
+            ("دعم الوزن بعد الحمل", "assessed"),
+        ]):
+            db.add(NutritionCase(
+                patient_id=p(i), title=title, dietary_plan="1800 سعرة/يوم — تقليل الكربوهيدرات",
+                meal_plan="6 وجبات صغيرة + سناك بروتيني", status=st, created_by="admin"))
+        planted.append("التغذية السريرية (2)")
+    if db.query(EmergencyCase).count() == 0:
+        for i, (complaint, triage, st) in enumerate([
+            ("ألم صدر عند المجهود", "urgent", "under_treatment"),
+            ("جرح سطحي بالساعد", "less_urgent", "discharged"),
+        ]):
+            db.add(EmergencyCase(
+                patient_id=p(i), complaint=complaint, triage_level=triage,
+                arrival_at=now - timedelta(hours=4 - i), status=st, created_by="admin",
+                disposition=("إلى العناية المركزة" if st == "under_treatment"
+                             else "خرج بعد الإسعاف الأولي"),
+                closed_at=(now - timedelta(hours=1)) if st == "discharged" else None))
+        planted.append("الطوارئ (2)")
+    if db.query(HomeHealthCase).count() == 0:
+        for i, (care, st) in enumerate([
+            ("زيارة أسبوعية لمتابعة الضماد والحركة", "active"),
+            ("تقييم بيئي قبل الخروج من المستشفى", "referred"),
+        ]):
+            db.add(HomeHealthCase(
+                patient_id=p(i), coordinator="أ. منسق الرعاية المنزلية", care_plan=care,
+                next_visit_at=now + timedelta(days=2), visits_completed=i + 1,
+                status=st, created_by="admin"))
+        planted.append("الرعاية المنزلية (2)")
+    if db.query(WellnessProgram).count() == 0:
+        for i, (name, goal, st) in enumerate([
+            ("برنامج العافية — تقليل الوزن", "خسارة 5 كجم خلال 3 أشهر", "active"),
+            ("إيقاف التدخين", "التوقف الكامل خلال شهرين", "planned"),
+        ]):
+            db.add(WellnessProgram(
+                patient_id=p(i), program_name=name, goal=goal,
+                baseline_metrics="الوزن 92 كجم · ضغط 130/85 · نبض 78",
+                progress_notes="التزام جيد بالأسبوع الأول", status=st, created_by="admin",
+                next_review_at=now + timedelta(days=14)))
+        planted.append("برامج العافية (2)")
+    if db.query(HousekeepingTask).count() == 0:
+        for room, ttype, prio, st in [
+            ("204", "cleaning", "high", "in_progress"),
+            ("105", "laundry", "normal", "pending"),
+            ("عمليات", "sanitation", "critical", "completed"),
+        ]:
+            db.add(HousekeepingTask(
+                room_number=room, task_type=ttype, priority=prio, status=st,
+                assigned_to="فريق النظافة", created_by="admin",
+                completed_at=now if st == "completed" else None))
+        planted.append("النظافة والتدبير (3)")
+
+    db.commit()
+    print(("✅ الوحدات الجديدة: " + " · ".join(planted)) if planted
+          else "ℹ️  الوحدات الجديدة: مزروعة مسبقًا")
 
 
 def main():
@@ -34,6 +222,8 @@ def main():
         ).count() > 0:
             print("⚠️  البيانات التجريبية موجودة مسبقًا — لا شيء لإضافته.")
             print("   (لإعادة الإنشاء: احذف المرضى ذوي البريد التجريبي أولًا)")
+            # الوحدات الجديدة قد تغيب رغم وجود البيانات الأساسية — تُزرع عند الحاجة
+            seed_units(db)
             return
 
         # ===== الأقسام (يُعاد استخدام الموجود في القاعدة) =====
@@ -393,6 +583,7 @@ def main():
         db.flush()
 
         db.commit()
+        seed_units(db)   # الوحدات الجديدة (طلبات/خطط/أسنان/تشغيلية) — آمنة التكرار
         print("\n" + "=" * 50)
         print("🎉 تم إنشاء البيانات التجريبية بنجاح!")
         print(f"   دخول الأطباء: demo_doc1..6 / {PASSWORD}")

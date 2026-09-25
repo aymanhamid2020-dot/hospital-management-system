@@ -17,6 +17,7 @@ const SHOTS: Array<[file: string, view: Parameters<typeof openView>[1]]> = [
   ['06-lab', 'lab'],
   ['07-invoices', 'invoices'],
   ['08-clinical', 'clinical'],
+  ['09-accounting', 'accounting'],
 ];
 
 test.describe('معرض لقطات الشاشات 🖼️', () => {
