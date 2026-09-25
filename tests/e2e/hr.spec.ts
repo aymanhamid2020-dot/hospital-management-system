@@ -17,8 +17,8 @@ test.describe('شؤون الموظفين 🗂️', () => {
     await expect(page.locator('#page-title')).toHaveText('شؤون الموظفين');
     await expect(page.locator('#hr-editor')).toBeVisible();
 
-    // ثمانية تبويبات: البيانات السبع + الرواتب
-    await expect(page.locator('#hr-editor .tabbar .tab')).toHaveCount(8);
+    // تسعة تبويبات: القائمة + البيانات السبع + الرواتب
+    await expect(page.locator('#hr-editor .tabbar .tab')).toHaveCount(9);
 
     const payrollTab = page.locator('#hr-editor .tabbar .tab', { hasText: '💵 الرواتب' });
     await expect(payrollTab).toHaveCount(1);
@@ -55,6 +55,36 @@ test.describe('شؤون الموظفين 🗂️', () => {
     await people.nth(1).click();
     await expect(page.locator('#hr-payroll h3').filter({ hasText: 'كشف الرواتب' }).first())
       .toBeVisible();
+
+    await expectNoUiError(page);
+  });
+
+  test('قائمة الموظفين تبويبًا أولًا + ربط الهاتف والإيميل ببيانات الموظف', async ({ page }) => {
+    await login(page);
+
+    // شاشة الموظفون المستقلة لم تعد موجودة في القائمة الجانبية
+    await expect(page.locator('.sidebar a[data-view="staff"]')).toHaveCount(0);
+
+    await page.click('.sidebar a[data-view="hr"]');
+    await expect(page.locator('#page-title')).toHaveText('شؤون الموظفين');
+
+    // أول فتح: التبويب الأول «قائمة الموظفين» — الجدول + نموذج الإضافة داخل الشاشة
+    const tabs = page.locator('#hr-editor .tabbar .tab');
+    await expect(tabs).toHaveCount(9);
+    await expect(tabs.first()).toContainText('قائمة الموظفين');
+    await expect(page.locator('#hr-roster table')).toBeVisible();
+    await expect(page.locator('#hr-roster summary')).toContainText('إضافة موظف');
+
+    const firstRow = page.locator('#hr-roster tbody tr').first();
+    const phone = (await firstRow.locator('td').nth(3).innerText()).trim();
+    const email = (await firstRow.locator('td').nth(4).innerText()).trim();
+    test.skip(!phone, 'الموظف الأول بلا هاتف مسجّل');
+
+    // اختيار الموظف يفتح تبويب بياناته — والحقلان معروضان من عموديه بلا طلب إدخال جديد
+    await page.click('#hr-list .hr-person');
+    await expect(page.locator('#hr-editor .tabbar .tab.active')).toContainText('البيانات الشخصية');
+    await expect(page.locator('input[data-hr="personal.phone"]')).toHaveValue(phone);
+    if (email) await expect(page.locator('input[data-hr="personal.email"]')).toHaveValue(email);
 
     await expectNoUiError(page);
   });

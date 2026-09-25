@@ -55,6 +55,23 @@ PENDING_COLUMNS = {
         "national_id": "VARCHAR",
         "insurer": "VARCHAR",
         "policy_number": "VARCHAR",
+        # الملف الشخصي والإداري + التاريخ الطبي (شاشة ملف المريض)
+        "nationality": "VARCHAR",
+        "smoking_status": "VARCHAR",
+        "emergency_contact_name": "VARCHAR",
+        "emergency_contact_phone": "VARCHAR",
+        "emergency_contact_relation": "VARCHAR",
+        "insurance_grade": "VARCHAR",
+        "insurance_copay": "FLOAT",
+        "chronic_conditions": "TEXT",
+        "past_surgeries": "TEXT",
+        "family_history": "TEXT",
+        "allergies": "TEXT",
+        "medical_warnings": "TEXT",
+    },
+    "medical_records": {
+        # شكوى المريض في كل زيارة
+        "chief_complaint": "VARCHAR",
     },
     "appointments": {
         "checked_in_at": "TIMESTAMP",
@@ -214,6 +231,8 @@ INDEXES = {
     "home_health_cases": ["patient_id", "status", "next_visit_at"],
     "wellness_programs": ["patient_id", "status"],
     "housekeeping_tasks": ["room_number", "status", "priority"],
+    "vital_signs": ["patient_id", "recorded_at"],
+    "insurance_claims": ["patient_id", "status", "invoice_id"],
 
     "budgets": ["fiscal_year", "department"],
 }

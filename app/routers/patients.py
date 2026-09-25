@@ -3,9 +3,17 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from app.database import get_db
-from app.models import Patient, User, Attachment
-from app.schemas import PatientCreate, PatientUpdate, PatientInDB
-from app.auth import get_current_user, require_admin
+from app.models import (
+    Patient, User, Attachment, Appointment, MedicalRecord, LabOrder,
+    Prescription, Invoice, Dispense, VitalSign, InsuranceClaim, ClaimStatus,
+    InvoiceStatus,
+)
+from app.schemas import (
+    PatientCreate, PatientUpdate, PatientInDB, PatientProfileUpdate,
+    VitalSignCreate, VitalSignUpdate, VitalSignInDB,
+    InsuranceClaimCreate, InsuranceClaimUpdate, InsuranceClaimInDB,
+)
+from app.auth import get_current_user, require_admin, get_user_role
 
 router = APIRouter(prefix="/patients", tags=["Patients"])
 
@@ -258,6 +266,300 @@ async def create_patient(patient: PatientCreate, db = Depends(get_db), _ = Depen
     db.commit()
     db.refresh(db_patient)
     return db_patient
+
+
+# ══════════ شاشة ملف المريض: الأقسام الستة في نقطة واحدة ══════════
+
+
+def _get_patient_or_404(db: Session, patient_id: int) -> Patient:
+    p = db.query(Patient).filter(Patient.id == patient_id).first()
+    if not p:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="لا يوجد مريض بالمعرف المحدد",
+        )
+    return p
+
+
+def _can_view_chart(db: Session, patient: Patient, user: User) -> bool:
+    """الطبيب يرى ملف مريضه فقط (له سجل)، والمدير/الموظف يريان الكل."""
+    if get_user_role(user) != "doctor":
+        return True
+    return any(r.doctor and r.doctor.email == user.email
+               for r in patient.medical_records)
+
+
+@router.get("/{patient_id}/chart", summary="ملف المريض المجمّع (الأقسام الستة)")
+async def patient_chart(
+    patient_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """الأقسام الستة في استدعاء واحد: الملف الشخصي · السجل الطبي · المواعيد ·
+    الفحوصات والوصفات · الحسابات والمطالبات · المرفقات."""
+    from datetime import date as _date
+    from app.schemas import (
+        PatientInDB, MedicalRecordInDB, AttachmentInDB, VitalSignInDB,
+        InsuranceClaimInDB,
+    )
+
+    p = _get_patient_or_404(db, patient_id)
+    if not _can_view_chart(db, p, current_user):
+        raise HTTPException(status_code=403, detail="لا صلاحية لعرض ملف هذا المريض")
+
+    today = _date.today()
+    records = (db.query(MedicalRecord)
+               .filter(MedicalRecord.patient_id == patient_id)
+               .order_by(MedicalRecord.created_at.desc()).all())
+    vitals = (db.query(VitalSign)
+              .filter(VitalSign.patient_id == patient_id)
+              .order_by(VitalSign.recorded_at.desc()).all())
+
+    appts = (db.query(Appointment)
+             .filter(Appointment.patient_id == patient_id)
+             .order_by(Appointment.appointment_date.desc()).all())
+    past_appts = [a for a in appts
+                  if a.appointment_date and a.appointment_date.date() < today]
+    upcoming = [a for a in appts
+                if a.appointment_date and a.appointment_date.date() >= today]
+
+    labs = (db.query(LabOrder)
+            .filter(LabOrder.patient_id == patient_id)
+            .order_by(LabOrder.ordered_at.desc()).all())
+    prescriptions = (db.query(Prescription)
+                     .filter(Prescription.patient_id == patient_id)
+                     .order_by(Prescription.created_at.desc()).all())
+    dispenses = (db.query(Dispense)
+                 .filter(Dispense.patient_id == patient_id,
+                         Dispense.returned_at.is_(None))
+                 .order_by(Dispense.created_at.desc()).all())
+    invoices = (db.query(Invoice)
+                .filter(Invoice.patient_id == patient_id)
+                .order_by(Invoice.created_at.desc()).all())
+    claims = (db.query(InsuranceClaim)
+              .filter(InsuranceClaim.patient_id == patient_id)
+              .order_by(InsuranceClaim.submitted_at.desc()).all())
+    attachments = (db.query(Attachment)
+                   .filter(Attachment.patient_id == patient_id)
+                   .order_by(Attachment.uploaded_at.desc()).all())
+
+    inv_total = round(sum(float(i.total or 0) for i in invoices), 2)
+    inv_paid = round(sum(float(i.paid_amount or 0) for i in invoices), 2)
+    sales_total = round(sum(float(s.total_price or 0) for s in dispenses), 2)
+    sales_paid = round(sum(float(s.paid_amount or 0) for s in dispenses), 2)
+
+    return {
+        "profile": PatientInDB.model_validate(p),
+        "records": [MedicalRecordInDB.model_validate(r) for r in records],
+        "vitals": [VitalSignInDB.model_validate(v) for v in vitals],
+        "appointments": {
+            "past": past_appts, "upcoming": upcoming,
+            "upcoming_total": len(upcoming),
+        },
+        "lab_orders": labs,
+        "prescriptions": prescriptions,
+        "dispenses": dispenses,
+        "invoices": invoices,
+        "financials": {
+            "invoices_total": inv_total, "invoices_paid": inv_paid,
+            "sales_total": sales_total, "sales_paid": sales_paid,
+            "dues": round(inv_total + sales_total, 2),
+            "outstanding": round((inv_total - inv_paid) + (sales_total - sales_paid), 2),
+        },
+        "claims": [InsuranceClaimInDB.model_validate(c) for c in claims],
+        "attachments": [AttachmentInDB.model_validate(a) for a in attachments],
+    }
+
+
+@router.put("/{patient_id}/profile", response_model=PatientInDB,
+            summary="تحديث الملف الشخصي والتاريخ الطبي")
+async def update_patient_profile(
+    patient_id: int,
+    profile: PatientProfileUpdate,
+    db = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """تحديث بيانات الملف الشخصي/الإداري والتاريخ الطبي والتحذيرات."""
+    db_patient = _get_patient_or_404(db, patient_id)
+    for field, value in profile.model_dump(exclude_unset=True).items():
+        setattr(db_patient, field, value)
+    db.commit()
+    db.refresh(db_patient)
+    return db_patient
+
+
+# ══════════ العلامات الحيوية ══════════
+@router.get("/{patient_id}/vitals", response_model=List[VitalSignInDB],
+            summary="سجل العلامات الحيوية للمريض")
+async def list_vitals(patient_id: int, db = Depends(get_db), _ = Depends(get_current_user)):
+    _get_patient_or_404(db, patient_id)
+    return (db.query(VitalSign)
+            .filter(VitalSign.patient_id == patient_id)
+            .order_by(VitalSign.recorded_at.desc()).all())
+
+
+@router.post("/{patient_id}/vitals", response_model=VitalSignInDB, status_code=201,
+             summary="تسجيل علامات حيوية")
+async def create_vital(
+    patient_id: int,
+    vitals: VitalSignCreate,
+    db = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """تسجيل قراءة جديدة (ضغط/حرارة/نبض/وزن/طول) لمريض."""
+    _get_patient_or_404(db, patient_id)
+    if all(getattr(vitals, f) is None for f in
+           ("systolic", "diastolic", "temperature", "pulse", "weight", "height")):
+        raise HTTPException(status_code=400, detail="أدخل قياسًا واحدًا على الأقل")
+    if (vitals.systolic and not vitals.diastolic) or (vitals.diastolic and not vitals.systolic):
+        raise HTTPException(status_code=400, detail="أدخل الضغط الانقباضي والانبساطي معًا")
+
+    v = VitalSign(patient_id=patient_id, **vitals.model_dump())
+    db.add(v)
+    db.commit()
+    db.refresh(v)
+    return v
+
+
+@router.put("/{patient_id}/vitals/{vital_id}", response_model=VitalSignInDB,
+            summary="تعديل قياس حيوي")
+async def update_vital(
+    patient_id: int,
+    vital_id: int,
+    vitals: VitalSignUpdate,
+    db = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    v = (db.query(VitalSign)
+         .filter(VitalSign.id == vital_id, VitalSign.patient_id == patient_id).first())
+    if not v:
+        raise HTTPException(status_code=404, detail="القياس غير موجود")
+    for field, value in vitals.model_dump(exclude_unset=True).items():
+        setattr(v, field, value)
+    db.commit()
+    db.refresh(v)
+    return v
+
+
+@router.delete("/{patient_id}/vitals/{vital_id}", status_code=204, summary="حذف قياس")
+async def delete_vital(
+    patient_id: int,
+    vital_id: int,
+    db = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    v = (db.query(VitalSign)
+         .filter(VitalSign.id == vital_id, VitalSign.patient_id == patient_id).first())
+    if not v:
+        raise HTTPException(status_code=404, detail="القياس غير موجود")
+    db.delete(v)
+    db.commit()
+    return None
+
+
+# ══════════ مطالبات التأمين ══════════
+@router.get("/{patient_id}/claims", response_model=List[InsuranceClaimInDB],
+            summary="مطالبات تأمين المريض")
+async def list_claims(patient_id: int, db = Depends(get_db), _ = Depends(get_current_user)):
+    _get_patient_or_404(db, patient_id)
+    return (db.query(InsuranceClaim)
+            .filter(InsuranceClaim.patient_id == patient_id)
+            .order_by(InsuranceClaim.submitted_at.desc()).all())
+
+
+@router.post("/{patient_id}/claims", response_model=InsuranceClaimInDB, status_code=201,
+             summary="تقديم مطالبة تأمين")
+async def create_claim(
+    patient_id: int,
+    claim: InsuranceClaimCreate,
+    db = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """تقديم مطالبة جديدة — شركة التأمين تُورَث من المريض إن لم تُحدد."""
+    p = _get_patient_or_404(db, patient_id)
+    if db.query(InsuranceClaim).filter(
+            InsuranceClaim.patient_id == patient_id,
+            InsuranceClaim.claim_number == claim.claim_number).first():
+        raise HTTPException(status_code=400, detail="رقم المطالبة مسجّل مسبقًا لهذا المريض")
+
+    if claim.invoice_id is not None:
+        inv = (db.query(Invoice)
+               .filter(Invoice.id == claim.invoice_id,
+                       Invoice.patient_id == patient_id).first())
+        if not inv:
+            raise HTTPException(status_code=404, detail="الفاتورة غير موجودة لهذا المريض")
+
+    c = InsuranceClaim(
+        patient_id=patient_id,
+        claim_number=claim.claim_number,
+        insurer=claim.insurer or p.insurer,
+        amount=claim.amount,
+        invoice_id=claim.invoice_id,
+        decision_notes=claim.decision_notes,
+    )
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    return c
+
+
+@router.put("/{patient_id}/claims/{claim_id}", response_model=InsuranceClaimInDB,
+            summary="تحديث/قرار مطالبة (موافقة · رفض · سداد)")
+async def decide_claim(
+    patient_id: int,
+    claim_id: int,
+    payload: InsuranceClaimUpdate,
+    db = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """تحديث بيانات المطالبة أو تثبيت قرار شركة التأمين.
+
+    الموافقة تتطلب approved_amount، والرفض يتطلب سببًا مكتوبًا.
+    """
+    from datetime import datetime
+    c = (db.query(InsuranceClaim)
+         .filter(InsuranceClaim.id == claim_id,
+                 InsuranceClaim.patient_id == patient_id).first())
+    if not c:
+        raise HTTPException(status_code=404, detail="المطالبة غير موجودة")
+
+    data = payload.model_dump(exclude_unset=True)
+    new_status = data.get("status", c.status)
+
+    if new_status == ClaimStatus.APPROVED and \
+            data.get("approved_amount", c.approved_amount) is None:
+        raise HTTPException(
+            status_code=400,
+            detail="حدد القيمة الموافق عليها (approved_amount) عند الموافقة")
+    if new_status == ClaimStatus.REJECTED and \
+            not (data.get("rejection_reason") or c.rejection_reason):
+        raise HTTPException(status_code=400, detail="اذكر سبب الرفض")
+
+    for field, value in data.items():
+        setattr(c, field, value)
+    if new_status in (ClaimStatus.APPROVED, ClaimStatus.REJECTED, ClaimStatus.PAID):
+        c.decided_at = datetime.now()
+    db.commit()
+    db.refresh(c)
+    return c
+
+
+@router.delete("/{patient_id}/claims/{claim_id}", status_code=204,
+               summary="حذف مطالبة")
+async def delete_claim(
+    patient_id: int,
+    claim_id: int,
+    db = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    c = (db.query(InsuranceClaim)
+         .filter(InsuranceClaim.id == claim_id,
+                 InsuranceClaim.patient_id == patient_id).first())
+    if not c:
+        raise HTTPException(status_code=404, detail="المطالبة غير موجودة")
+    db.delete(c)
+    db.commit()
+    return None
 
 
 @router.put("/{patient_id}", response_model=PatientInDB, summary="تحديث بيانات مريض")

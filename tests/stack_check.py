@@ -100,6 +100,14 @@ def main():
           "['payroll','الرواتب'" in ui_all
           and "renderHRPayroll" in ui_all
           and 'data-view="payroll"' not in ui_all)
+    check("قائمة الموظفين: تبويب أول داخل شؤون الموظفين بلا قائمة مستقلة",
+          "['roster','قائمة الموظفين'" in ui_all
+          and "renderHRRoster" in ui_all
+          and 'data-view="staff"' not in ui_all
+          and "async staff(main)" in ui_all)
+    check("الهاتف والبريد في الملف مربوطان بعمودي الموظف (لا إدخال مكرر)",
+          "if (!p.personal.phone) p.personal.phone = s?.phone" in ui_all
+          and "if (!p.personal.email) p.personal.email = s?.email" in ui_all)
     check("القائمة تفصل المبيعات عن الحسابات",
           'data-view="sales"' in ui_all and 'data-view="accounts"' in ui_all
           and "async sales(main)" in ui_all

@@ -5,7 +5,7 @@ from datetime import datetime, time
 
 from app.models import (
     Gender, UserRole, AppointmentStatus, InvoiceStatus, BedStatus,
-    TestType, LabStatus, PayrollStatus,
+    TestType, LabStatus, PayrollStatus, ClaimStatus,
 )
 
 
@@ -121,6 +121,20 @@ class PatientBase(BaseModel):
     national_id: Optional[str] = Field(None, description="الهوية الوطنية/الإقامة")
     insurer: Optional[str] = Field(None, description="شركة التأمين")
     policy_number: Optional[str] = Field(None, description="رقم وثيقة التأمين")
+    # الملف الشخصي والإداري
+    nationality: Optional[str] = Field(None, description="الجنسية")
+    smoking_status: Optional[str] = Field(None, description="حالة التدخين")
+    emergency_contact_name: Optional[str] = Field(None, description="اسم جهة الطوارئ")
+    emergency_contact_phone: Optional[str] = Field(None, description="هاتف الطوارئ")
+    emergency_contact_relation: Optional[str] = Field(None, description="صلة القرابة")
+    insurance_grade: Optional[str] = Field(None, description="درجة التغطية")
+    insurance_copay: Optional[float] = Field(None, ge=0, le=100, description="نسبة التحمل Co-pay %")
+    # التاريخ الطبي والحساسية
+    chronic_conditions: Optional[str] = Field(None, description="الأمراض المزمنة")
+    past_surgeries: Optional[str] = Field(None, description="العمليات السابقة")
+    family_history: Optional[str] = Field(None, description="التاريخ العائلي المرضي")
+    allergies: Optional[str] = Field(None, description="الحساسية")
+    medical_warnings: Optional[str] = Field(None, description="تحذيرات طبية مهمة")
 
 
 class PatientCreate(PatientBase):
@@ -136,12 +150,104 @@ class PatientUpdate(BaseModel):
     national_id: Optional[str] = None
     insurer: Optional[str] = None
     policy_number: Optional[str] = None
+    nationality: Optional[str] = None
+    smoking_status: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
+    emergency_contact_relation: Optional[str] = None
+    insurance_grade: Optional[str] = None
+    insurance_copay: Optional[float] = Field(None, ge=0, le=100)
+    chronic_conditions: Optional[str] = None
+    past_surgeries: Optional[str] = None
+    family_history: Optional[str] = None
+    allergies: Optional[str] = None
+    medical_warnings: Optional[str] = None
+
+
+class PatientProfileUpdate(PatientUpdate):
+    """تحديث الملف الشخصي والتاريخ الطبي — نفس حقول PatientUpdate.
+
+    (تُستخدم في PUT /patients/{id}/profile داخل شاشة الملف)
+    """
 
 
 class PatientInDB(PatientBase):
     id: int
     created_at: datetime
     updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ===== العلامات الحيوية =====
+class VitalSignBase(BaseModel):
+    systolic: Optional[int] = Field(None, ge=0, le=300, description="الضغط الانقباضي")
+    diastolic: Optional[int] = Field(None, ge=0, le=200, description="الضغط الانبساطي")
+    temperature: Optional[float] = Field(None, ge=30, le=45, description="الحرارة °C")
+    pulse: Optional[int] = Field(None, ge=0, le=250, description="النبض")
+    weight: Optional[float] = Field(None, gt=0, le=500, description="الوزن كجم")
+    height: Optional[float] = Field(None, gt=0, le=300, description="الطول سم")
+    notes: Optional[str] = Field(None, max_length=500)
+    recorded_by: Optional[str] = Field(None, max_length=120)
+
+
+class VitalSignCreate(VitalSignBase):
+    pass
+
+
+class VitalSignUpdate(BaseModel):
+    systolic: Optional[int] = Field(None, ge=0, le=300)
+    diastolic: Optional[int] = Field(None, ge=0, le=200)
+    temperature: Optional[float] = Field(None, ge=30, le=45)
+    pulse: Optional[int] = Field(None, ge=0, le=250)
+    weight: Optional[float] = Field(None, gt=0, le=500)
+    height: Optional[float] = Field(None, gt=0, le=300)
+    notes: Optional[str] = Field(None, max_length=500)
+    recorded_by: Optional[str] = Field(None, max_length=120)
+
+
+class VitalSignInDB(VitalSignBase):
+    id: int
+    patient_id: int
+    bmi: Optional[float] = None
+    recorded_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ===== مطالبات التأمين =====
+class InsuranceClaimCreate(BaseModel):
+    invoice_id: Optional[int] = None
+    claim_number: str = Field(..., min_length=2, max_length=60, description="رقم المطالبة")
+    insurer: Optional[str] = Field(None, max_length=120)
+    amount: float = Field(..., ge=0, description="قيمة المطالبة")
+    decision_notes: Optional[str] = Field(None, max_length=500)
+
+
+class InsuranceClaimUpdate(BaseModel):
+    """تحديث/قرار المطالبة — الحالة تتطلب approved_amount عند الموافقة."""
+    claim_number: Optional[str] = Field(None, min_length=2, max_length=60)
+    insurer: Optional[str] = Field(None, max_length=120)
+    amount: Optional[float] = Field(None, ge=0)
+    approved_amount: Optional[float] = Field(None, ge=0)
+    status: Optional[ClaimStatus] = None
+    decision_notes: Optional[str] = Field(None, max_length=500)
+    rejection_reason: Optional[str] = Field(None, max_length=500)
+
+
+class InsuranceClaimInDB(BaseModel):
+    id: int
+    patient_id: int
+    invoice_id: Optional[int] = None
+    claim_number: str
+    insurer: Optional[str] = None
+    amount: float
+    approved_amount: Optional[float] = None
+    status: ClaimStatus
+    decision_notes: Optional[str] = None
+    rejection_reason: Optional[str] = None
+    submitted_at: datetime
+    decided_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -427,6 +533,7 @@ class MedicalRecordBase(BaseModel):
     patient_id: int = Field(..., description="معرّف المريض")
     doctor_id: Optional[int] = Field(None, description="معرّف الطبيب")
     diagnosis: str = Field(..., description="التشخيص")
+    chief_complaint: Optional[str] = Field(None, description="شكوى المريض عند الزيارة")
     prescription: Optional[str] = Field(None, description="الوصفة الطبية")
     notes: Optional[str] = Field(None, description="ملاحظات إضافية")
 
@@ -437,6 +544,7 @@ class MedicalRecordCreate(MedicalRecordBase):
 
 class MedicalRecordUpdate(BaseModel):
     diagnosis: Optional[str] = None
+    chief_complaint: Optional[str] = None
     prescription: Optional[str] = None
     notes: Optional[str] = None
 

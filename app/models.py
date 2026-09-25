@@ -57,6 +57,13 @@ class PayrollStatus(str, enum.Enum):
     PAID = "paid"
 
 
+class ClaimStatus(str, enum.Enum):
+    SUBMITTED = "submitted"   # مُقدَّمة لشركة التأمين
+    APPROVED = "approved"     # موافق عليها
+    REJECTED = "rejected"     # مرفوضة
+    PAID = "paid"             # مسدَّدة لشركة التأمين
+
+
 # ===== المستخدمون (للتسجيل والصلاحيات) =====
 class User(Base):
     __tablename__ = "users"
@@ -116,6 +123,20 @@ class Patient(Base):
     national_id = Column(String, nullable=True)      # الهوية الوطنية/الإقامة
     insurer = Column(String, nullable=True)          # شركة التأمين (على مستوى المريض)
     policy_number = Column(String, nullable=True)    # رقم وثيقة التأمين
+    # ===== الملف الشخصي والإداري (تكميل) =====
+    nationality = Column(String, nullable=True)      # الجنسية
+    smoking_status = Column(String, nullable=True)   # حالة التدخين
+    emergency_contact_name = Column(String, nullable=True)      # جهة الطوارئ
+    emergency_contact_phone = Column(String, nullable=True)     # هاتف الطوارئ
+    emergency_contact_relation = Column(String, nullable=True)  # صلة القرابة
+    insurance_grade = Column(String, nullable=True)  # درجة التغطية (ذهبية/فضية/…)
+    insurance_copay = Column(Float, nullable=True)    # نسبة التحمل Co-pay %
+    # ===== التاريخ الطبي والحساسية (تُحدَّث في الملف) =====
+    chronic_conditions = Column(Text, nullable=True)     # الأمراض المزمنة
+    past_surgeries = Column(Text, nullable=True)         # العمليات السابقة
+    family_history = Column(Text, nullable=True)         # التاريخ العائلي المرضي
+    allergies = Column(Text, nullable=True)              # الحساسية (أدوية/أطعمة)
+    medical_warnings = Column(Text, nullable=True)       # تحذيرات (سكر، سيولة…)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -123,6 +144,59 @@ class Patient(Base):
     appointments = relationship("Appointment", back_populates="patient", cascade="all, delete-orphan")
     invoices = relationship("Invoice", back_populates="patient", cascade="all, delete-orphan")
     medical_records = relationship("MedicalRecord", back_populates="patient", cascade="all, delete-orphan")
+    vital_signs = relationship(
+        "VitalSign", back_populates="patient", cascade="all, delete-orphan",
+        order_by="desc(VitalSign.recorded_at)")
+    insurance_claims = relationship(
+        "InsuranceClaim", back_populates="patient", cascade="all, delete-orphan",
+        order_by="desc(InsuranceClaim.submitted_at)")
+
+
+# ===== العلامات الحيوية (الضغط/الحرارة/النبض/الوزن/الطول عبر الزيارات) =====
+class VitalSign(Base):
+    __tablename__ = "vital_signs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"), nullable=False)
+    recorded_by = Column(String, nullable=True)        # من سجّل القراءة
+    systolic = Column(Integer, nullable=True)         # الضغط الانقباضي
+    diastolic = Column(Integer, nullable=True)         # الضغط الانبساطي
+    temperature = Column(Float, nullable=True)         # الحرارة °C
+    pulse = Column(Integer, nullable=True)             # النبض
+    weight = Column(Float, nullable=True)              # الوزن كجم
+    height = Column(Float, nullable=True)              # الطول سم
+    notes = Column(String, nullable=True)
+    recorded_at = Column(DateTime, server_default=func.now())
+
+    patient = relationship("Patient", back_populates="vital_signs")
+
+    @property
+    def bmi(self):
+        """مؤشر كتلة الجسم من الوزن والطول — None إن نقص أحدهما."""
+        if not self.weight or not self.height or self.height <= 0:
+            return None
+        return round(self.weight / ((self.height / 100) ** 2), 1)
+
+
+# ===== مطالبات التأمين (الموافقة/الرفض من شركة التأمين) =====
+class InsuranceClaim(Base):
+    __tablename__ = "insurance_claims"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"), nullable=False)
+    invoice_id = Column(Integer, ForeignKey("invoices.id", ondelete="SET NULL"), nullable=True)
+    claim_number = Column(String, nullable=False)     # رقم المطالبة
+    insurer = Column(String, nullable=True)           # شركة التأمين (مطابقة للمريض)
+    amount = Column(Float, nullable=False, default=0)  # قيمة المطالبة
+    approved_amount = Column(Float, nullable=True)     # القيمة الموافق عليها
+    status = Column(SAEnum(ClaimStatus), default=ClaimStatus.SUBMITTED, nullable=False)
+    decision_notes = Column(String, nullable=True)    # ملاحظات القرار
+    rejection_reason = Column(String, nullable=True)   # سبب الرفض
+    submitted_at = Column(DateTime, server_default=func.now())
+    decided_at = Column(DateTime, nullable=True)
+
+    patient = relationship("Patient", back_populates="insurance_claims")
+    invoice = relationship("Invoice")
 
 
 # ===== الأطباء =====
@@ -263,6 +337,7 @@ class MedicalRecord(Base):
     patient_id = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"), nullable=False)
     doctor_id = Column(Integer, ForeignKey("doctors.id", ondelete="SET NULL"), nullable=True)
     diagnosis = Column(String, nullable=False)
+    chief_complaint = Column(String, nullable=True)   # شكوى المريض عند الزيارة
     prescription = Column(String, nullable=True)
     notes = Column(String, nullable=True)
     created_at = Column(DateTime, server_default=func.now())

@@ -93,6 +93,7 @@ async def create_record(
         patient_id=record.patient_id,
         doctor_id=doctor_id,
         diagnosis=record.diagnosis,
+        chief_complaint=record.chief_complaint,
         prescription=record.prescription,
         notes=record.notes,
     )

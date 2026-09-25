@@ -98,7 +98,7 @@ test.describe('وحدة الأطباء 🩺', () => {
     expect(APP).toBe('/');
   });
 
-  test('الواجهة الإنجليزية تترجم تبويبات ملف الموظف الثمانية', async ({ page }) => {
+  test('الواجهة الإنجليزية تترجم تبويبات ملف الموظف التسعة', async ({ page }) => {
     await login(page);
     await page.click('.sidebar a[data-view="hr"]');
     await expect(page.locator('#hr-editor')).toBeVisible();
@@ -108,8 +108,8 @@ test.describe('وحدة الأطباء 🩺', () => {
     await expect(page.locator('html')).toHaveAttribute('dir', 'ltr');
 
     const tabs = page.locator('#hr-editor .tabbar .tab');
-    await expect(tabs).toHaveCount(8);
-    for (let i = 0; i < 8; i++) {
+    await expect(tabs).toHaveCount(9);
+    for (let i = 0; i < 9; i++) {
       const text = (await tabs.nth(i).innerText()).trim();
       expect(text, `تبويب غير مترجم: ${text}`).not.toMatch(/[؀-ۿ]/);
     }

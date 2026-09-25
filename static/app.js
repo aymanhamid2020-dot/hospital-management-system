@@ -154,10 +154,18 @@ const AR2EN = {
   'الأسرّة': 'Beds',
   'الفواتير': 'Invoices',
   'الموظفون': 'Staff',
+  'قائمة الموظفين': 'Employee List',
   'شؤون الموظفين': 'Employee Affairs',
   'البيانات الشخصية والتعريفية': 'Personal & Identification Info',
   'البيانات الوظيفية والإدارية': 'Employment & Job Info',
   'البيانات المالية والتعويضات': 'Salary & Allowances Info',
+  /* شاشة ملف المريض */
+  'الملف الشخصي': 'Profile',
+  'السجل الطبي': 'Medical Record',
+  'المواعيد والزيارات': 'Appointments & Visits',
+  'الفحوصات والوصفات': 'Diagnostics & Orders',
+  'الحسابات والتأمين': 'Billing & Insurance',
+  'المرفقات': 'Documents',
   'الاستقطاعات والتأمينات والضرائب': 'Deductions & Taxes',
   'الإجازات والدوام': 'Leave & Attendance',
   'العهد العينية والعهد': 'Assets & Loans',
@@ -849,6 +857,441 @@ async function statementPdf() {
 /* تسديد دفعة لعملية بيع — نافذة منبثقة (مبلغ + طريقة + معاينة المتبقي) */
 let ACC_ROWS = [];
 
+/* ══════════ شاشة ملف المريض: الأقسام الستة ══════════
+   نقطة واحدة GET /patients/{id}/chart تجمع كل الأقسام، والتبويبات تُرسم
+   من الذاكرة (CHART) بلا طلبات إضافية — تبديل التبويب فوري. */
+let CHART = null, CHART_ID = null, CHART_TAB = 'profile';
+
+const CHART_TABS = [
+  ['profile', 'الملف الشخصي', '🪪'],
+  ['record', 'السجل الطبي', '🩺'],
+  ['visits', 'المواعيد والزيارات', '📅'],
+  ['orders', 'الفحوصات والوصفات', '🔬'],
+  ['billing', 'الحسابات والتأمين', '💰'],
+  ['docs', 'المرفقات', '📎'],
+];
+
+const emptyRow = (cols, msg) =>
+  `<tr><td colspan="${cols}" class="empty">${msg}</td></tr>`;
+
+async function openPatientChart(id) {
+  CHART_ID = id;
+  try {
+    CHART = await api(`/patients/${id}/chart`);
+  } catch (e) { return toast(e.message, true); }
+  if (!CHART) return;
+  CHART_TAB = 'profile';
+  openModal('🗂️ ملف المريض', `<div id="chart-box"></div>`, true);
+  renderPatientChart();
+  paintChartTab();
+}
+
+function chartHead() {
+  const p = CHART.profile;
+  return `<div class="chart-head">
+    <div><h3>${esc(p.full_name)}</h3>
+      <p>${esc(p.gender)} · ${fmtDate(p.date_of_birth)} · 🩸 ${esc(p.blood_type || '—')}
+         ${p.national_id ? ' · 🪪 ' + esc(p.national_id) : ''}</p></div>
+    <div class="actions">
+      <button class="btn ghost sm" onclick="download('/patients/${p.id}/pdf','patient_${p.id}_file.pdf')">📄 الملف PDF</button>
+      <button class="btn ghost sm" onclick="download('/accounts/statement/${p.id}/pdf','patient_statement_${p.id}.pdf')">🧾 كشف الحساب</button>
+    </div></div>`;
+}
+
+function renderPatientChart() {
+  const box = document.getElementById('chart-box');
+  if (!box) return;
+  box.innerHTML = chartHead() + `
+    <div class="tabbar" id="chart-tabs">${CHART_TABS.map(([k, l, i]) =>
+      `<button class="tab${k === CHART_TAB ? ' active' : ''}" data-ctab="${k}"
+        onclick="setChartTab('${k}')">${i} ${tr(l)}</button>`).join('')}</div>
+    <div id="chart-body"></div>`;
+}
+
+function setChartTab(tab) { CHART_TAB = tab; renderPatientChart(); paintChartTab(); }
+
+async function paintChartTab() {
+  const body = document.getElementById('chart-body');
+  if (!body || !CHART) return;
+  document.querySelectorAll('#chart-tabs .tab').forEach(b =>
+    b.classList.toggle('active', b.dataset.ctab === CHART_TAB));
+  body.innerHTML = '<div class="empty">جارٍ التحميل…</div>';
+  const renderers = { profile: chartProfile, record: chartRecord, visits: chartVisits,
+                      orders: chartOrders, billing: chartBilling, docs: chartDocs };
+  try { body.innerHTML = renderers[CHART_TAB](); }
+  catch (e) { body.innerHTML = `<div class="empty" style="color:#dc3545">⚠️ ${esc(e.message)}</div>`; }
+  applyI18n(body);
+}
+
+/* — (1) الملف الشخصي والإداري — */
+function chartProfile() {
+  const p = CHART.profile;
+  const f = (l, id, v, type = 'text') =>
+    `<div class="field"><label>${tr(l)}</label>
+      <input data-pf="${id}" type="${type}" value="${esc(v == null ? '' : v)}"></div>`;
+  const ta = (l, id, v) =>
+    `<div class="field wide"><label>${tr(l)}</label>
+      <textarea data-pf="${id}" rows="2">${esc(v || '')}</textarea></div>`;
+  return `<div class="card">
+    <h3>🪪 البيانات الشخصية</h3>
+    <div class="form-grid">
+      ${f('الاسم الكامل', 'full_name', p.full_name)}
+      ${f('الرقم القومي/الهوية', 'national_id', p.national_id)}
+      ${f('تاريخ الميلاد', 'date_of_birth', (p.date_of_birth || '').slice(0, 10), 'date')}
+      ${f('الجنس', 'gender', p.gender)}
+      ${f('الجنسية', 'nationality', p.nationality)}
+      ${f('حالة التدخين', 'smoking_status', p.smoking_status)}
+      ${f('فصيلة الدم', 'blood_type', p.blood_type)}
+    </div>
+    <h3 style="margin-top:18px">📞 معلومات الاتصال</h3>
+    <div class="form-grid">
+      ${f('رقم الهاتف', 'phone', p.phone)}
+      ${f('البريد الإلكتروني', 'email', p.email, 'email')}
+      ${f('العنوان', 'address', p.address)}
+      ${f('جهة الطوارئ', 'emergency_contact_name', p.emergency_contact_name)}
+      ${f('هاتف الطوارئ', 'emergency_contact_phone', p.emergency_contact_phone)}
+      ${f('صلة القرابة', 'emergency_contact_relation', p.emergency_contact_relation)}
+    </div>
+    <h3 style="margin-top:18px">🏢 التأمين الصحي</h3>
+    <div class="form-grid">
+      ${f('شركة التأمين', 'insurer', p.insurer)}
+      ${f('رقم البوليصة', 'policy_number', p.policy_number)}
+      ${f('درجة التغطية', 'insurance_grade', p.insurance_grade)}
+      ${f('نسبة التحمل %', 'insurance_copay', p.insurance_copay, 'number')}
+    </div>
+    <button class="btn success" style="margin-top:14px" onclick="savePatientProfile()">💾 حفظ الملف الشخصي</button>
+  </div>
+
+  <div class="card">
+    <h3>🩺 التاريخ الطبي</h3>
+    <div class="form-grid">
+      ${ta('الأمراض المزمنة', 'chronic_conditions', p.chronic_conditions)}
+      ${ta('العمليات الجراحية السابقة', 'past_surgeries', p.past_surgeries)}
+      ${ta('التاريخ العائلي المرضي', 'family_history', p.family_history)}
+    </div>
+    <h3 style="margin-top:18px">⚠️ الحساسية والتحذيرات</h3>
+    <div class="form-grid">
+      ${ta('الحساسية (أدوية/أطعمة)', 'allergies', p.allergies)}
+      ${ta('تحذيرات طبية مهمة', 'medical_warnings', p.medical_warnings)}
+    </div>
+  </div>`;
+}
+
+async function savePatientProfile() {
+  const body = {};
+  document.querySelectorAll('#chart-body [data-pf]').forEach(el => {
+    let v = el.value;
+    if (el.type === 'number') v = v === '' ? null : Number(v);
+    else if (v === '') v = null;
+    body[el.dataset.pf] = v;
+  });
+  try {
+    CHART.profile = await api(`/patients/${CHART_ID}/profile`, {
+      method: 'PUT', body: JSON.stringify(body) });
+    toast('تم حفظ الملف ✅');
+    renderPatientChart(); paintChartTab();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* — (2) السجل الطبي: الزيارات + العلامات الحيوية — */
+function chartRecord() {
+  const p = CHART.profile;
+  const warn = (t, v, cls) => v ? `<div class="alert-box ${cls}"><b>${tr(t)}</b><span>${esc(v)}</span></div>` : '';
+  return `<div class="card">
+    <h3>⚠️ ملخّص التحذيرات</h3>
+    <div class="alert-grid">
+      ${warn('الحساسية', p.allergies, 'danger')}
+      ${warn('تحذيرات طبية', p.medical_warnings, 'warn')}
+      ${warn('أمراض مزمنة', p.chronic_conditions, 'info')}
+      ${warn('عمليات سابقة', p.past_surgeries, 'info')}
+      ${warn('تاريخ عائلي', p.family_history, 'info')}
+    </div>
+    ${(!p.allergies && !p.medical_warnings && !p.chronic_conditions)
+      ? '<div class="empty">لا توجد تحذيرات مسجّلة</div>' : ''}
+  </div>
+
+  <div class="card">
+    <h3>💓 العلامات الحيوية (${CHART.vitals.length})</h3>
+    <details class="addbox"><summary>➕ تسجيل قياس جديد</summary>
+      <div class="form-grid">
+        <div class="field"><label>الضغط الانقباضي</label><input id="v-sys" type="number" min="0" max="300"></div>
+        <div class="field"><label>الضغط الانبساطي</label><input id="v-dia" type="number" min="0" max="200"></div>
+        <div class="field"><label>الحرارة °C</label><input id="v-temp" type="number" step="0.1" min="30" max="45"></div>
+        <div class="field"><label>النبض</label><input id="v-pulse" type="number" min="0" max="250"></div>
+        <div class="field"><label>الوزن كجم</label><input id="v-weight" type="number" step="0.1" min="1"></div>
+        <div class="field"><label>الطول سم</label><input id="v-height" type="number" step="0.1" min="30"></div>
+        <div class="field wide"><label>ملاحظات</label><input id="v-notes"></div>
+      </div>
+      <button class="btn success" style="margin-top:12px" onclick="addVital()">حفظ القياس</button>
+    </details>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>التاريخ</th><th>الضغط</th><th>الحرارة</th><th>النبض</th><th>الوزن</th><th>الطول</th><th>BMI</th><th></th></tr></thead>
+      <tbody>${CHART.vitals.map(v => `<tr>
+        <td>${fmtDate(v.recorded_at)}</td>
+        <td>${v.systolic || '-'}/${v.diastolic || '-'}</td>
+        <td>${v.temperature ?? '-'}</td><td>${v.pulse ?? '-'}</td>
+        <td>${v.weight ?? '-'}</td><td>${v.height ?? '-'}</td>
+        <td>${v.bmi ?? '-'}</td>
+        <td class="actions">${isAdmin() ? `<button class="btn sm danger" onclick="delVital(${v.id})">حذف</button>` : ''}</td>
+      </tr>`).join('') || emptyRow(8, 'لا توجد علامات حيوية مسجّلة')}</tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h3>🩺 الملاحظات الطبية والتشخيصات (${CHART.records.length})</h3>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>التاريخ</th><th>الطبيب</th><th>الشكوى</th><th>التشخيص</th><th>الوصفة</th><th>ملاحظات</th></tr></thead>
+      <tbody>${CHART.records.map(r => `<tr>
+        <td>${fmtDate(r.created_at)}</td>
+        <td>${esc(r.doctor ? r.doctor.full_name : '—')}</td>
+        <td>${esc(r.chief_complaint || '—')}</td>
+        <td><strong>${esc(r.diagnosis)}</strong></td>
+        <td>${esc(r.prescription || '—')}</td>
+        <td>${esc(r.notes || '—')}</td>
+      </tr>`).join('') || emptyRow(6, 'لا توجد زيارات مسجّلة')}</tbody>
+    </table></div>
+  </div>`;
+}
+
+async function addVital() {
+  const num = id => { const v = V(id); return v === '' || v === undefined ? null : Number(v); };
+  const body = { systolic: num('v-sys'), diastolic: num('v-dia'), temperature: num('v-temp'),
+                 pulse: num('v-pulse'), weight: num('v-weight'), height: num('v-height'),
+                 notes: V('v-notes') || null };
+  try {
+    await api(`/patients/${CHART_ID}/vitals`, { method: 'POST', body: JSON.stringify(body) });
+    toast('تم تسجيل القياس ✅');
+    await refreshChart();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function delVital(id) {
+  if (!confirm('حذف هذا القياس؟')) return;
+  try {
+    await api(`/patients/${CHART_ID}/vitals/${id}`, { method: 'DELETE' });
+    toast('تم الحذف ✅');
+    await refreshChart();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* إعادة تحميل نقطة الملف بعد تعديل (تبقى التبويب الحالي) */
+async function refreshChart() {
+  CHART = await api(`/patients/${CHART_ID}/chart`);
+  renderPatientChart(); paintChartTab();
+}
+
+/* — (3) المواعيد والزيارات — */
+function chartVisits() {
+  const { past = [], upcoming = [] } = CHART.appointments;
+  const rows = (list, empty) => list.map(a => `<tr>
+      <td>${fmtDate(a.appointment_date)}</td>
+      <td>${esc(a.doctor ? a.doctor.full_name : '—')}</td>
+      <td>${esc(a.reason || '—')}</td>
+      <td><span class="pill ${a.status}">${esc(a.status)}</span></td>
+    </tr>`).join('') || emptyRow(4, empty);
+  return `<div class="card">
+    <h3>📅 سجل الزيارات السابقة (${past.length})</h3>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>التاريخ</th><th>الطبيب</th><th>السبب</th><th>الحالة</th></tr></thead>
+      <tbody>${rows(past, 'لا زيارات سابقة')}</tbody>
+    </table></div>
+  </div>
+  <div class="card">
+    <h3>⏰ المواعيد القادمة (${upcoming.length})</h3>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>التاريخ</th><th>الطبيب</th><th>السبب</th><th>الحالة</th></tr></thead>
+      <tbody>${rows(upcoming, 'لا مواعيد قادمة')}</tbody>
+    </table></div>
+    <p class="muted">لتعديل أو إلغاء موعد افتح شاشة «المواعيد».</p>
+  </div>`;
+}
+
+/* — (4) الفحوصات والخدمات الطبية — */
+function chartOrders() {
+  const stLbl = { pending: 'مسجّل', in_progress: 'قيد التنفيذ', ready: 'جاهزة',
+                  reviewed: 'مراجَعة', cancelled: 'ملغاة' };
+  return `<div class="card">
+    <h3>🔬 المختبر والأشعة (${CHART.lab_orders.length})</h3>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>التاريخ</th><th>النوع</th><th>الفحص</th><th>الحالة</th><th>النتيجة</th><th></th></tr></thead>
+      <tbody>${CHART.lab_orders.map(l => `<tr>
+        <td>${fmtDate(l.ordered_at)}</td>
+        <td>${l.test_type === 'radiology' ? '🩻 أشعة' : '🧪 مختبر'}</td>
+        <td><strong>${esc(l.test_name)}</strong></td>
+        <td><span class="pill ${l.status}">${esc(stLbl[l.status] || l.status)}</span></td>
+        <td>${esc(l.result || '—')}</td>
+        <td><button class="btn sm ghost" onclick="download('/lab-orders/${l.id}/pdf','lab_${l.id}.pdf')">🖨️ ورقة</button></td>
+      </tr>`).join('') || emptyRow(6, 'لا فحوصات')}</tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h3>💊 الوصفات الطبية (${CHART.prescriptions.length})</h3>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>التاريخ</th><th>الطبيب</th><th>التشخيص</th><th>الحالة</th><th></th></tr></thead>
+      <tbody>${CHART.prescriptions.map(r => `<tr>
+        <td>${fmtDate(r.created_at)}</td>
+        <td>${esc(r.doctor ? r.doctor.full_name : '—')}</td>
+        <td>${esc(r.diagnosis || '—')}</td>
+        <td><span class="pill ${r.status}">${esc(r.status)}</span></td>
+        <td><button class="btn sm ghost" onclick="download('/prescriptions/${r.id}/pdf','rx_${r.id}.pdf')">🖨️ وصفة</button></td>
+      </tr>`).join('') || emptyRow(5, 'لا وصفات')}</tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h3>🛒 الأدوية المصروفة (${CHART.dispenses.length})</h3>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>التاريخ</th><th>الدواء</th><th>الكمية</th><th>الجرعة</th><th>الإجمالي</th><th>الحالة</th></tr></thead>
+      <tbody>${CHART.dispenses.map(s => `<tr>
+        <td>${fmtDate(s.created_at)}</td>
+        <td>${esc(s.medication ? s.medication.name : '—')}</td>
+        <td>${s.quantity ?? '—'}</td>
+        <td>${esc(s.dosage || '—')}</td>
+        <td>${(s.total_price || 0).toLocaleString()} ر.س</td>
+        <td><span class="pill ${s.status}">${esc(s.status)}</span></td>
+      </tr>`).join('') || emptyRow(6, 'لا صرف')}</tbody>
+    </table></div>
+  </div>`;
+}
+
+/* — (5) الحسابات والمطالبات — */
+function chartBilling() {
+  const f = CHART.financials;
+  const clLbl = { submitted: 'مُقدَّمة', approved: 'موافق عليها',
+                  rejected: 'مرفوضة', paid: 'مسدَّدة' };
+  return `<div class="card">
+    <h3>💰 ملخّص الحساب</h3>
+    <div class="stats">
+      <div class="stat"><div class="num">${f.dues.toLocaleString()}</div><div class="lbl">إجمالي المستحق</div></div>
+      <div class="stat green"><div class="num">${(f.invoices_paid + f.sales_paid).toLocaleString()}</div><div class="lbl">المسدَّد</div></div>
+      <div class="stat ${f.outstanding > 0 ? 'red' : 'green'}"><div class="num">${f.outstanding.toLocaleString()}</div><div class="lbl">المتبقي</div></div>
+      <div class="stat"><div class="num">${CHART.invoices.length}</div><div class="lbl">فواتير</div></div>
+    </div>
+    <p class="muted">فواتير الخدمات ${f.invoices_total.toLocaleString()} · صرف الصيدلية ${f.sales_total.toLocaleString()} ر.س</p>
+  </div>
+
+  <div class="card">
+    <h3>🧾 الفواتير (${CHART.invoices.length})</h3>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>التاريخ</th><th>الوصف</th><th>الإجمالي</th><th>المدفوع</th><th>الحالة</th><th></th></tr></thead>
+      <tbody>${CHART.invoices.map(i => `<tr>
+        <td>${fmtDate(i.created_at)}</td>
+        <td>${esc(i.description || '—')}</td>
+        <td>${(i.total || 0).toLocaleString()}</td>
+        <td>${(i.paid_amount || 0).toLocaleString()}</td>
+        <td><span class="pill ${i.status}">${esc(i.status)}</span></td>
+        <td><button class="btn sm ghost" onclick="download('/invoices/${i.id}/pdf','invoice_${i.id}.pdf')">🖨️</button></td>
+      </tr>`).join('') || emptyRow(6, 'لا فواتير')}</tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h3>🏢 مطالبات التأمين (${CHART.claims.length})</h3>
+    ${isAdmin() ? `<details class="addbox"><summary>➕ تقديم مطالبة</summary>
+      <div class="form-grid">
+        <div class="field"><label>رقم المطالبة *</label><input id="c-no"></div>
+        <div class="field"><label>القيمة (ر.س) *</label><input id="c-amount" type="number" step="0.01" min="0"></div>
+        <div class="field wide"><label>ملاحظات</label><input id="c-notes"></div>
+      </div>
+      <button class="btn success" style="margin-top:12px" onclick="addClaim()">تقديم المطالبة</button>
+    </details>` : ''}
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>رقم المطالبة</th><th>الشركة</th><th>القيمة</th><th>الموافق</th><th>الحالة</th><th>القرار</th><th></th></tr></thead>
+      <tbody>${CHART.claims.map(c => `<tr>
+        <td><strong>${esc(c.claim_number)}</strong></td>
+        <td>${esc(c.insurer || '—')}</td>
+        <td>${(c.amount || 0).toLocaleString()}</td>
+        <td>${c.approved_amount != null ? c.approved_amount.toLocaleString() : '—'}</td>
+        <td><span class="pill ${c.status}">${esc(clLbl[c.status] || c.status)}</span></td>
+        <td>${esc(c.rejection_reason || c.decision_notes || '—')}</td>
+        <td class="actions">${isAdmin() ? `
+          ${c.status !== 'approved' && c.status !== 'paid'
+            ? `<button class="btn sm success" onclick="decideClaim(${c.id},'approved')">موافقة</button>` : ''}
+          ${c.status !== 'rejected'
+            ? `<button class="btn sm danger" onclick="decideClaim(${c.id},'rejected')">رفض</button>` : ''}
+          <button class="btn sm ghost" onclick="delClaim(${c.id})">حذف</button>` : ''}</td>
+      </tr>`).join('') || emptyRow(7, 'لا مطالبات تأمين')}</tbody>
+    </table></div>
+  </div>`;
+}
+
+async function addClaim() {
+  const no = V('c-no'), amt = V('c-amount');
+  if (!no || amt === '') return toast('رقم المطالبة والقيمة مطلوبان', true);
+  try {
+    await api(`/patients/${CHART_ID}/claims`, { method: 'POST',
+      body: JSON.stringify({ claim_number: no, amount: Number(amt), decision_notes: V('c-notes') || null }) });
+    toast('تم تقديم المطالبة ✅');
+    await refreshChart();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function decideClaim(id, action) {
+  const body = { status: action };
+  if (action === 'approved') {
+    const v = prompt('القيمة الموافق عليها (ر.س):', '0');
+    if (v === null) return;
+    body.approved_amount = Number(v);
+  } else {
+    const v = prompt('سبب الرفض:');
+    if (!v) return;
+    body.rejection_reason = v;
+  }
+  try {
+    await api(`/patients/${CHART_ID}/claims/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+    toast(action === 'approved' ? 'تم تسجيل الموافقة ✅' : 'تم تسجيل الرفض ❌');
+    await refreshChart();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function delClaim(id) {
+  if (!confirm('حذف هذه المطالبة؟')) return;
+  try {
+    await api(`/patients/${CHART_ID}/claims/${id}`, { method: 'DELETE' });
+    toast('تم الحذف ✅');
+    await refreshChart();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* — (6) المرفقات والوثائق — */
+function chartDocs() {
+  return `<div class="card">
+    <h3>📎 المرفقات والوثائق (${CHART.attachments.length})</h3>
+    <p class="muted">صور الهوية · بطاقة التأمين · التقارير الطبية الخارجية · نماذج الإقرار والتوقيعات (حد 10MB)</p>
+    <label class="btn ghost" style="cursor:pointer;margin:0;display:inline-block">⬆️ رفع ملف
+      <input type="file" style="display:none" onchange="uploadChartFile(this)"></label>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>الملف</th><th>النوع</th><th>الحجم</th><th>تاريخ الرفع</th><th></th></tr></thead>
+      <tbody>${CHART.attachments.map(a => `<tr>
+        <td><strong>${esc(a.original_name)}</strong></td>
+        <td>${esc(a.content_type)}</td>
+        <td>${(a.size_bytes / 1024).toFixed(0)} KB</td>
+        <td>${fmtDate(a.uploaded_at)}</td>
+        <td class="actions">
+          <button class="btn sm ghost" onclick="window.open('/attachments/${a.id}/preview','_blank')">👁️ معاينة</button>
+          <button class="btn sm ghost" onclick="download('/attachments/${a.id}/file','${esc(a.original_name)}')">⬇️ تنزيل</button>
+        </td>
+      </tr>`).join('') || emptyRow(5, 'لا مرفقات — ارفع صورة الهوية أو التقارير')}</tbody>
+    </table></div>
+  </div>`;
+}
+
+async function uploadChartFile(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('patient_id', CHART_ID);
+  fd.append('file', file);
+  try {
+    const res = await fetch(API + '/attachments/', {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + TOKEN }, body: fd });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || 'فشل الرفع'); }
+    toast('تم الرفع ✅');
+    await refreshChart();
+  } catch (e) { toast(e.message, true); }
+}
+
 function openModal(title, html, wide = false) {
   const t = document.getElementById('modal-title');
   t.textContent = title;
@@ -1323,6 +1766,7 @@ async function ledgerAction(action) {
 
 let HR_ROWS = [], HR_SELECTED = null, HR_TAB = 'personal', HR_ACCOUNTS = [];
 const HR_TABS = [
+  ['roster','قائمة الموظفين','👥'],
   ['personal','البيانات الشخصية والتعريفية','🪪'], ['employment','البيانات الوظيفية والإدارية','🏢'],
   ['salary','البيانات المالية والتعويضات','💰'], ['deductions','الاستقطاعات والتأمينات والضرائب','🧮'],
   ['attendance','الإجازات والدوام','🕒'], ['assets','العهد العينية والعهد','💻'],
@@ -1338,7 +1782,17 @@ const HR_DEFAULT = {
   end_service: { end_service_method:'مخصص الخدمة المتبقية', provision_rate:0, payroll_account:'', loan_account:'', end_service_account:'' }
 };
 function currentHR() { return HR_ROWS.find(x => x.id === HR_SELECTED) || null; }
-function hrProfile() { return Object.assign({}, HR_DEFAULT, currentHR()?.hr_profile || {}); }
+function hrProfile() {
+  const s = currentHR();
+  const p = Object.assign({}, HR_DEFAULT, s?.hr_profile || {});
+  /* ربط عمودي الموظف بالملف: الهاتف والبريد يُدخلان في شاشة الموظفين داخل أعمدة
+     الموظف نفسها، فيُعرضان هنا متى لم يُدخَلا في الملف بعد — فلا يُطلب إدخالهما ثانية،
+     وعند الحفظ يدفعهما saveHR إلى العمودين فتبقى المصدرين متّحدَين. */
+  p.personal = Object.assign({}, HR_DEFAULT.personal, p.personal);
+  if (!p.personal.phone) p.personal.phone = s?.phone || '';
+  if (!p.personal.email) p.personal.email = s?.email || '';
+  return p;
+}
 function hrField(group, key, label, type='text', options='') {
   const v = hrProfile()[group]?.[key] ?? '';
   const input = type === 'select' ? `<select data-hr="${group}.${key}">${options.map(o => `<option ${String(v)===o?'selected':''}>${esc(o)}</option>`).join('')}</select>`
@@ -1354,12 +1808,15 @@ function hrDirectoryHTML(filter='') {
 }
 function hrEditorHTML() {
   const s = currentHR();
-  if (!s) return '<div class="card empty">اختر موظفًا لعرض ملفه</div>';
-  const p = hrProfile();
+  if (!s) HR_TAB = 'roster';   /* بلا موظف مختار: القائمة هي العرض الافتراضي */
+  const p = s ? hrProfile() : null;
+  const tabs = `<div class="tabbar" role="tablist">${HR_TABS.map(([k,l,i])=>`<button class="tab${HR_TAB===k?' active':''}" role="tab" aria-selected="${HR_TAB===k}" onclick="setHRTab('${k}')">${i} ${l}</button>`).join('')}</div>`;
+  /* تبويب «قائمة الموظفين»: الجدول + الإضافة + الحذف — بلا رأس ملف */
+  if (HR_TAB === 'roster') return `<div class="card">${tabs}<div id="hr-tab" class="hr-tab">${hrTabHTML()}</div></div>`;
   return `<div class="card hr-card">
     <div class="hr-profile-head"><div><h3>${esc(s.full_name)}</h3><p>${esc(s.position)} · تعيين ${fmtDate(s.hire_date)}</p></div>
       <div class="actions"><button class="btn success" onclick="saveHR()">💾 حفظ ملف الموظف</button><span class="pill active">${esc(p.employment.status || 'على رأس العمل')}</span></div></div>
-    <div class="tabbar" role="tablist">${HR_TABS.map(([k,l,i])=>`<button class="tab${HR_TAB===k?' active':''}" role="tab" aria-selected="${HR_TAB===k}" onclick="setHRTab('${k}')">${i} ${l}</button>`).join('')}</div>
+    ${tabs}
     <div id="hr-tab" class="hr-tab">${hrTabHTML()}</div></div>`;
 }
 /* اختيار موظف: يُعاد بناء المحرّر كاملًا — ومع التبويب الحالي «الرواتب»
@@ -1367,12 +1824,18 @@ function hrEditorHTML() {
    لأن hrEditorHTML() يعيد بناء <div id="hr-payroll"></div> من الصفر. */
 async function selectHR(id) {
   captureHRFields(); HR_SELECTED=id;
+  if (HR_TAB === 'roster') HR_TAB = 'personal';   /* من القائمة: يُفتح ملف الموظف مباشرة */
   document.getElementById('hr-list').innerHTML=hrDirectoryHTML();
   document.getElementById('hr-editor').innerHTML=hrEditorHTML();
   applyI18n(document.getElementById('hr-editor'));
-  if (HR_TAB === 'payroll') await renderHRPayroll();
+  await renderHRCurrentTab();
 }
-async function setHRTab(tab) { captureHRFields(); HR_TAB=tab; document.getElementById('hr-editor').innerHTML=hrEditorHTML(); applyI18n(document.getElementById('hr-editor')); if (tab === 'payroll') await renderHRPayroll(); }
+async function setHRTab(tab) { captureHRFields(); HR_TAB=tab; document.getElementById('hr-editor').innerHTML=hrEditorHTML(); applyI18n(document.getElementById('hr-editor')); await renderHRCurrentTab(); }
+/* رسم محتوى التبويب الذي يُبنى لاحقًا (القائمة أو الرواتب يُستدعى عبر VIEWS…) */
+async function renderHRCurrentTab() {
+  if (HR_TAB === 'roster') await renderHRRoster();
+  else if (HR_TAB === 'payroll') await renderHRPayroll();
+}
 function filterHR(value) { document.getElementById('hr-list').innerHTML=hrDirectoryHTML(value); }
 function captureHRFields() {
   const staff = currentHR();
@@ -1420,6 +1883,7 @@ async function deleteStaffDoc(id) {
 
 function hrTabHTML() {
   const p = hrProfile(), s = currentHR();
+  if (HR_TAB === 'roster') return '<div id="hr-roster"></div>';
   if (HR_TAB === 'personal') return `<div class="section-title">🪪 البيانات الأساسية والوثائقية</div><div class="form-grid">
     ${hrField('personal','birth_date','تاريخ الميلاد','date')}${hrField('personal','gender','الجنس','select',['ذكر','أنثى'])}${hrField('personal','nationality','الجنسية')}${hrField('personal','marital_status','الحالة الاجتماعية','select',['أعزب','متزوج','مطلق','أرمل'])}
     ${hrField('personal','national_id','رقم الهوية / الرقم الوطني')}${hrField('personal','passport_number','رقم الجواز')}${hrField('personal','document_issue_date','تاريخ إصدار الوثائق','date')}${hrField('personal','document_expiry_date','تاريخ انتهاء الوثائق','date')}</div>
@@ -1446,14 +1910,27 @@ async function renderHRPayroll() {
   applyI18n(box);   /* المحتوى يُبنى بعد applyI18n في المستدعي — نترجمه هنا */
 }
 
+/* تبويب «قائمة الموظفين» داخل شؤون الموظفين — يعيد استخدام شاشة الموظفين
+   كاملة (الجدول + نموذج الإضافة + الحذف) بدل شاشة منفصلة في القائمة الجانبية */
+async function renderHRRoster() {
+  const box = document.getElementById('hr-roster');
+  if (!box) return;
+  box.innerHTML = '<div class="empty">جارٍ التحميل…</div>';
+  try { await VIEWS.staff(box); }
+  catch (e) { box.innerHTML = `<div class="empty" style="color:#dc3545">⚠️ ${esc(e.message)}</div>`; }
+  applyI18n(box);
+}
+
 const VIEWS = {
   /* --- شاشة شؤون الموظفين: ملف موظف بتبويبات متكاملة --- */
   async hr(main) {
     if (!isAdmin()) { main.innerHTML = '<div class="empty">🔒 هذه الصفحة متاحة للمدير فقط</div>'; return; }
     const [rows, accounts] = await Promise.all([api('/staff/'), api('/accounts/ledger/accounts')]);
     HR_ROWS = rows; HR_ACCOUNTS = accounts;
+    const firstOpen = !HR_SELECTED;          /* أول فتح: نبدأ من قائمة الموظفين */
     if (!HR_SELECTED && rows.length) HR_SELECTED = rows[0].id;
     if (!rows.some(x => x.id === HR_SELECTED)) HR_SELECTED = rows[0]?.id || null;
+    if (firstOpen) HR_TAB = 'roster';
     main.innerHTML = `
       <div class="hr-shell">
         <div class="card hr-directory">
@@ -1463,7 +1940,8 @@ const VIEWS = {
         </div>
         <div class="hr-editor" id="hr-editor">${hrEditorHTML()}</div>
       </div>`;
-    if (HR_TAB === 'payroll') await renderHRPayroll();
+    applyI18n(document.getElementById('hr-editor'));
+    await renderHRCurrentTab();
   },
 
   /* --- الموظفون --- */
@@ -1491,7 +1969,7 @@ const VIEWS = {
             <td>${s.id}</td><td><strong>${esc(s.full_name)}</strong></td><td>${esc(s.position)}</td>
             <td>${esc(s.phone)}</td><td>${esc(s.email)}</td><td>${fmtDate(s.hire_date)}</td>
             <td>${s.salary ? s.salary.toLocaleString() : '-'}</td>
-            ${isAdmin() ? `<td><button class="btn sm danger" onclick="del('staff',${s.id},'staff')">حذف</button></td>` : ''}
+            ${isAdmin() ? `<td><button class="btn sm danger" onclick="del('staff',${s.id},'hr')">حذف</button></td>` : ''}
           </tr>`).join('') || '<tr><td colspan="8" class="empty">لا يوجد موظفون</td></tr>'}</tbody>
         </table></div>
       </div>`;
@@ -2442,6 +2920,7 @@ async function deleteStaffDoc(id) {
             <td>${esc(p.national_id || '-')}${p.insurer ? `<br><small>🏢 ${esc(p.insurer)}</small>` : ''}</td>
             <td>${fmtDate(p.created_at)}</td>
             <td class="actions">
+              <button class="btn sm primary" onclick="openPatientChart(${p.id})">🗂️ الملف</button>
               <button class="btn sm ghost" onclick="download('/patients/${p.id}/pdf','patient_${p.id}_file.pdf')">📄 الملف PDF</button>
               ${isAdmin() ? `<button class="btn sm danger" onclick="del('patients',${p.id},'patients')">حذف</button>` : ''}
             </td>
@@ -3329,7 +3808,7 @@ function addStaff() {
   post('/staff/', {
     full_name: V('f-name'), position: V('f-pos'), phone: V('f-phone'),
     email: V('f-email'), hire_date: V('f-hire'), salary: V('f-sal') ? Number(V('f-sal')) : null
-  }, 'staff');
+  }, 'hr');   /* الإضافة تتم داخل تبويب القائمة في شؤون الموظفين — نعود إليها */
 }
 
 /* ========== عمليات المحاور الجديدة ========== */

@@ -45,6 +45,23 @@
   .role-badge { background: #eef4ff; color: #2c7be5; padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; }
   main { padding: 26px; }
 
+  /* ===== بطاقة ملف المريض (شاشة الأقسام الستة) ===== */
+  .chart-head { display: flex; justify-content: space-between; align-items: flex-start;
+    gap: 14px; flex-wrap: wrap; background: #fff; border-radius: 12px; padding: 16px 20px;
+    margin-bottom: 14px; box-shadow: 0 2px 8px rgba(0,0,0,.05); }
+  .chart-head h3 { border: 0; margin: 0 0 4px; padding: 0; font-size: 19px; color: #1e2a3a; }
+  .chart-head p { margin: 0; font-size: 13px; color: #777; }
+  .muted { color: #999; font-size: 13px; margin: 10px 0 0; }
+  .alert-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+  .alert-box { border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }
+  .alert-box b { font-size: 12px; }
+  .alert-box span { font-size: 13px; }
+  .alert-box.danger { background: #f8d7da; color: #721c24; }
+  .alert-box.warn { background: #fff3cd; color: #8a6d00; }
+  .alert-box.info { background: #eef4ff; color: #2c7be5; }
+  .field.wide { grid-column: 1 / -1; }
+  .field textarea { min-height: 56px; resize: vertical; font-family: inherit; }
+
   /* ===== بطاقات الإحصائيات ===== */
   .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; margin-bottom: 26px; }
   .stat { background: #fff; border-radius: 12px; padding: 18px; box-shadow: 0 2px 8px rgba(0,0,0,.05);
