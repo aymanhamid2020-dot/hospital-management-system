@@ -70,96 +70,6 @@ def _token(account: PatientPortalAccount) -> str:
     }, SECRET_KEY, algorithm=ALGORITHM)
 
 
-@router.post("/accounts", response_model=PortalAccountOut, status_code=201,
-             summary="إنشاء حساب بوابة لمريض (مدير فقط)")
-async def create_portal_account(
-    payload: PortalAccountCreate,
-    db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
-):
-    """إنشاء حساب بوابة لمريض موجود — المدير فقط."""
-    if not db.query(Patient).filter(Patient.id == payload.patient_id).first():
-        raise HTTPException(404, "المريض غير موجود")
-    existing = db.query(PatientPortalAccount).filter(
-        PatientPortalAccount.username == payload.username).first()
-    if existing:
-        raise HTTPException(400, "اسم المستخدم مستخدم مسبقًا")
-    patient_same = db.query(PatientPortalAccount).filter(
-        PatientPortalAccount.patient_id == payload.patient_id).first()
-    if patient_same:
-        raise HTTPException(400, "يوجد حساب بوابة لهذا المريض مسبقًا")
-    account = PatientPortalAccount(
-        patient_id=payload.patient_id,
-        username=payload.username,
-        hashed_password=hash_password(payload.password),
-        is_active=True,
-        created_at=datetime.now(timezone.utc).replace(tzinfo=None),
-    )
-    db.add(account)
-    db.commit()
-    db.refresh(account)
-    return _out(account, db)
-
-
-@router.get("/accounts", response_model=List[PortalAccountOut],
-            summary="قائمة حسابات البوابة (مدير فقط)")
-async def list_portal_accounts(
-    db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
-):
-    """قائمة جميع حسابات البوابة (مدير فقط)."""
-    accounts = db.query(PatientPortalAccount).order_by(PatientPortalAccount.id.desc()).all()
-    return [_out(a, db) for a in accounts]
-
-
-@router.get("/accounts/{account_id}", response_model=PortalAccountOut,
-            summary="عرض حساب بوابة (مدير فقط)")
-async def get_portal_account(
-    account_id: int,
-    db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
-):
-    """عرض تفاصيل حساب بوابة (مدير فقط)."""
-    account = db.query(PatientPortalAccount).filter(PatientPortalAccount.id == account_id).first()
-    if not account:
-        raise HTTPException(404, "الحساب غير موجود")
-    return _out(account, db)
-
-
-@router.put("/accounts/{account_id}", response_model=PortalAccountOut,
-            summary="تحديث حساب بوابة (مدير فقط)")
-async def update_portal_account(
-    account_id: int,
-    payload: PortalPasswordReset,
-    db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
-):
-    """إعادة تعيين كلمة مرور حساب بوابة (مدير فقط)."""
-    account = db.query(PatientPortalAccount).filter(PatientPortalAccount.id == account_id).first()
-    if not account:
-        raise HTTPException(404, "الحساب غير موجود")
-    account.hashed_password = hash_password(payload.password)
-    db.commit()
-    db.refresh(account)
-    return _out(account, db)
-
-
-@router.delete("/accounts/{account_id}", status_code=204,
-               summary="حذف حساب بوابة (مدير فقط)")
-async def delete_portal_account(
-    account_id: int,
-    db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
-):
-    """حذف حساب بوابة (مدير فقط) — حذف نهائي."""
-    account = db.query(PatientPortalAccount).filter(PatientPortalAccount.id == account_id).first()
-    if not account:
-        raise HTTPException(404, "الحساب غير موجود")
-    db.delete(account)
-    db.commit()
-    return None
-
-
 def _account(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
              db: Session = Depends(get_db)) -> PatientPortalAccount:
     if not credentials:
@@ -207,6 +117,18 @@ def create_account(payload: PortalAccountCreate, db: Session = Depends(get_db),
     db.add(account)
     db.commit()
     db.refresh(account)
+    return _out(account, db)
+
+
+@router.get("/accounts/{account_id}", response_model=PortalAccountOut,
+            summary="عرض حساب بوابة المريض (مدير فقط)")
+def get_account(account_id: int, db: Session = Depends(get_db),
+                _: User = Depends(require_admin)):
+    """عرض حساب واحد — بلا كلمة المرور."""
+    account = db.query(PatientPortalAccount).filter(
+        PatientPortalAccount.id == account_id).first()
+    if not account:
+        raise HTTPException(404, "حساب البوابة غير موجود")
     return _out(account, db)
 
 
