@@ -408,6 +408,38 @@ async def verify_lab_order(
     return order
 
 
+@router.post("/{order_id}/deliver", response_model=LabOrderInDB, summary="تسليم النتيجة للمريض")
+async def deliver_lab_order(
+    order_id: int,
+    payload: LabVerify,  # reuse: channel in note or extend schema
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    تسجيل تسليم النتيجة للمريض — يحدد قناة التسليم (pdf, portal, whatsapp, sms, email).
+    يعيد الطلب مع حقول التسليم (delivered_at, delivered_by, delivery_channel).
+    """
+    order = _load(db, current_user, order_id)
+    if order.status not in (LabStatus.READY, LabStatus.REVIEWED):
+        raise HTTPException(status_code=400,
+                            detail="لا يمكن تسليم نتيجة غير جاهزة أو غير مراجعة")
+    if order.delivered_at:
+        raise HTTPException(status_code=409,
+                            detail="تم تسليم هذه النتيجة مسبقًا")
+
+    channel = (payload.note or "pdf").lower()
+    allowed = ("pdf", "portal", "whatsapp", "sms", "email")
+    if channel not in allowed:
+        channel = "pdf"
+
+    order.delivered_at = datetime.now()
+    order.delivered_by = _who(current_user)
+    order.delivery_channel = channel
+    db.commit()
+    db.refresh(order)
+    return order
+
+
 @router.put("/{order_id}", response_model=LabOrderInDB, summary="تحديث طلب (نتيجة/حالة/جدولة)")
 async def update_lab_order(
     order_id: int,

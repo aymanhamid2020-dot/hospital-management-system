@@ -252,6 +252,8 @@ from app.routers.audit import router as audit_router
 from app.routers.accounts import router as accounts_router
 from app.routers.accounting import router as accounting_router
 from app.routers.inventory import router as inventory_router
+from app.routers.general_stock import router as general_stock_router
+from app.routers.shared_stats import router as shared_stats_router
 from app.routers.search import router as search_router
 from app.routers.care_plans import router as care_plans_router
 from app.routers.clinical import router as clinical_router
@@ -286,6 +288,8 @@ app.include_router(audit_router)
 app.include_router(accounts_router)
 app.include_router(accounting_router)
 app.include_router(inventory_router)
+app.include_router(general_stock_router)
+app.include_router(shared_stats_router)
 app.include_router(dental_router)
 app.include_router(service_units_router)
 

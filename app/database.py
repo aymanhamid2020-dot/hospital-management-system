@@ -143,6 +143,10 @@ PENDING_COLUMNS = {
         "report": "TEXT",
         "reported_by": "VARCHAR",
         "reported_at": "TIMESTAMP",
+        # مشترك: تسليم النتائج
+        "delivered_at": "TIMESTAMP",
+        "delivered_by": "VARCHAR",
+        "delivery_channel": "VARCHAR",
     },
     "attachments": {
         # DICOM/PACS metadata

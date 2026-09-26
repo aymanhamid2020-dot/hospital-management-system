@@ -461,6 +461,10 @@ class LabOrder(Base):
     report = Column(Text, nullable=True)                # التقرير التشخيصي
     reported_by = Column(String, nullable=True)
     reported_at = Column(DateTime, nullable=True)
+    # — تسليم النتائج (مشترك) —
+    delivered_at = Column(DateTime, nullable=True)
+    delivered_by = Column(String, nullable=True)
+    delivery_channel = Column(String, nullable=True)  # pdf, portal, whatsapp, sms, email
 
     patient = relationship("Patient")
     doctor = relationship("Doctor")

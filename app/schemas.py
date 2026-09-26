@@ -984,6 +984,10 @@ class LabOrderInDB(LabOrderBase):
     report: Optional[str] = None
     reported_by: Optional[str] = None
     reported_at: Optional[datetime] = None
+    # تسليم النتائج
+    delivered_at: Optional[datetime] = None
+    delivered_by: Optional[str] = None
+    delivery_channel: Optional[str] = None
     patient: PatientBrief
     doctor: Optional[DoctorBrief] = None
 
@@ -1050,6 +1054,55 @@ class MedicationInDB(MedicationBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# ===== مخزون عام (مستلزمات/مواد غير دوائية) =====
+class GeneralStockItemBase(BaseModel):
+    code: str = Field(..., min_length=1, max_length=40, description="رمز الصنف")
+    name: str = Field(..., min_length=2, description="اسم الصنف")
+    category: str = Field("medical_supplies", description="التصنيف")
+    warehouse: str = Field("main", description="المخزن")
+    quantity: int = Field(0, ge=0, description="الكمية الحالية")
+    min_quantity: int = Field(0, ge=0, description="حد إعادة الطلب")
+    unit: str = Field("قطعة", description="وحدة القياس")
+    unit_cost: float = Field(0, ge=0, description="تكلفة الوحدة")
+    expiry_date: Optional[datetime] = Field(None, description="تاريخ انتهاء الصلاحية")
+
+
+class GeneralStockItemCreate(GeneralStockItemBase):
+    pass
+
+
+class GeneralStockItemUpdate(BaseModel):
+    """تحديث جزئي — الحقول غير المرسلة تبقى كما هي."""
+    code: Optional[str] = Field(None, min_length=1, max_length=40)
+    name: Optional[str] = Field(None, min_length=2)
+    category: Optional[str] = None
+    warehouse: Optional[str] = None
+    quantity: Optional[int] = Field(None, ge=0)
+    min_quantity: Optional[int] = Field(None, ge=0)
+    unit: Optional[str] = None
+    unit_cost: Optional[float] = Field(None, ge=0)
+    expiry_date: Optional[datetime] = None
+
+
+class GeneralStockItemInDB(GeneralStockItemBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class GeneralStockItemMovement(BaseModel):
+    """حركة مخزون عام (توريد/صرف/جرد/إتلاف/مرتجع)."""
+    item_id: int
+    type: str = Field(..., description="in|out|adjust|disposal|return")
+    change: int
+    quantity_after: int
+    note: Optional[str] = None
+    made_by: Optional[str] = None
+    created_at: datetime
 
 
 class DispenseCreate(BaseModel):
