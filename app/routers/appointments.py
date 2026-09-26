@@ -3,7 +3,10 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from app.database import get_db
-from app.models import Appointment, Patient, Doctor, User, AppointmentStatus, DoctorSchedule
+from app.models import (
+    Appointment, Patient, Doctor, User, AppointmentStatus, DoctorSchedule,
+    DoctorBlock, DoctorLeave,
+)
 from app.schemas import AppointmentCreate, AppointmentUpdate, AppointmentInDB
 from app.auth import get_current_user, require_admin, get_user_role
 
@@ -35,6 +38,39 @@ def _check_appointment_in_schedule(db, doctor_id: int, dt) -> str:
         if at < s.end_time and at > s.start_time:
             return ""  # مقبول
     return (f"الموعد خارج نوبات العمل المحددة ليوم {_DAYS[hms_dow]}")
+
+
+def _check_blocked(db, doctor_id: int, dt) -> str:
+    """منع الحجز في أيام الإجازة والحظر. يُرجع رسالة أو "" إن كان مسموحًا.
+
+    الإجازة تغطي اليوم كاملًا، والحظر قد يكون لليوم كاملًا (بلا أوقات) أو
+    لجزء منه (نطاق داخل اليوم) — والمقارنة بالساعة لتجاهل الثانية.
+    """
+    from datetime import datetime, timedelta
+    if not isinstance(dt, datetime):
+        return ""
+    day = dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    nxt = day + timedelta(days=1)
+
+    on_leave = (db.query(DoctorLeave.id)
+                .filter(DoctorLeave.doctor_id == doctor_id,
+                        DoctorLeave.is_approved.is_(True),
+                        DoctorLeave.start_date < nxt,
+                        DoctorLeave.end_date >= day)
+                .first())
+    if on_leave:
+        return "الطبيب في إجازة في هذا اليوم — اختر تاريخًا آخر"
+
+    for b in (db.query(DoctorBlock)
+              .filter(DoctorBlock.doctor_id == doctor_id,
+                      DoctorBlock.block_date >= day,
+                      DoctorBlock.block_date < nxt).all()):
+        if b.start_time is None or b.end_time is None:
+            return f"الحجز محظور في هذا اليوم ({b.reason or 'محجوز'})"
+        at = dt.time()
+        if at >= b.start_time and at < b.end_time:
+            return f"الحجز محظور في هذه الفترة ({b.reason or 'محجوز'})"
+    return ""
 
 
 @router.get("/", response_model=List[AppointmentInDB], summary="عرض قائمة المواعيد")
@@ -181,6 +217,11 @@ async def create_appointment(
     _sch_msg = _check_appointment_in_schedule(db, appointment.doctor_id, appointment.appointment_date)
     if _sch_msg:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_sch_msg)
+
+    # منع الحجز في إجازات الطبيب وأيام الحظر
+    _blk_msg = _check_blocked(db, appointment.doctor_id, appointment.appointment_date)
+    if _blk_msg:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_blk_msg)
     
     # التحقق من توفر الطبيب في التاريخ المطلوب
     existing_appointment = db.query(Appointment).filter(
@@ -248,6 +289,12 @@ async def update_appointment(
     _sch_msg = _check_appointment_in_schedule(db, db_appointment.doctor_id, new_date)
     if _sch_msg:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_sch_msg)
+
+    # إعادة الجدولة إلى يوم إجازة/محظور ممنوعة أيضًا
+    if new_date != db_appointment.appointment_date:
+        _blk_msg = _check_blocked(db, db_appointment.doctor_id, new_date)
+        if _blk_msg:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_blk_msg)
     
     # التحقق من توفر الطبيب (استبعاد الموعد الحالي) - فقط عند تغيير التاريخ أو الطبيب
     existing_appointment = db.query(Appointment).filter(
