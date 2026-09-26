@@ -80,7 +80,9 @@ def test_portal_account_admin_lifecycle(client, admin):
 
     # الحذف يمحو الحساب فقط ولا يمسّ سجل المريض
     assert client.delete(f"/patient-portal/accounts/{acc_id}", headers=admin).status_code == 204
-    assert client.get("/patient-portal/accounts", headers=admin).json() == []
+    # القاعدة مشتركة بين الملفات ⇒ نتحقق من اختفاء حسابنا لا من فراغ القائمة
+    assert acc_id not in [x["id"] for x in
+                          client.get("/patient-portal/accounts", headers=admin).json()]
     assert client.get(f"/patients/{pid}", headers=admin).status_code == 200
     assert client.delete(f"/patient-portal/accounts/{acc_id}", headers=admin).status_code == 404
 
