@@ -11,6 +11,8 @@ const TITLES: Record<string, string> = {
   lab: 'المختبر والأشعة',
   accounting: 'المحاسبة',
   departments: 'الأقسام',
+  sales: 'المبيعات',
+  accounts: 'الحسابات',
   beds: 'الأسرّة',
   /* الفواتير تبويب داخل شاشة المحاسبة — تُفتح الشاشة بعنوانها */
   invoices: 'المحاسبة',

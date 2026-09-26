@@ -31,9 +31,9 @@ test.describe('شؤون الموظفين 🗂️', () => {
     await expect(page.locator('#hr-payroll button:has-text("كشف الرواتب CSV")')).toBeVisible();
     await expect(page.locator('#hr-payroll summary:has-text("إضافة قيد راتب")')).toBeVisible();
 
-    // شاشة المحاسبة لم يبقَ فيها تبويب رواتب
+    // شاشة المحاسبة: خمسة تبويبات (بلا رواتب وبلا مبيعات — الأخيرة شاشة مستقلة)
     await page.click('.sidebar a[data-view="accounting"]');
-    await expect(page.locator('#acc-tabs .tab')).toHaveCount(6);
+    await expect(page.locator('#acc-tabs .tab')).toHaveCount(5);
     await expect(page.locator('#acc-tabs .tab', { hasText: 'الرواتب' })).toHaveCount(0);
 
     await expectNoUiError(page);

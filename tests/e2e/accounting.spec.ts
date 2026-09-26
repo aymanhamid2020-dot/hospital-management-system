@@ -3,12 +3,12 @@ import { login } from './helpers';
 import { expectNoUiError, openView } from './views';
 
 /** شاشة المحاسبة: ستة تبويبات — كل تبويب يجمع كل ما يرتبط به */
-const TABS = ['overview', 'sales', 'debtors', 'invoices', 'ledger', 'reports'] as const;
+const TABS = ['overview', 'debtors', 'invoices', 'ledger', 'reports'] as const;
+// «المبيعات» شاشة مستقلة في القائمة — تُختبر في sales.spec.ts لا هنا
 
 /** علامة مميّزة لكل تبويب تُثبت أن محتواه هو المعروض */
 const MARKERS: Record<(typeof TABS)[number], string> = {
   overview: 'منحنى الإيراد',
-  sales: 'سجل المبيعات',
   debtors: 'كشف حساب مريض',
   invoices: 'الفواتير',
   ledger: 'الدفتر العام',
@@ -20,7 +20,7 @@ const active = (page: import('@playwright/test').Page) =>
   page.locator('#acc-tabs .tab.active').first();
 
 test.describe('شاشة المحاسبة وتبويباتها 💰', () => {
-  test('ستة تبويبات + نظرة عامة بالملخّص المالي', async ({ page }) => {
+  test('خمسة تبويبات + نظرة عامة بالملخّص المالي', async ({ page }) => {
     await login(page);
     await openView(page, 'accounting');
 
@@ -53,7 +53,6 @@ test.describe('شاشة المحاسبة وتبويباتها 💰', () => {
     await login(page);
 
     const shortcuts: Array<[view: string, tab: string]> = [
-      ['sales', 'sales'],
       ['accounts', 'overview'],
       ['invoices', 'invoices'],
       ['accounting', 'overview'],
@@ -65,27 +64,6 @@ test.describe('شاشة المحاسبة وتبويباتها 💰', () => {
       await expect(active(page)).toHaveAttribute('data-tab', tab);
       await expectNoUiError(page);
     }
-  });
-
-  test('تبويب المبيعات: الفلاتر والسجل والتسديد', async ({ page }) => {
-    await login(page);
-    await openView(page, 'accounting');
-    await page.click('#acc-tabs .tab[data-tab="sales"]');
-
-    await expect(page.locator('#acc-body h3').filter({ hasText: 'سجل المبيعات' })).toBeVisible();
-    await expect(page.locator('#f-acc-period')).toBeVisible();
-
-    // فلترة بفترة بلا عمليات: الجدول يعرض رسالة الفراغ بدل صفوف قديمة
-    await page.fill('#f-acc-period', '2099-01');
-    await page.click('#acc-body button:has-text("تطبيق")');
-    await expect(active(page)).toHaveAttribute('data-tab', 'sales');
-    await expect(page.locator('#acc-body table tbody .empty'))
-      .toHaveText('لا توجد مبيعات في هذه الفترة');
-
-    // مسح الفلاتر يعيد السجل كما كان
-    await page.click('#acc-body button:has-text("مسح")');
-    await expect(page.locator('#acc-body h3').filter({ hasText: 'سجل المبيعات' })).toBeVisible();
-    await expectNoUiError(page);
   });
 
   test('تبويب التقارير: مركز تنزيل تقارير المحاسبة', async ({ page }) => {

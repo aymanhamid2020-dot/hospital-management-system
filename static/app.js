@@ -733,21 +733,21 @@ async function downloadPayroll(kind) {
 let ACC = { period: '', method: '', status: '', patient: '', staff: '' };
 let accGroup = 'day';
 
-/* --- شاشة المحاسبة: التبويب الحالي + تعريفات التبويبات واختصارات القائمة --- */
+/* --- شاشة المحاسبة: التبويب الحالي + تعريفات التبويبات واختصارات القائمة ---
+   «المبيعات» شاشة مستقلة في القائمة (data-view="sales") لا تبويب هنا. */
 let ACC_TAB = 'overview';
 const ACC_TAB_LIST = [
   ['overview', '📊 نظرة عامة'],
-  ['sales', '🛒 المبيعات'],
   ['debtors', '🧾 المدينون'],
   ['invoices', '💳 الفواتير'],
   ['ledger', '📒 الدفتر العام'],
   ['reports', '📄 التقارير']
 ];
-/* أسماء الشاشات السابقة → التبويب المقابل (تعمل كاختصارات وعمق روابط) */
-const ACC_ALIAS = { sales: 'sales', accounts: 'overview', invoices: 'invoices' };
-/* مفتاح التبويب → اسم العرض المنفّذ داخل VIEWS (تبويب «نظرة عامة» = قسم الحسابات) */
+/* أسماء الشاشات السابقة → التبويب المقابل (اختصارات وعمق روابط) */
+const ACC_ALIAS = { accounts: 'overview', invoices: 'invoices' };
+/* مفتاح التبويب → اسم العرض المنفّذ داخل VIEWS */
 const ACC_VIEW = {
-  overview: 'accounts', sales: 'sales', debtors: 'debtors', invoices: 'invoices',
+  overview: 'accounts', debtors: 'debtors', invoices: 'invoices',
   ledger: 'ledger', reports: 'reports',
 };
 
@@ -3376,12 +3376,14 @@ function navigate(view) {
 }
 
 async function renderView(view) {
-  /* اختصارات شاشة المحاسبة (المبيعات/الحسابات/الفواتير) تفتح تبويبها،
-     ورابط «المحاسبة» نفسه يبدأ من تبويب «نظرة عامة» */
+  /* اختصارات شاشة المحاسبة (الحسابات/الفواتير) تفتح تبويبها، ورابط «المحاسبة»
+     يبدأ من تبويب «نظرة عامة» — و«sales» شاشة مستقلة لا تُعاد كتابتها هنا */
   if (ACC_ALIAS[view]) { ACC_TAB = ACC_ALIAS[view]; view = 'accounting'; }
   else if (view === 'accounting') { ACC_TAB = 'overview'; }
   CURRENT_VIEW = view;
-  document.querySelectorAll('.sidebar a').forEach(a => a.classList.toggle('active', a.dataset.view === view));
+  document.querySelectorAll('.sidebar a').forEach(a => {
+    a.classList.toggle('active', a.dataset.view === view);
+  });
   document.getElementById('page-title').textContent = tr(TITLES[view] || '');
   const main = document.getElementById('main');
   main.innerHTML = '<div class="empty">جارٍ التحميل…</div>';
@@ -4417,7 +4419,7 @@ async function deleteStaffDoc(id) {
     }
   },
 
-  /* --- تبويب «المبيعات»: السجل + الفلاتر + التسديد --- */
+  /* --- المبيعات: شاشة مستقلة في القائمة (ليست تبويبًا في المحاسبة) --- */
   async sales(main) {
     const f = ACC;
     const p = periodRange(f.period);
@@ -4432,6 +4434,14 @@ async function deleteStaffDoc(id) {
     ACC_ROWS = sales;
     const unpaidCount = sales.filter(x => x.status !== 'PAID').length;
     main.innerHTML = `
+      <div class="card" style="background:#f8fafc">
+        <div class="toolbar" style="border:0;padding:0">
+          <h3 style="margin:0">🛒 المبيعات</h3>
+          <span class="pill partial">شاشة مستقلة — خارج تبويبات المحاسبة</span>
+          <span style="flex:1"></span>
+          <button class="btn ghost" onclick="navigate('accounting')">💰 الذهاب للمحاسبة</button>
+        </div>
+      </div>
       <div class="card">
         <div class="toolbar"><h3 style="margin:0">سجل المبيعات (${sales.length})</h3>
           <input id="f-acc-period" placeholder="YYYY-MM (كل الفترات)" value="${esc(f.period || '')}" style="max-width:170px">
@@ -4529,7 +4539,7 @@ async function deleteStaffDoc(id) {
       </div>` : ''}
       <div class="card">
         <div class="toolbar"><h3 style="margin:0">🔗 أقسام مرتبطة</h3>
-          <button class="btn sm" onclick="setAccTab('sales')">🛒 سجل المبيعات</button>
+          <button class="btn sm" onclick="navigate('sales')">🛒 سجل المبيعات (شاشة مستقلة)</button>
           <button class="btn sm" onclick="setAccTab('debtors')">🧾 المدينون</button>
           <button class="btn sm ghost" onclick="setAccTab('ledger')">📒 الدفتر العام</button>
           <button class="btn sm ghost" onclick="setAccTab('reports')">📄 التقارير</button>
