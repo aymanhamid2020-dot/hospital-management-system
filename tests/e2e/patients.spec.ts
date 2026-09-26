@@ -11,7 +11,9 @@ async function openChart(page: import('@playwright/test').Page) {
   // الملف يُعرض كتبويب داخل شاشة المرضى نفسها (لا نافذة منبثقة)
   await expect(page.locator('#modal-back')).not.toHaveClass(/show/);
   await expect(page.locator('#pat-tabs .tab.active')).toContainText('الملف الشخصي');
-  await expect(page.locator('#chart-tabs .tab')).toHaveCount(6);
+  // شريط تبويبات واحد فقط (لا شريط داخلي مكرّر) + سبعة تبويبات: قائمة وستة أقسام
+  await expect(page.locator('#chart-tabs')).toHaveCount(0);
+  await expect(page.locator('#pat-tabs .tab')).toHaveCount(7);
   await expect(page.locator('#chart-body h3').first()).toBeVisible();
 }
 
@@ -30,8 +32,10 @@ test.describe('ملف المريض 🗂️', () => {
     await openChart(page);
 
     for (const [tab, heading] of SECTIONS) {
-      await expect(page.locator('#chart-tabs .tab', { hasText: tab })).toHaveCount(1);
-      await page.click(`#chart-tabs .tab:has-text("${tab}")`);
+      await expect(page.locator('#pat-tabs .tab', { hasText: tab })).toHaveCount(1);
+      await page.click(`#pat-tabs .tab:has-text("${tab}")`);
+      // فتح التبويب يبدّل محتواه فعلًا ويحرّك التمييز معه
+      await expect(page.locator('#pat-tabs .tab.active')).toContainText(tab);
       await expect(page.locator('#chart-body h3').filter({ hasText: heading }).first())
         .toBeVisible();
       // لا رسالة فشل عرض في أي قسم
@@ -39,7 +43,8 @@ test.describe('ملف المريض 🗂️', () => {
     }
 
     // حقول الملف الشخصي والتأمين موجودة في تبويبه
-    await page.click('#chart-tabs .tab:has-text("الملف الشخصي")');
+    await page.click('#pat-tabs .tab:has-text("الملف الشخصي")');
+    await expect(page.locator('#pat-tabs .tab.active')).toContainText('الملف الشخصي');
     for (const f of ['nationality', 'smoking_status', 'emergency_contact_name',
                      'emergency_contact_phone', 'insurance_grade', 'insurance_copay',
                      'allergies', 'medical_warnings', 'chronic_conditions']) {
@@ -50,7 +55,7 @@ test.describe('ملف المريض 🗂️', () => {
 
   test('تسجيل علامة حيوية من شاشة الملف', async ({ page }) => {
     await openChart(page);
-    await page.click('#chart-tabs .tab:has-text("السجل الطبي")');
+    await page.click('#pat-tabs .tab:has-text("السجل الطبي")');
     await expect(page.locator('#chart-body h3').filter({ hasText: 'العلامات الحيوية' })).toBeVisible();
 
     await page.click('#chart-body summary:has-text("تسجيل قياس جديد")');

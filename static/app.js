@@ -2735,12 +2735,15 @@ async function openPatientChart(id) {
   if (CURRENT_VIEW === 'patients') return renderView('patients');
 }
 
-/* تبديل تبويبات شاشة المرضى بين القائمة وأقسام الملف */
+/* تبديل تبويبات شاشة المرضى بين القائمة وأقسام الملف.
+   شريط واحد هو المرجع: اختيار قسم هنا يحدّد CHART_TAB أيضًا (مصدر واحد للحقيقة)،
+   فالنقر على «السجل الطبي» يفتحه فعلًا بدل أن يبقى المحتوى على «الملف الشخصي». */
 function setPatTab(tab) {
   if (tab !== 'list' && !(CHART && CHART_ID)) {
     return toast('اختر مريضًا من «قائمة المرضى» أولًا', true);
   }
   PAT_TAB = tab;
+  if (tab !== 'list') CHART_TAB = tab;
   return renderView('patients');
 }
 
@@ -2759,20 +2762,13 @@ function chartHead() {
 function renderPatientChart() {
   const box = document.getElementById('chart-box');
   if (!box) return;
-  box.innerHTML = chartHead() + `
-    <div class="tabbar" id="chart-tabs">${CHART_TABS.map(([k, l, i]) =>
-      `<button class="tab${k === CHART_TAB ? ' active' : ''}" data-ctab="${k}"
-        onclick="setChartTab('${k}')">${i} ${tr(l)}</button>`).join('')}</div>
-    <div id="chart-body"></div>`;
+  /* بلا شريط تبويبات ثانٍ: التبويبات في شريط الشاشة الأعلى (#pat-tabs) */
+  box.innerHTML = chartHead() + '<div id="chart-body"></div>';
 }
-
-function setChartTab(tab) { CHART_TAB = tab; renderPatientChart(); paintChartTab(); }
 
 async function paintChartTab() {
   const body = document.getElementById('chart-body');
   if (!body || !CHART) return;
-  document.querySelectorAll('#chart-tabs .tab').forEach(b =>
-    b.classList.toggle('active', b.dataset.ctab === CHART_TAB));
   body.innerHTML = '<div class="empty">جارٍ التحميل…</div>';
   const renderers = { profile: chartProfile, record: chartRecord, visits: chartVisits,
                       orders: chartOrders, billing: chartBilling, docs: chartDocs };

@@ -105,7 +105,9 @@ test.describe('قائمة المرضى 🧑‍🤝‍🧑', () => {
     // الملف داخل الشاشة: تبويب «الملف الشخصي» مفعّل بدل النافذة المنبثقة
     await expect(page.locator('#pat-tabs .tab.active')).toContainText('الملف الشخصي');
     await expect(page.locator('#modal-back')).not.toHaveClass(/show/);
-    await expect(page.locator('#chart-tabs .tab')).toHaveCount(6);
+    // شريط تبويبات واحد: سبعة تبويبات (قائمة + ستة أقسام) بلا شريط داخلي مكرّر
+    await expect(page.locator('#chart-tabs')).toHaveCount(0);
+    await expect(page.locator('#pat-tabs .tab')).toHaveCount(7);
 
     // شريط التبويبات يعود بالكامل إلى القائمة (الجدول والفلاتر والصفحات)
     await page.click('#pat-tabs .tab:has-text("قائمة المرضى")');
