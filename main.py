@@ -264,6 +264,7 @@ from app.routers.patient_portal import router as patient_portal_router
 from app.routers.stock_ops import router as stock_ops_router
 from app.routers.exchange import router as exchange_router
 from app.routers.department_hub import router as department_hub_router
+from app.routers.quick_ops import router as quick_ops_router
 
 app.include_router(auth_router)
 app.include_router(patients_router)
@@ -304,6 +305,7 @@ app.include_router(patient_portal_router)
 app.include_router(stock_ops_router)
 app.include_router(exchange_router)
 app.include_router(department_hub_router)
+app.include_router(quick_ops_router)
 
 
 # ===== سجل التدقيق (يُسجّل كل عملية تعديلية) =====
