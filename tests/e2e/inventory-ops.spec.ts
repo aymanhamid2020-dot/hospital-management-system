@@ -158,4 +158,56 @@ test.describe('إدارة المخازن (الأقسام الستة)', () => {
       if (wh) await request.delete(`/stock/warehouses/${wh.id}`, { headers });
     }
   });
+
+  test('تصدير/استيراد الأصناف من الواجهة ⬆️⬇️', async ({ page, request }) => {
+    test.setTimeout(90_000);
+    const uid = tag();
+    const code = 'CSV' + uid.slice(-5).toUpperCase();
+    const headers = await authHeader(request);
+    let itemId = 0;
+
+    try {
+      await login(page);
+      await openView(page, 'inventory');
+      await page.click('[data-invtab="item-master"]');
+      await page.click('[data-invsub="catalog"]');
+
+      // الأزرار الثلاثة في دليل المنتجات
+      const bar = page.locator('#inv-ops .toolbar');
+      await expect(bar.locator('button:has-text("تصدير CSV")')).toBeVisible();
+      await expect(bar.locator('button:has-text("قالب")')).toBeVisible();
+      await expect(bar.locator('label:has-text("استيراد CSV")')).toBeVisible();
+
+      // القالب يُنزَّل فعلًا
+      const tpl = page.waitForEvent('download', { timeout: 20_000 });
+      await bar.locator('button:has-text("قالب")').click();
+      expect((await tpl).suggestedFilename()).toContain('template_stock_items');
+
+      // والتصدير كذلك
+      const exp = page.waitForEvent('download', { timeout: 20_000 });
+      await bar.locator('button:has-text("تصدير CSV")').click();
+      expect((await exp).suggestedFilename()).toBe('stock_items.csv');
+
+      // استيراد ملف فيه صفّان: جديد وصفّ ناقص المفتاح (يجب أن يتخطّاه)
+      const csv = ['الكود,اسم الصنف,الوحدة,الكمية,حد الأمان,تكلفة الوحدة',
+        `${code},مستلزم مستورد,علبة,25,8,14.5`,
+        ',بلا كود,علبة,3,1,2'].join('\n');
+      await page.setInputFiles('#inv-ops input[type="file"]', {
+        name: 'items.csv', mimeType: 'text/csv', buffer: Buffer.from(csv, 'utf-8') });
+
+      await expect(page.locator('.toast')).toContainText('أُضيف 1', { timeout: 20_000 });
+      await expect(page.locator('#inv-ops')).toContainText(code, { timeout: 20_000 });
+      await expect(page.locator('#inv-ops')).toContainText('مستلزم مستورد');
+
+      // الصف المُستورد وصل القاعدة بتفاصيله (حد الأمان والتكلفة)
+      const items = await (await request.get('/general-stock/', { headers })).json();
+      const row = items.find((i: any) => i.code === code);
+      itemId = row?.id ?? 0;
+      expect(itemId, 'لم يُستورد الصنف').toBeGreaterThan(0);
+      expect(row.unit_cost).toBe(14.5);
+      expect(row.min_quantity).toBe(8);
+    } finally {
+      if (itemId) await request.delete(`/general-stock/${itemId}`, { headers });
+    }
+  });
 });

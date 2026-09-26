@@ -925,6 +925,7 @@ async function invCatalogHTML() {
     </td></tr>`).join('');
   return `<div class="card">
     <div class="toolbar"><h3 style="margin:0">📋 قائمة المنتجات (${items.length})</h3>
+      ${csvButtons('items', 'stock_items.csv')}
       ${isAdmin() ? '<button class="btn success" onclick="editStockItem(0)">➕ إضافة صنف</button>' : ''}
     </div>
     <p style="margin:0 0 10px;color:#64748b">الحد الأمان / نقطة إعادة الطلب / الحد الأقصى — و«بطاقة الصنف» تعرض أرصدته ودفعاته وحركته.
@@ -964,6 +965,7 @@ async function invWarehousesHTML() {
   const summary = await api('/stock/reports/summary');
   return `<div class="card">
     <div class="toolbar"><h3 style="margin:0">🏭 المستودعات والفروع (${list.length})</h3>
+      ${csvButtons('warehouses', 'warehouses.csv')}
       ${isAdmin() ? '<button class="btn success" onclick="newWarehouse()">➕ إضافة مستودع</button>' : ''}
     </div>
     <div class="stats" style="margin-bottom:12px">
@@ -1173,7 +1175,8 @@ async function invVendorsHTML() {
   STK.vendors = vendors;
   return `<div class="card">
     <div class="toolbar"><h3 style="margin:0">🏢 دليل الموردين (${vendors.length})</h3>
-      <span class="pill ${vendors.length ? 'confirmed' : 'partial'}">${vendors.length} مورد</span></div>
+      <span class="pill ${vendors.length ? 'confirmed' : 'partial'}">${vendors.length} مورد</span>
+      ${csvButtons('vendors', 'vendors.csv')}</div>
     <p style="margin:0 0 10px;color:#64748b">الموردون يُسجَّلون في دليل المشتريات/المحاسبة، ويظهرون في «أمر شراء» و«مرتجع المورد» و«إذن الاستلام».</p>
     <div style="overflow-x:auto"><table>
       <thead><tr><th>#</th><th>الرمز</th><th>الاسم</th><th>جهة الاتصال</th><th>الهاتف</th><th>الحالة</th></tr></thead>
@@ -3628,6 +3631,7 @@ const VIEWS = {
           ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/csv?section=dispenses','pharmacy_dispenses.csv')">⬇️ صرف CSV</button>` : ''}
           ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/csv?section=disposals','pharmacy_disposals.csv')">🗑️ إتلاف/إرجاع CSV</button>` : ''}
           ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/csv?section=reorder','pharmacy_reorder.csv')">🛒 طلب CSV</button>` : ''}
+          ${csvButtons('medications', 'medications.csv')}
           ${isAdmin() ? `<button class="btn ghost" onclick="download('/inventory/labels','med_labels.pdf')">🏷️ ملصقات الكل</button>` : ''}
           </div>
         </div>
@@ -4996,6 +5000,39 @@ async function downloadReport() {
   const m = month.trim();
   if (m && !/^\d{4}-\d{2}$/.test(m)) return toast('الصيغة يجب أن تكون YYYY-MM', true);
   await download('/dashboard/report/pdf' + (m ? '?month=' + m : ''), `report_${m || 'current'}.pdf`);
+}
+
+/* ===== تبادل CSV: أزرار موحّدة لكل القوائم + استيراد موحّد =====
+   كل قائمة تستدعي csvButtons('items'|'vendors'|'medications'|'warehouses'|…)
+   فيظهر trio: تصدير · قالب · استيراد (الاستيراد للمدير فقط). */
+function csvButtons(resource, filename) {
+  return `<button class="btn ghost" title="تصدير القائمة إلى CSV"
+      onclick="download('/exchange/${resource}/export.csv','${filename}')">⬆️ تصدير CSV</button>
+    ${isAdmin() ? `<button class="btn ghost" title="قالب جاهز للتعبئة ثم الاستيراد"
+      onclick="download('/exchange/${resource}/template.csv','template_${filename}')">📄 قالب</button>
+    <label class="btn ghost" style="cursor:pointer;margin:0" title="استيراد أو دمج ملف CSV">
+      ⬇️ استيراد CSV
+      <input type="file" accept=".csv,text/csv" style="display:none"
+             onchange="importCsv(this,'${resource}')"></label>` : ''}`;
+}
+
+async function importCsv(input, resource) {
+  const file = input.files[0];
+  input.value = '';
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const res = await fetch(API + '/exchange/' + resource + '/import', {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + TOKEN }, body: fd });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(typeof d.detail === 'string' ? d.detail : 'فشل الاستيراد');
+    const errs = (d.errors || []).slice(0, 3)
+      .map(e => (e.row > 0 ? `سطر ${e.row}: ` : '') + e.error).join(' | ');
+    toast(`✅ ${d.label || ''} — أُضيف ${d.created} · حُدّث ${d.updated} · تخطّي ${d.skipped}`
+      + (errs ? ` — ${errs}` : ''), (d.errors || []).length > 0);
+    await navigate(CURRENT_VIEW);
+  } catch (e) { toast(e.message, true); }
 }
 
 async function importPatients(input) {
