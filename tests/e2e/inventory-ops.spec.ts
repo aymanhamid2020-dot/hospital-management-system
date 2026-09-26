@@ -147,8 +147,12 @@ test.describe('إدارة المخازن (الأقسام الستة)', () => {
         await expectNoUiError(page);
       });
     } finally {
-      // تنظيف: الصنف أولاً (تُحذف أرصدته ودفعاته تاليًا) ثم المستودع
-      if (itemId) await request.delete(`/general-stock/${itemId}`, { headers });
+      // تنظيف: الصنف له حركات ومستندات فلا يُحذف (409) فيُعطَّل، والمستودع يُحذف
+      if (itemId) {
+        const off = await request.put(`/general-stock/${itemId}`,
+          { headers, data: { is_active: false } });
+        expect([200, 204]).toContain(off.status());
+      }
       const whs = await (await request.get('/stock/warehouses', { headers })).json();
       const wh = whs.find((w: any) => w.name === whName);
       if (wh) await request.delete(`/stock/warehouses/${wh.id}`, { headers });

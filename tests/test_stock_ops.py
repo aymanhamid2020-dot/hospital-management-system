@@ -280,6 +280,31 @@ def test_stocktake_close_posts_variance(client, admin):
                        json={"action": "unknown"}).status_code == 400
 
 
+def test_item_with_stock_history_cannot_be_deleted(client, admin):
+    """صنف له حركات/مستندات ⇒ 409 برسالة واضحة (كان 500 من قيد المفاتيح)."""
+    # بلا تاريخ ⇒ الحذف ينجح
+    plain = _item(client, admin)["id"]
+    assert client.delete(f"/general-stock/{plain}", headers=admin).status_code == 204
+
+    # برصيد قديم بلا حركات ⇒ يُحذف كسابقه (تُمسح أرصدته ودفعاته تاليًا)
+    legacy = _item(client, admin, quantity=5)["id"]
+    assert client.delete(f"/general-stock/{legacy}", headers=admin).status_code == 204
+
+    # بحركة مستند ⇒ 409 برسالة توجّه للتعطيل
+    moved = _item(client, admin)["id"]
+    _grn(client, admin, moved, qty=3)
+    r = client.delete(f"/general-stock/{moved}", headers=admin)
+    assert r.status_code == 409, r.text
+    assert "is_active=false" in r.json()["detail"]
+
+    # التعطيل يبقى ممكنًا ويُخفيه من الدليل النشط مع بقاء سجله
+    off = client.put(f"/general-stock/{moved}", headers=admin,
+                     json={"is_active": False})
+    assert off.status_code == 200 and off.json()["is_active"] is False
+    card = client.get(f"/stock/items/{moved}/card", headers=admin)
+    assert card.status_code == 200 and card.json()["item"]["quantity"] == 3
+
+
 def test_purchase_request_and_order_flow(client, admin):
     """طلب شراء مسودّة ← اعتماد، وأمر شراء معتمد ← استلامه يولّد إذن استلام يورّد الكمية."""
     item = _item(client, admin, unit_cost=15)

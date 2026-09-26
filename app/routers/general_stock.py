@@ -3,11 +3,12 @@ from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_admin
 from app.database import get_db
-from app.models import GeneralStockItem, User
+from app.models import GeneralStockItem, GeneralStockMovement, StockDocLine, User
 from app.schemas import (
     GeneralStockItemCreate,
     GeneralStockItemInDB,
@@ -93,10 +94,25 @@ async def delete_general_stock(
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    """حذف صنف (مدير فقط)."""
+    """حذف صنف (مدير فقط).
+
+    صنف له حركات في دفتر المخزون أو سطور في مستندات لا يُحذف: سطور المستندات
+    مقيدة بـ RESTRICT فكان الحذف ينتهي بـ 500 (FOREIGN KEY) بدل رسالة مفهومة،
+    والحركات سجل لا يُمحى. البديل تعطيله (is_active=false) فيبقى للتدقيق.
+    صنف برصيد قديم بلا حركات يُحذف كسابقه (تُمسح أرصدته ودفعاته تاليًا).
+    """
     row = db.query(GeneralStockItem).filter(GeneralStockItem.id == item_id).first()
     if not row:
         raise HTTPException(status_code=404, detail="لا يوجد صنف بالمعرف المحدد")
+
+    moves = (db.query(GeneralStockMovement)
+             .filter(GeneralStockMovement.item_id == item_id).count())
+    lines = db.query(StockDocLine).filter(StockDocLine.item_id == item_id).count()
+    if moves or lines:
+        raise HTTPException(
+            status_code=409,
+            detail="لا يمكن حذف صنف له حركات مخزون أو مستندات — اعطِله (is_active=false) بدل حذفه",
+        )
     db.delete(row)
     db.commit()
     return None

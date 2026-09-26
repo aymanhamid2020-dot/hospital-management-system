@@ -908,7 +908,8 @@ async function invOpsHTML() {
 
 /* ---------- 1) دليل المواد: قائمة المنتجات ---------- */
 async function invCatalogHTML() {
-  const items = await api('/general-stock/');
+  const all = await api('/general-stock/');
+  const items = all.filter(i => i.is_active !== false);   // المعطّل يخرج من الدليل
   STK.items = items;
   const rows = items.map(i => `<tr>
     <td>${i.id}</td><td>${esc(i.code)}</td>
@@ -926,7 +927,8 @@ async function invCatalogHTML() {
     <div class="toolbar"><h3 style="margin:0">📋 قائمة المنتجات (${items.length})</h3>
       ${isAdmin() ? '<button class="btn success" onclick="editStockItem(0)">➕ إضافة صنف</button>' : ''}
     </div>
-    <p style="margin:0 0 10px;color:#64748b">الحد الأمان / نقطة إعادة الطلب / الحد الأقصى — و«بطاقة الصنف» تعرض أرصدته ودفعاته وحركته.</p>
+    <p style="margin:0 0 10px;color:#64748b">الحد الأمان / نقطة إعادة الطلب / الحد الأقصى — و«بطاقة الصنف» تعرض أرصدته ودفعاته وحركته.
+      ${all.length !== items.length ? `(<b>${all.length - items.length}</b> صنف معطّل مخفي — اعطِله بدل حذفه ليبقى سجله محفوظًا)` : ''}</p>
     <div style="overflow-x:auto"><table>
       <thead><tr><th>#</th><th>الكود</th><th>الصنف</th><th>الفئة</th><th>الوحدة</th>
         <th>الكمية</th><th>حد/نقطة/أقصى</th><th>التكلفة</th><th>التخزين</th><th>الانتهاء</th><th></th></tr></thead>
