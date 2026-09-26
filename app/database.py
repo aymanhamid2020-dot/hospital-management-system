@@ -148,6 +148,17 @@ PENDING_COLUMNS = {
         "delivered_by": "VARCHAR",
         "delivery_channel": "VARCHAR",
     },
+    "general_stock_items": {
+        # دليل المواد: بيانات تفصيلية + مستويات إعادة الطلب + شروط التخزين
+        "barcode": "VARCHAR",
+        "trade_name": "VARCHAR",
+        "generic_name": "VARCHAR",
+        "storage_condition": "VARCHAR",
+        "max_quantity": "INTEGER",
+        "reorder_point": "INTEGER",
+        "supplier_name": "VARCHAR",
+        "is_active": "BOOLEAN NOT NULL DEFAULT 1",
+    },
     "attachments": {
         # DICOM/PACS metadata
         "dicom_study_uid": "VARCHAR",
@@ -297,6 +308,11 @@ INDEXES = {
     "doctor_payouts": ["doctor_id", "period"],
 
     "budgets": ["fiscal_year", "department"],
+    "stock_balances": ["item_id", "warehouse_id"],
+    "stock_batches": ["item_id", "warehouse_id", "expiry_date"],
+    "stock_docs": ["doc_type", "status", "created_at"],
+    "stock_doc_lines": ["doc_id", "item_id"],
+    "general_stock_movements": ["item_id", "warehouse_id", "type", "created_at"],
 }
 
 

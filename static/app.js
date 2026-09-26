@@ -846,6 +846,650 @@ const INV_SUBS = {
 function setInvTab(tab) { INV_TAB = tab; return navigate('inventory'); }
 function setInvSub(sub) { INV_SUB = sub; return navigate('inventory'); }
 
+/* ===== إدارة المخازن: شريط الأقسام الستة + محتوى كل تبويب =====
+   الأقسام نفسها في INV_TABS/INV_SUBS أعلاه، وكل واحد يُغذّى من /stock. */
+let STK = { warehouses: [], items: [], docs: [], vendors: [], departments: [], card: null };
+
+const DOC_META = {
+  grn: ['إذن استلام', '📥', 'رفع الكميات إلى المستودع مع رقم التشغيلة وتاريخ الانتهاء'],
+  transfer: ['تحويل بين المخازن', '🔄', 'نقل من مستودع إلى آخر'],
+  issue: ['صرف للأقسام/المرضى', '📤', 'صرف مستلزمات لقسم أو لمريض'],
+  return: ['مرتجع', '↩️', 'رجوع مستلزمات من قسم أو مريض إلى المستودع'],
+  supplier_return: ['مرتجع مورد', '📤', 'إرجاع مواد إلى المورد'],
+  stocktake: ['جرد فعلي', '📋', 'جلسة جرد تُقارن العدّ بالرصيد'],
+  pr: ['طلب شراء', '📝', 'طلب من القسم إلى المشتريات'],
+  po: ['أمر شراء', '📋', 'أمر للمورد — استلامه يولّد إذن استلام'],
+};
+const DOC_STATUS_PILL = { draft: 'pending', approved: 'in_progress', completed: 'confirmed', cancelled: 'cancelled' };
+const DOC_STATUS_AR = { draft: 'مسودّة', approved: 'معتمد', completed: 'منجز', cancelled: 'ملغى' };
+const DOC_MOVE_AR = {
+  grn: 'وارد', transfer_in: 'تحويل وارد', transfer_out: 'تحويل صادر', issue: 'صرف',
+  return_in: 'مرتجع وارد', supplier_return: 'مرتجع مورد', disposal: 'إتلاف', adjust: 'تسوية',
+};
+
+function invBarsHTML() {
+  const subs = INV_SUBS[INV_TAB] || [];
+  if (!subs.some(s => s[0] === INV_SUB)) INV_SUB = subs.length ? subs[0][0] : '';
+  return `<div class="tabbar" role="tablist">${INV_TABS.map(([k, l, n]) =>
+    `<button type="button" role="tab" aria-selected="${k === INV_TAB}"
+       class="tab${k === INV_TAB ? ' active' : ''}" data-invtab="${k}"
+       onclick="setInvTab('${k}')">${n}. ${l}</button>`).join('')}</div>
+    <div class="tabbar" role="tablist">${subs.map(([k, l, i]) =>
+    `<button type="button" role="tab" aria-selected="${k === INV_SUB}"
+       class="tab${k === INV_SUB ? ' active' : ''}" data-invsub="${k}"
+       onclick="setInvSub('${k}')">${i} ${l}</button>`).join('')}</div>`;
+}
+
+async function invOpsHTML() {
+  const key = INV_TAB + '/' + INV_SUB;
+  try {
+    if (key === 'item-master/catalog') return await invCatalogHTML();
+    if (key === 'item-master/reorder') return invReorderHTML();
+    if (key === 'stock-movements/warehouses') return await invWarehousesHTML();
+    if (key === 'stocktake/adjustments') return await invAdjustmentsHTML();
+    if (key === 'expiry/tracking' || key === 'reports/expiry-alerts') return await invExpiryHTML();
+    if (key === 'expiry/disposal') return await invDisposalHTML();
+    if (key === 'procurement/vendors') return await invVendorsHTML();
+    if (key === 'reports/item-card') return await invItemCardHTML();
+    if (key === 'reports/valuation') return await invValuationHTML();
+    if (key === 'reports/slow-moving') return await invSlowHTML();
+    if (key === 'stock-movements/grn') return await invDocsHTML('grn');
+    if (key === 'stock-movements/transfers') return await invDocsHTML('transfer');
+    if (key === 'stock-movements/issues') return await invDocsHTML('issue');
+    if (key === 'stock-movements/returns') return await invDocsHTML('return');
+    if (key === 'stocktake/physical') return await invDocsHTML('stocktake');
+    if (key === 'procurement/purchase-requests') return await invDocsHTML('pr');
+    if (key === 'procurement/purchase-orders') return await invDocsHTML('po');
+    return '<div class="empty">قسم غير معروف</div>';
+  } catch (e) {
+    return `<div class="empty">تعذّر التحميل: ${esc(e.message || 'خطأ')}</div>`;
+  }
+}
+
+/* ---------- 1) دليل المواد: قائمة المنتجات ---------- */
+async function invCatalogHTML() {
+  const items = await api('/general-stock/');
+  STK.items = items;
+  const rows = items.map(i => `<tr>
+    <td>${i.id}</td><td>${esc(i.code)}</td>
+    <td><strong>${esc(i.name)}</strong>${i.generic_name ? `<br><small>الاسم العلمي: ${esc(i.generic_name)}</small>` : ''}</td>
+    <td>${esc(i.category)}</td><td>${esc(i.unit)}</td><td>${i.quantity}</td>
+    <td>${i.min_quantity} / ${i.reorder_point == null ? '—' : i.reorder_point} / ${i.max_quantity == null ? '—' : i.max_quantity}</td>
+    <td>${(i.unit_cost || 0).toLocaleString()} ر.س</td>
+    <td>${esc(i.storage_condition || '—')}</td>
+    <td>${i.expiry_date ? fmtDate(i.expiry_date) : '—'}</td>
+    <td class="actions">
+      <button class="btn sm ghost" onclick="itemCard(${i.id})">📋 بطاقة</button>
+      ${isAdmin() ? `<button class="btn sm ghost" onclick="editStockItem(${i.id})">✏️ تعديل</button>` : ''}
+    </td></tr>`).join('');
+  return `<div class="card">
+    <div class="toolbar"><h3 style="margin:0">📋 قائمة المنتجات (${items.length})</h3>
+      ${isAdmin() ? '<button class="btn success" onclick="editStockItem(0)">➕ إضافة صنف</button>' : ''}
+    </div>
+    <p style="margin:0 0 10px;color:#64748b">الحد الأمان / نقطة إعادة الطلب / الحد الأقصى — و«بطاقة الصنف» تعرض أرصدته ودفعاته وحركته.</p>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>#</th><th>الكود</th><th>الصنف</th><th>الفئة</th><th>الوحدة</th>
+        <th>الكمية</th><th>حد/نقطة/أقصى</th><th>التكلفة</th><th>التخزين</th><th>الانتهاء</th><th></th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="11" class="empty">لا توجد أصناف — ابدأ بإضافة صنف أو بإذن استلام</td></tr>'}</tbody>
+    </table></div></div>`;
+}
+
+/* ---------- 2) مستويات إعادة الطلب ---------- */
+async function invReorderHTML() {
+  const rows = await api('/stock/reports/reorder');
+  return `<div class="card">
+    <div class="toolbar"><h3 style="margin:0">🔄 مستويات إعادة الطلب (${rows.length})</h3>
+      <span class="pill ${rows.length ? 'lowstock' : 'confirmed'}">${rows.length} صنف عند الحد</span></div>
+    <p style="margin:0 0 10px;color:#64748b">الأصناف التي بلغت حد الأمان أو نزلت عنه، والكمية المقترحة للتوريد حتى نقطة إعادة الطلب.</p>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>#</th><th>الكود</th><th>الصنف</th><th>الرصيد</th><th>حد الأمان</th>
+        <th>نقطة الطلب</th><th>الحد الأقصى</th><th>المقترح</th><th>المورد</th><th></th></tr></thead>
+      <tbody>${rows.map(r => `<tr>
+        <td>${r.item_id}</td><td>${esc(r.code)}</td><td>${esc(r.name)}</td>
+        <td><span class="pill lowstock">${r.quantity} ${esc(r.unit)}</span></td>
+        <td>${r.min_quantity}</td><td>${r.reorder_point == null ? '—' : r.reorder_point}</td>
+        <td>${r.max_quantity == null ? '—' : r.max_quantity}</td>
+        <td><strong>${r.suggested_quantity}</strong></td><td>${esc(r.supplier_name || '—')}</td>
+        <td>${isAdmin() ? `<button class="btn sm ghost" onclick="newStockDoc('grn', ${r.item_id})">📥 توريد</button>` : ''}</td>
+      </tr>`).join('') || '<tr><td colspan="10" class="empty">كل الأصناف فوق حد الأمان ✅</td></tr>'}</tbody>
+    </table></div></div>`;
+}
+
+/* ---------- 3) المستودعات والفروع ---------- */
+async function invWarehousesHTML() {
+  const list = await api('/stock/warehouses');   // بلا شرطة أخيرة: المسار مسجّل هكذا
+  STK.warehouses = list;
+  const summary = await api('/stock/reports/summary');
+  return `<div class="card">
+    <div class="toolbar"><h3 style="margin:0">🏭 المستودعات والفروع (${list.length})</h3>
+      ${isAdmin() ? '<button class="btn success" onclick="newWarehouse()">➕ إضافة مستودع</button>' : ''}
+    </div>
+    <div class="stats" style="margin-bottom:12px">
+      <div class="stat"><div class="num">${list.length}</div><div class="lbl">مستودع</div></div>
+      <div class="stat green"><div class="num">${summary.items}</div><div class="lbl">صنف نشط</div></div>
+      <div class="stat"><div class="num">${(summary.total_value || 0).toLocaleString()} ر.س</div><div class="lbl">قيمة المخزون</div></div>
+      <div class="stat amber"><div class="num">${summary.expiring_within_90}</div><div class="lbl">تنتهي خلال 90 يومًا</div></div>
+    </div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>#</th><th>المستودع</th><th>النوع</th><th>الموقع</th><th>الأصناف</th>
+        <th>إجمالي القطع</th><th>الحالة</th><th></th></tr></thead>
+      <tbody>${list.map(w => `<tr>
+        <td>${w.id}</td><td><strong>${esc(w.name)}</strong>${w.is_default ? ' <span class="pill confirmed">افتراضي</span>' : ''}</td>
+        <td>${esc(w.kind)}</td><td>${esc(w.location || '—')}</td>
+        <td>${w.items_count}</td><td>${w.total_quantity}</td>
+        <td><span class="pill ${w.is_active ? 'confirmed' : 'cancelled'}">${w.is_active ? 'نشط' : 'معطّل'}</span></td>
+        <td class="actions"><button class="btn sm ghost" onclick="whItems(${w.id})">📦 الأصناف</button></td>
+      </tr>`).join('') || '<tr><td colspan="8" class="empty">لا مستودعات</td></tr>'}</tbody>
+    </table></div></div>`;
+}
+
+function whItems(id) {
+  const w = STK.warehouses.find(x => x.id === id) || { name: 'المستودع' };
+  openModal('📦 أصناف «' + w.name + '»', '<div class="empty">جارٍ التحميل…</div>');
+  api('/stock/warehouses/' + id + '/items').then(rows => {
+    const body = document.getElementById('modal-body');
+    if (!body) return;
+    body.innerHTML = `<div style="overflow-x:auto"><table>
+      <thead><tr><th>#</th><th>الكود</th><th>الصنف</th><th>الرصيد</th><th>الحد</th><th>التكلفة</th><th>القيمة</th><th></th></tr></thead>
+      <tbody>${rows.map(r => `<tr>
+        <td>${r.item_id}</td><td>${esc(r.code)}</td><td>${esc(r.name)}</td>
+        <td><span class="pill ${r.below_min ? 'lowstock' : 'confirmed'}">${r.quantity} ${esc(r.unit)}</span></td>
+        <td>${r.min_quantity}</td><td>${(r.unit_cost || 0).toLocaleString()} ر.س</td>
+        <td>${(r.value || 0).toLocaleString()} ر.س</td>
+        <td><button class="btn sm ghost" onclick="closeModal(); itemCard(${r.item_id})">📋 بطاقة</button></td>
+      </tr>`).join('') || '<tr><td colspan="8" class="empty">لا أصناف في هذا المستودع</td></tr>'}</tbody>
+    </table></div>`;
+  }).catch(e => toast(e.message || 'تعذّر التحميل', true));
+}
+
+/* ---------- 4) مستندات المخزون (استلام/تحويل/صرف/مرتجع/جرد/شراء) ---------- */
+function docActionsHTML(d) {
+  if (!isAdmin()) return '';
+  let out = '';
+  if ((d.doc_type === 'pr' || d.doc_type === 'po') && d.status === 'draft')
+    out += `<button class="btn sm success" onclick="docAction(${d.id},'approve')">✔️ اعتماد</button>`;
+  if (d.doc_type === 'po' && d.status === 'approved')
+    out += `<button class="btn sm success" onclick="receivePO(${d.id})">📥 استلام</button>`;
+  if (d.doc_type === 'stocktake' && d.status === 'draft')
+    out += `<button class="btn sm success" onclick="docAction(${d.id},'complete')">🧮 إغلاق وتسوية</button>`;
+  if (d.status === 'draft' || d.status === 'approved')
+    out += `<button class="btn sm ghost" onclick="docAction(${d.id},'cancel')">✖️ إلغاء</button>`;
+  return out;
+}
+
+async function invDocsHTML(type) {
+  const [docs, items] = await Promise.all([
+    api('/stock/docs?doc_type=' + type + '&limit=50'),
+    api('/general-stock/')]);
+  STK.docs = docs;
+  const meta = DOC_META[type] || [type, '📄', ''];
+  const label = type === 'return' ? 'return' : type;
+  const rows = docs.map(d => `<tr>
+    <td>${d.id}</td><td><strong>${esc(d.doc_no)}</strong></td>
+    <td>${esc(d.from_warehouse || '—')}${d.to_warehouse ? ' ← ' + esc(d.to_warehouse) : ''}</td>
+    <td>${esc(d.vendor_name || (d.department_id ? 'قسم #' + d.department_id : d.patient_id ? 'مريض #' + d.patient_id : '—'))}</td>
+    <td>${d.total_quantity} / ${d.total_value.toLocaleString()} ر.س</td>
+    <td>${d.lines.length} صنف</td>
+    <td><span class="pill ${DOC_STATUS_PILL[d.status] || 'partial'}">${DOC_STATUS_AR[d.status] || d.status}</span></td>
+    <td>${fmtDate(d.created_at)}</td>
+    <td class="actions">${docActionsHTML(d)}
+      <button class="btn sm ghost" onclick="showDoc(${d.id})">👁️</button></td>
+  </tr>`).join('');
+  return `<div class="card">
+    <div class="toolbar"><h3 style="margin:0">${meta[1]} ${meta[0]} (${docs.length})</h3>
+      ${isAdmin() ? `<button class="btn success" onclick="newStockDoc('${type}')">➕ جديد</button>` : ''}
+    </div>
+    <p style="margin:0 0 10px;color:#64748b">${meta[2]}</p>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>#</th><th>الرقم</th><th>المستودع</th><th>الجهة</th><th>الكمية/القيمة</th>
+        <th>السطور</th><th>الحالة</th><th>التاريخ</th><th></th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="9" class="empty">لا ${meta[0]} بعد</td></tr>`}</tbody>
+    </table></div></div>`;
+}
+
+function showDoc(id) {
+  openModal('📄 مستند #' + id, '<div class="empty">جارٍ التحميل…</div>');
+  api('/stock/docs/' + id).then(d => {
+    const body = document.getElementById('modal-body');
+    if (!body) return;
+    body.innerHTML = `<p style="margin:0 0 10px"><b>${esc(d.doc_no)}</b> —
+      <span class="pill ${DOC_STATUS_PILL[d.status] || 'partial'}">${DOC_STATUS_AR[d.status] || d.status}</span>
+      ${d.from_warehouse ? ' · من ' + esc(d.from_warehouse) : ''}
+      ${d.to_warehouse ? ' · إلى ' + esc(d.to_warehouse) : ''}
+      ${d.vendor_name ? ' · المورد: ' + esc(d.vendor_name) : ''}</p>
+      <div style="overflow-x:auto"><table>
+      <thead><tr><th>الصنف</th><th>الكمية</th><th>العدّ</th><th>التشغيلة</th><th>الانتهاء</th><th>التكلفة</th></tr></thead>
+      <tbody>${d.lines.map(l => `<tr>
+        <td>${esc(l.item_name || '')} <small>${esc(l.item_code || '')}</small></td>
+        <td>${l.quantity}</td><td>${l.counted_quantity == null ? '—' : l.counted_quantity}</td>
+        <td>${esc(l.batch_no || '—')}</td><td>${l.expiry_date ? fmtDate(l.expiry_date) : '—'}</td>
+        <td>${(l.unit_cost || 0).toLocaleString()} ر.س</td>
+      </tr>`).join('')}</tbody></table></div>`;
+  }).catch(e => toast(e.message || 'تعذّر التحميل', true));
+}
+
+async function docAction(id, action) {
+  const msg = { approve: 'اعتماد المستند؟', cancel: 'إلغاء المستند؟',
+    complete: 'إغلاق الجرد وتسوية الفروقات؟' }[action] || 'تأكيد؟';
+  if (!confirm(msg)) return;
+  try {
+    await api('/stock/docs/' + id + '/action', { method: 'POST', body: JSON.stringify({ action }) });
+    toast(action === 'complete' ? 'أُغلق الجرد وقُيّدت الفروقات ✅' : 'تم تنفيذ الإجراء ✅');
+    await navigate(CURRENT_VIEW);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function receivePO(id) {
+  if (!confirm('تسجيل استلام أمر الشراء؟ سيولّد إذن استلام ويرفع الأرصدة.')) return;
+  try {
+    const grn = await api('/stock/docs/' + id + '/receive', { method: 'POST' });
+    toast('سُجّل الاستلام بإذن ' + grn.doc_no + ' ✅');
+    await navigate(CURRENT_VIEW);
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ---------- 5) تسوية المخزون + الإتلاف ---------- */
+async function invAdjustmentsHTML() {
+  const rows = await api('/stock/movements?type=adjust&limit=100');
+  const total = rows.reduce((s, m) => s + m.change, 0);
+  return `<div class="card">
+    <div class="toolbar"><h3 style="margin:0">🧮 تسويات المخزون (${rows.length})</h3>
+      <span class="pill ${total >= 0 ? 'confirmed' : 'cancelled'}">صافي الفرق ${total > 0 ? '+' : ''}${total}</span>
+      ${isAdmin() ? '<button class="btn" onclick="INV_TAB=\'stocktake\';setInvSub(\'physical\')">📋 فتح الجرد الفعلي</button>' : ''}
+    </div>
+    <p style="margin:0 0 10px;color:#64748b">الفروقات الناتجة عن إغلاق جلسات الجرد (عجز/زيادة) — مقيّدة في دفتر الحركات.</p>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>#</th><th>التاريخ</th><th>الصنف</th><th>المستودع</th><th>الفرق</th>
+        <th>الرصيد بعدها</th><th>المستند</th><th>المستخدم</th></tr></thead>
+      <tbody>${rows.map(m => `<tr>
+        <td>${m.id}</td><td>${fmtDate(m.created_at)}</td>
+        <td>${esc(m.item_name || '')}</td><td>${esc(m.warehouse || '—')}</td>
+        <td style="color:${m.change > 0 ? '#155724' : '#721c24'};font-weight:700">${m.change > 0 ? '+' : ''}${m.change}</td>
+        <td>${m.quantity_after}</td><td>${esc(m.doc_no || '—')}</td><td>${esc(m.made_by || '—')}</td>
+      </tr>`).join('') || '<tr><td colspan="8" class="empty">لا تسويات بعد</td></tr>'}</tbody>
+    </table></div></div>`;
+}
+
+async function invDisposalHTML() {
+  const rows = await api('/stock/movements?limit=200');
+  const disposals = rows.filter(m => m.type === 'disposal');
+  const expiry = await api('/stock/reports/expiry?days=0');
+  return `<div class="card">
+    <div class="toolbar"><h3 style="margin:0">🗑️ إعدام التالف والمنتهي (${disposals.length})</h3>
+      <span class="pill ${disposals.length ? 'cancelled' : 'confirmed'}">${disposals.length} إتلاف</span>
+      <span class="pill ${expiry.length ? 'lowstock' : 'confirmed'}">${expiry.length} دفعة منتهية الآن</span>
+    </div>
+    <p style="margin:0 0 10px;color:#64748b">إتلاف أدوية الصيدلية عبر زر «🗑️ إتلاف» يسجّل حركة إتلاف هنا، وتُدار دفعات المستلزمات المنتهية بإذن استلام/تحويل مع ضبط تاريخ الانتهاء.</p>
+    ${expiry.length ? `<div style="overflow-x:auto;margin-bottom:12px"><table>
+      <thead><tr><th>الصنف</th><th>المستودع</th><th>الكمية</th><th>التشغيلة</th><th>انتهى منذ</th></tr></thead>
+      <tbody>${expiry.slice(0, 10).map(x => `<tr>
+        <td>${esc(x.item_name || '')}</td><td>${esc(x.warehouse || '—')}</td><td>${x.quantity}</td>
+        <td>${esc(x.batch_no || '—')}</td>
+        <td><span class="pill cancelled">منتهي منذ ${Math.abs(x.days_left)} يوم</span></td>
+      </tr>`).join('')}</tbody></table></div>` : ''}
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>#</th><th>التاريخ</th><th>الصنف</th><th>المستودع</th><th>الكمية</th><th>السبب</th><th>المستخدم</th></tr></thead>
+      <tbody>${disposals.map(m => `<tr>
+        <td>${m.id}</td><td>${fmtDate(m.created_at)}</td><td>${esc(m.item_name || '')}</td>
+        <td>${esc(m.warehouse || '—')}</td>
+        <td style="color:#721c24;font-weight:700">${m.change}</td>
+        <td>${esc(m.note || '—')}</td><td>${esc(m.made_by || '—')}</td>
+      </tr>`).join('') || '<tr><td colspan="7" class="empty">لا عمليات إتلاف</td></tr>'}</tbody>
+    </table></div></div>`;
+}
+
+/* ---------- 6) متابعة الصلاحية (FEFO) ---------- */
+async function invExpiryHTML() {
+  const rows = await api('/stock/reports/expiry?days=90');
+  const buckets = [0, 30, 60, 90];
+  return `<div class="card">
+    <div class="toolbar"><h3 style="margin:0">⏰ متابعة الصلاحية — الدفعات القادمة (${rows.length})</h3>
+      ${isAdmin() ? '<button class="btn ghost" onclick="newStockDoc(\'issue\')">📤 صرف FEFO</button>' : ''}
+    </div>
+    <div class="stats" style="margin-bottom:12px">
+      <div class="stat red"><div class="num">${rows.filter(r => r.days_left <= 0).length}</div><div class="lbl">منتهية الآن</div></div>
+      <div class="stat amber"><div class="num">${rows.filter(r => r.days_left > 0 && r.days_left <= 30).length}</div><div class="lbl">خلال 30 يومًا</div></div>
+      <div class="stat amber"><div class="num">${rows.filter(r => r.days_left > 30 && r.days_left <= 60).length}</div><div class="lbl">31 – 60 يومًا</div></div>
+      <div class="stat"><div class="num">${rows.filter(r => r.days_left > 60).length}</div><div class="lbl">61 – 90 يومًا</div></div>
+    </div>
+    <p style="margin:0 0 10px;color:#64748b">الصرف يخصم الدفعة <b>الأقرب انتهاءً أولًا</b> (FEFO) تلقائيًا، فلا يحتاج صنفًا منفصلًا لكل تشغيلة.</p>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>الصنف</th><th>المستودع</th><th>الكمية</th><th>التشغيلة</th><th>ينتهي</th><th>متبقٍ</th><th>القيمة</th></tr></thead>
+      <tbody>${rows.map(r => `<tr>
+        <td>${esc(r.item_name || '')} <small>${esc(r.code || '')}</small></td>
+        <td>${esc(r.warehouse || '—')}</td><td>${r.quantity}</td>
+        <td>${esc(r.batch_no || '—')}</td><td>${fmtDate(r.expiry_date)}</td>
+        <td><span class="pill ${r.days_left <= 30 ? 'cancelled' : r.days_left <= 60 ? 'lowstock' : 'pending'}">${r.days_left} يوم</span></td>
+        <td>${(r.value || 0).toLocaleString()} ر.س</td>
+      </tr>`).join('') || '<tr><td colspan="7" class="empty">لا دفعات تنتهي خلال 90 يومًا ✅</td></tr>'}</tbody>
+    </table></div></div>`;
+}
+
+/* ---------- 7) دليل الموردين ---------- */
+async function invVendorsHTML() {
+  const vendors = await api('/accounts/ledger/vendors').catch(() => []);
+  STK.vendors = vendors;
+  return `<div class="card">
+    <div class="toolbar"><h3 style="margin:0">🏢 دليل الموردين (${vendors.length})</h3>
+      <span class="pill ${vendors.length ? 'confirmed' : 'partial'}">${vendors.length} مورد</span></div>
+    <p style="margin:0 0 10px;color:#64748b">الموردون يُسجَّلون في دليل المشتريات/المحاسبة، ويظهرون في «أمر شراء» و«مرتجع المورد» و«إذن الاستلام».</p>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>#</th><th>الرمز</th><th>الاسم</th><th>جهة الاتصال</th><th>الهاتف</th><th>الحالة</th></tr></thead>
+      <tbody>${vendors.map(v => `<tr>
+        <td>${v.id}</td><td>${esc(v.code || '—')}</td><td><strong>${esc(v.name)}</strong></td>
+        <td>${esc(v.contact_name || '—')}</td><td>${esc(v.phone || '—')}</td>
+        <td><span class="pill ${v.is_active === false ? 'cancelled' : 'confirmed'}">${v.is_active === false ? 'موقوف' : 'نشط'}</span></td>
+      </tr>`).join('') || '<tr><td colspan="6" class="empty">لا موردين — أضفهم من شاشة المحاسبة ← دفتر الأستاذ</td></tr>'}</tbody>
+    </table></div></div>`;
+}
+
+/* ---------- 8) بطاقة الصنف ---------- */
+async function invItemCardHTML() {
+  const items = await api('/general-stock/');
+  STK.items = items;
+  const sel = document.getElementById('stk-item-pick');
+  const id = sel ? Number(sel.value) : (STK.card || (items[0] && items[0].id));
+  const card = id ? await api('/stock/items/' + id + '/card') : null;
+  STK.card = id;
+  return `<div class="card">
+    <div class="toolbar"><h3 style="margin:0">📋 بطاقة الصنف — حركة كاملة</h3>
+      <select id="stk-item-pick" onchange="STK.card=Number(this.value);renderInvOps()">
+        ${items.map(i => `<option value="${i.id}" ${i.id === id ? 'selected' : ''}>${esc(i.code)} — ${esc(i.name)}</option>`).join('')
+      || '<option>لا أصناف</option>'}
+      </select>
+    </div>
+    ${card ? `<div class="stats" style="margin-bottom:12px">
+      <div class="stat"><div class="num">${card.item.quantity}</div><div class="lbl">${esc(card.item.unit)}</div></div>
+      <div class="stat green"><div class="num">${(card.item.value || 0).toLocaleString()} ر.س</div><div class="lbl">قيمة الصنف</div></div>
+      <div class="stat amber"><div class="num">${card.item.min_quantity}</div><div class="lbl">حد الأمان</div></div>
+      <div class="stat red"><div class="num">${card.batches.length}</div><div class="lbl">دفعة نشطة</div></div>
+    </div>
+    <p style="margin:0 0 10px;color:#64748b">الأرصدة: ${card.balances.map(b => esc(b.warehouse) + ' = ' + b.quantity).join(' · ') || '—'}
+       · التخزين: ${esc(card.item.storage_condition || '—')}</p>
+    ${card.batches.length ? `<div style="overflow-x:auto;margin-bottom:12px"><table>
+      <thead><tr><th>التشغيلة</th><th>الكمية</th><th>ينتهي</th><th>التكلفة</th></tr></thead>
+      <tbody>${card.batches.map(b => `<tr><td>${esc(b.batch_no || '—')}</td><td>${b.quantity}</td>
+        <td>${b.expiry_date ? fmtDate(b.expiry_date) : '—'}</td><td>${(b.unit_cost || 0).toLocaleString()} ر.س</td></tr>`).join('')}</tbody>
+    </table></div>` : ''}
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>#</th><th>التاريخ</th><th>الحركة</th><th>المستودع</th><th>التغيّر</th>
+        <th>الرصيد</th><th>المستند</th><th>التشغيلة</th><th>المستخدم</th></tr></thead>
+      <tbody>${card.movements.map(m => `<tr>
+        <td>${m.id}</td><td>${fmtDate(m.created_at)}</td>
+        <td><span class="pill ${m.change > 0 ? 'confirmed' : 'cancelled'}">${DOC_MOVE_AR[m.type] || m.type}</span></td>
+        <td>${esc(m.warehouse || '—')}</td>
+        <td style="color:${m.change > 0 ? '#155724' : '#721c24'};font-weight:700">${m.change > 0 ? '+' : ''}${m.change}</td>
+        <td>${m.quantity_after}</td><td>${esc(m.doc_no || '—')}</td>
+        <td>${esc(m.batch_no || '—')}</td><td>${esc(m.made_by || '—')}</td>
+      </tr>`).join('') || '<tr><td colspan="9" class="empty">لا حركات لهذا الصنف</td></tr>'}</tbody>
+    </table></div>` : '<div class="empty">اختر صنفًا</div>'}
+  </div>`;
+}
+
+/* ---------- 9) قيمة المخزون (متوسط / FIFO) ---------- */
+async function invValuationHTML() {
+  const rows = await api('/stock/reports/valuation');
+  const avg = rows.reduce((s, r) => s + r.total_average, 0);
+  const fifo = rows.reduce((s, r) => s + r.total_fifo, 0);
+  return `<div class="card">
+    <div class="toolbar"><h3 style="margin:0">💰 قيمة المخزون (${rows.length} صنف)</h3>
+      <span class="pill confirmed">بالتكلفة المتوسطة: ${avg.toLocaleString()} ر.س</span>
+      <span class="pill in_progress">بطريقة FIFO: ${fifo.toLocaleString()} ر.س</span>
+    </div>
+    <p style="margin:0 0 10px;color:#64748b">المتوسط = تكلفة مرجّحة بكميات الاستلام · FIFO = طبقات الدفعات الأقرب انتهاءً التي سيُصرف بها.</p>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>#</th><th>الكود</th><th>الصنف</th><th>الكمية</th>
+        <th>متوسط الوحدة</th><th>وحدة FIFO</th><th>الإجمالي (متوسط)</th><th>الإجمالي (FIFO)</th><th>الفرق</th></tr></thead>
+      <tbody>${rows.map(r => `<tr>
+        <td>${r.item_id}</td><td>${esc(r.code || '—')}</td><td>${esc(r.item_name || '')}</td>
+        <td>${r.quantity}</td>
+        <td>${(r.average_cost || 0).toLocaleString()} ر.س</td>
+        <td>${(r.fifo_cost || 0).toLocaleString()} ر.س</td>
+        <td>${r.total_average.toLocaleString()} ر.س</td>
+        <td>${r.total_fifo.toLocaleString()} ر.س</td>
+        <td>${(r.total_fifo - r.total_average).toFixed(2)}</td>
+      </tr>`).join('') || '<tr><td colspan="9" class="empty">لا أرصدة للتقييم</td></tr>'}</tbody>
+    </table></div></div>`;
+}
+
+/* ---------- 10) الركود والأكثر حركة ---------- */
+async function invSlowHTML() {
+  const rows = await api('/stock/reports/slow-moving?days=90');
+  const slow = rows.filter(r => r.is_slow);
+  return `<div class="card">
+    <div class="toolbar"><h3 style="margin:0">📈 الركود والأكثر حركة</h3>
+      <span class="pill cancelled">${slow.length} راكد</span>
+      <span class="pill confirmed">${rows.length - slow.length} نشط</span></div>
+    <p style="margin:0 0 10px;color:#64748b">راكد = رصيده موجب ولم يُصرف منه شيء خلال 90 يومًا — مرشّح لإعادة التوريد أو التسييل.</p>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>#</th><th>الكود</th><th>الصنف</th><th>الرصيد</th><th>الوارد</th><th>المصروف</th>
+        <th>آخر صرف</th><th>مضى</th><th>القيمة</th><th>الحالة</th></tr></thead>
+      <tbody>${rows.map(r => `<tr>
+        <td>${r.item_id}</td><td>${esc(r.code || '—')}</td><td>${esc(r.item_name || '')}</td>
+        <td>${r.quantity}</td><td>${r.received_qty}</td><td><strong>${r.issued_qty}</strong></td>
+        <td>${r.last_issue_at ? fmtDate(r.last_issue_at) : 'لم يُصرف'}</td>
+        <td>${r.days_since_issue == null ? '—' : r.days_since_issue + ' يوم'}</td>
+        <td>${(r.value || 0).toLocaleString()} ر.س</td>
+        <td><span class="pill ${r.is_slow ? 'cancelled' : 'confirmed'}">${r.is_slow ? 'راكد' : 'نشط'}</span></td>
+      </tr>`).join('') || '<tr><td colspan="10" class="empty">لا أصناف</td></tr>'}</tbody>
+    </table></div></div>`;
+}
+
+/* ---------- نماذج الإدخال: مستند · مستودع · صنف ---------- */
+let STK_LINES = [];
+
+function stkOptions(rows, selected, labelFn) {
+  return rows.map(r => `<option value="${r.id}" ${r.id === selected ? 'selected' : ''}>${esc(labelFn(r))}</option>`).join('');
+}
+
+function stkLinesHTML(items) {
+  return STK_LINES.map((l, i) => `<div class="row2" data-stk-line="${i}" style="margin-bottom:8px;align-items:end">
+    <div class="field"><label>الصنف</label><select onchange="STK_LINES[${i}].item_id=Number(this.value)">
+      ${stkOptions(items, l.item_id, x => x.code + ' — ' + x.name)}</select></div>
+    <div class="field"><label>الكمية</label><input type="number" min="0" value="${l.quantity || 0}" data-stk="qty"
+      onchange="STK_LINES[${i}].quantity=Number(this.value||0)"></div>
+    <div class="field"><label>رقم التشغيلة</label><input value="${esc(l.batch_no || '')}" data-stk="batch" placeholder="B-1234"
+      onchange="STK_LINES[${i}].batch_no=this.value"></div>
+    <div class="field"><label>تاريخ الانتهاء</label><input type="date" data-stk="expiry"
+      onchange="STK_LINES[${i}].expiry_date=this.value||''"></div>
+    <div class="field"><label>تكلفة الوحدة</label><input type="number" min="0" step="0.01" data-stk="cost"
+      value="${l.unit_cost == null ? '' : l.unit_cost}"
+      onchange="STK_LINES[${i}].unit_cost=this.value===''?null:Number(this.value)"></div>
+    <button class="btn ghost" onclick="stkDropLine(${i})">🗑️</button>
+  </div>`).join('');
+}
+
+function stkAddLine() {
+  api('/general-stock/').then(items => {
+    STK_LINES.push({ item_id: items[0] ? items[0].id : 0, quantity: 1,
+      counted_quantity: null, batch_no: '', expiry_date: '', unit_cost: null });
+    const box = document.getElementById('stk-lines');
+    if (box) box.innerHTML = stkLinesHTML(items);
+  });
+}
+
+function stkDropLine(i) { STK_LINES.splice(i, 1); stkAddLine(); }
+
+function newStockDoc(type, itemId) {
+  const meta = DOC_META[type] || [type, '📄', ''];
+  openModal(`${meta[1]} ${meta[0]}`, '<div class="empty">جارٍ التحميل…</div>');
+  Promise.all([
+    api('/general-stock/'), api('/stock/warehouses'),   // بلا شرطة أخيرة
+    api('/departments/').catch(() => []),
+    api('/accounts/ledger/vendors').catch(() => []),
+  ]).then(([items, whs, deps, vendors]) => {
+    STK_LINES = itemId ? [{ item_id: itemId, quantity: 1, counted_quantity: null,
+      batch_no: '', expiry_date: '', unit_cost: null }] : [];
+    stkDocFormHTML(type, items, whs, deps, vendors);
+  }).catch(e => {
+    toast(e.message || 'تعذّر التحميل', true);
+    const body = document.getElementById('modal-body');
+    if (body) body.innerHTML = `<div class="empty">تعذّر فتح النموذج: ${esc(e.message || 'خطأ')}</div>`;
+  });
+}
+
+function newWarehouse() {
+  openModal('➕ إضافة مستودع', `
+    <div class="form-grid">
+      <div class="field"><label>اسم المستودع *</label><input id="wh-name" placeholder="مخزن الطوارئ"></div>
+      <div class="field"><label>النوع</label><select id="wh-kind">
+        <option value="main">رئيسي</option><option value="pharmacy">صيدلية</option>
+        <option value="emergency">طوارئ</option><option value="or">غرف عمليات</option>
+        <option value="dept">قسم</option></select></div>
+      <div class="field"><label>الموقع</label><input id="wh-loc" placeholder="الدور الأرضي"></div>
+    </div>
+    <div class="row2" style="margin-top:12px">
+      <button class="btn success" onclick="saveWarehouse()">حفظ المستودع</button>
+      <button class="btn ghost" onclick="closeModal()">إلغاء</button>
+    </div>`);
+}
+
+async function saveWarehouse() {
+  const body = { name: (V('wh-name') || '').trim(), kind: V('wh-kind') || 'main',
+    location: (V('wh-loc') || '').trim() || null };
+  if (body.name.length < 2) return toast('اسم المستودع مطلوب', true);
+  try {
+    await api('/stock/warehouses', { method: 'POST', body: JSON.stringify(body) });
+    closeModal(); toast('أُضيف المستودع ✅'); await navigate(CURRENT_VIEW);
+  } catch (e) { toast(e.message, true); }
+}
+
+function editStockItem(id) {
+  const it = id ? STK.items.find(x => x.id === Number(id)) : null;
+  openModal(it ? '✏️ تعديل الصنف' : '➕ إضافة صنف', `
+    <div class="form-grid">
+      <div class="field"><label>الكود *</label><input id="si-code" value="${esc(it ? it.code : '')}"></div>
+      <div class="field"><label>اسم الصنف *</label><input id="si-name" value="${esc(it ? it.name : '')}"></div>
+      <div class="field"><label>الفئة</label><input id="si-cat" value="${esc(it ? it.category : 'medical_supplies')}"></div>
+      <div class="field"><label>الوحدة</label><input id="si-unit" value="${esc(it ? it.unit : 'قطعة')}"></div>
+      <div class="field"><label>الاسم العلمي</label><input id="si-gen" value="${esc(it ? (it.generic_name || '') : '')}"></div>
+      <div class="field"><label>الاسم التجاري</label><input id="si-trade" value="${esc(it ? (it.trade_name || '') : '')}"></div>
+      <div class="field"><label>الباركود</label><input id="si-bar" value="${esc(it ? (it.barcode || '') : '')}"></div>
+      <div class="field"><label>شروط التخزين</label><input id="si-store" placeholder="ثلاجة 2–8°" value="${esc(it ? (it.storage_condition || '') : '')}"></div>
+      <div class="field"><label>تكلفة الوحدة</label><input id="si-cost" type="number" min="0" step="0.01" value="${it ? it.unit_cost : 0}"></div>
+      <div class="field"><label>حد الأمان</label><input id="si-min" type="number" min="0" value="${it ? it.min_quantity : 0}"></div>
+      <div class="field"><label>نقطة إعادة الطلب</label><input id="si-reorder" type="number" min="0" value="${it && it.reorder_point != null ? it.reorder_point : ''}"></div>
+      <div class="field"><label>الحد الأقصى</label><input id="si-max" type="number" min="0" value="${it && it.max_quantity != null ? it.max_quantity : ''}"></div>
+      <div class="field"><label>المورد الافتراضي</label><input id="si-sup" value="${esc(it ? (it.supplier_name || '') : '')}"></div>
+    </div>
+    <div class="row2" style="margin-top:12px">
+      <button class="btn success" onclick="saveStockItem(${id || 0})">حفظ الصنف</button>
+      <button class="btn ghost" onclick="closeModal()">إلغاء</button>
+    </div>`);
+}
+
+async function saveStockItem(id) {
+  const n = k => { const v = V(k); return v === '' || v == null ? null : Number(v); };
+  const s = k => { const v = V(k); return v ? v.trim() : null; };
+  const body = {
+    code: (V('si-code') || '').trim(), name: (V('si-name') || '').trim(),
+    category: (V('si-cat') || 'medical_supplies').trim(), unit: (V('si-unit') || 'قطعة').trim(),
+    generic_name: s('si-gen'), trade_name: s('si-trade'), barcode: s('si-bar'),
+    storage_condition: s('si-store'), supplier_name: s('si-sup'),
+    unit_cost: n('si-cost') ?? 0, min_quantity: n('si-min') ?? 0,
+    reorder_point: n('si-reorder'), max_quantity: n('si-max'),
+  };
+  if (!body.code || body.name.length < 2) return toast('الكود والاسم مطلوبان', true);
+  try {
+    if (id) await api('/general-stock/' + id, { method: 'PUT', body: JSON.stringify(body) });
+    else await api('/general-stock/', { method: 'POST', body: JSON.stringify(body) });
+    closeModal(); toast(id ? 'حُفظ الصنف ✅' : 'أُضيف الصنف ✅');
+    await navigate(CURRENT_VIEW);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function itemCard(id) {
+  try {
+    const card = await api('/stock/items/' + id + '/card');
+    openModal('📋 بطاقة الصنف — ' + card.item.name, `
+      <p style="margin:0 0 10px;color:#64748b">${esc(card.item.code)} · الوحدة ${esc(card.item.unit)}
+        · الأرصدة: ${card.balances.map(b => esc(b.warehouse) + ' = ' + b.quantity).join(' · ') || '—'}
+        · قيمة الصنف ${(card.item.value || 0).toLocaleString()} ر.س</p>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>التاريخ</th><th>الحركة</th><th>المستودع</th><th>التغيّر</th><th>الرصيد</th><th>المستند</th><th>التشغيلة</th></tr></thead>
+        <tbody>${card.movements.map(m => `<tr>
+          <td>${fmtDate(m.created_at)}</td>
+          <td><span class="pill ${m.change > 0 ? 'confirmed' : 'cancelled'}">${DOC_MOVE_AR[m.type] || m.type}</span></td>
+          <td>${esc(m.warehouse || '—')}</td>
+          <td style="font-weight:700;color:${m.change > 0 ? '#155724' : '#721c24'}">${m.change > 0 ? '+' : ''}${m.change}</td>
+          <td>${m.quantity_after}</td><td>${esc(m.doc_no || '—')}</td><td>${esc(m.batch_no || '—')}</td>
+        </tr>`).join('') || '<tr><td colspan="7" class="empty">لا حركات</td></tr>'}</tbody>
+      </table></div>`);
+  } catch (e) { toast(e.message || 'تعذّر التحميل', true); }
+}
+
+/* إعادة رسم محتوى التبويب المختار فقط (دون إعادة تحميل الشاشة كاملة) */
+async function renderInvOps() {
+  const box = document.getElementById('inv-ops');
+  if (!box) return;
+  box.innerHTML = await invOpsHTML();
+}
+
+function stkDocFormHTML(type, items, whs, deps, vendors) {
+  const meta = DOC_META[type] || [type, '📄', ''];
+  const defId = (whs.find(w => w.is_default) || whs[0] || {}).id;
+  const wh = () => stkOptions(whs, defId, w => w.name);
+  const vendorSel = `<div class="field"><label>المورد *</label><select id="stk-vendor">
+      ${vendors.map(v => `<option value="${v.id}">${esc(v.name)}</option>`).join('') || '<option value="">— أضف موردًا من شاشة المحاسبة —</option>'}
+    </select></div>`;
+  const deptSel = `<div class="field"><label>القسم</label><select id="stk-dept">
+      <option value="">— بدون —</option>${deps.map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join('')}
+    </select></div>`;
+  const patSel = '<div class="field"><label>رقم المريض</label><input id="stk-patient" type="number" min="1" placeholder="اختياري"></div>';
+  const head = {
+    grn: `<div class="field"><label>مستودع الاستلام</label><select id="stk-to">${wh()}</select></div>${vendorSel}`,
+    transfer: `<div class="field"><label>من مستودع</label><select id="stk-from">${wh()}</select></div>
+               <div class="field"><label>إلى مستودع</label><select id="stk-to">${wh()}</select></div>`,
+    issue: `<div class="field"><label>من مستودع</label><select id="stk-from">${wh()}</select></div>${deptSel}${patSel}`,
+    return: `<div class="field"><label>إلى مستودع</label><select id="stk-to">${wh()}</select></div>${deptSel}${patSel}`,
+    supplier_return: `<div class="field"><label>من مستودع</label><select id="stk-from">${wh()}</select></div>${vendorSel}`,
+    stocktake: `<div class="field"><label>مستودع الجرد</label><select id="stk-from">${wh()}</select></div>`,
+    pr: deptSel,
+    po: `${vendorSel}<div class="field"><label>مرجع خارجي</label><input id="stk-ref" placeholder="رقم الأمر"></div>`,
+  }[type] || '';
+  const body = document.getElementById('modal-body');
+  if (!body) return;
+  body.innerHTML = `
+    <p style="margin:0 0 10px;color:#64748b">${meta[2]}</p>
+    <div class="form-grid">${head}</div>
+    <h4 style="margin:14px 0 6px">${type === 'stocktake' ? 'العدّ الفعلي' : 'السطور'}</h4>
+    <div id="stk-lines">${stkLinesHTML(items)}</div>
+    <button class="btn ghost" onclick="stkAddLine()">➕ إضافة سطر</button>
+    <div class="field" style="margin-top:10px"><label>ملاحظات</label><input id="stk-notes"></div>
+    <div class="row2" style="margin-top:12px">
+      <button class="btn success" onclick="stkSaveDoc('${type}')">حفظ ${esc(meta[0])}</button>
+      <button class="btn ghost" onclick="closeModal()">إلغاء</button>
+    </div>`;
+}
+
+async function stkSaveDoc(type) {
+  const num = id => { const v = V(id); return v ? Number(v) : null; };
+  let lines = STK_LINES.filter(l => l.item_id).map(l => ({
+    item_id: Number(l.item_id), quantity: Number(l.quantity || 0),
+    batch_no: l.batch_no || null,
+    expiry_date: l.expiry_date ? new Date(l.expiry_date).toISOString() : null,
+    unit_cost: l.unit_cost == null ? null : Number(l.unit_cost),
+  }));
+  // الجرد: العدّ الفعلي هو ما يُرسل، والكمية تُشتق منه عند الإغلاق
+  if (type === 'stocktake') lines = lines.map(l => ({
+    item_id: l.item_id, quantity: 0, counted_quantity: l.quantity }));
+  if (!lines.length) return toast('أضف سطرًا واحدًا على الأقل', true);
+  const body = {
+    doc_type: type,
+    from_warehouse_id: num('stk-from'), to_warehouse_id: num('stk-to'),
+    vendor_id: num('stk-vendor'), department_id: num('stk-dept'),
+    patient_id: num('stk-patient'), reference: V('stk-ref') || null,
+    notes: V('stk-notes') || null, lines,
+  };
+  try {
+    const doc = await api('/stock/docs', { method: 'POST', body: JSON.stringify(body) });
+    closeModal();
+    toast('سُجّل ' + doc.doc_no + ' ✅');
+    STK_LINES = [];
+    await navigate(CURRENT_VIEW);
+  } catch (e) { toast(e.message, true); }
+}
+
 /* ========== الصيدلية: حالة الفلاتر + بيانات مساعدة ========== */
 let PH = { q: '', status: '' };
 let PH_MEDS = [];   // كل الأدوية (للبحث بالباركود)
@@ -3201,6 +3845,8 @@ async function deleteStaffDoc(id) {
         <div class="stat amber"><div class="num">${sum.expiring}</div><div class="lbl">أصناف تنتهي قريبًا</div></div>
         <div class="stat red"><div class="num">${sum.expired}</div><div class="lbl">أصناف منتهية</div></div>
       </div>
+      ${invBarsHTML()}
+      <div id="inv-ops"><div class="empty">جارٍ التحميل…</div></div>
       <div class="card">
         <div class="toolbar">
           <input id="f-inv-q" placeholder="ابحث بالاسم أو الرمز" value="${esc(INV.q)}" style="min-width:200px">
@@ -3252,6 +3898,7 @@ async function deleteStaffDoc(id) {
       </div>
         </div>
       </div>`;
+    await renderInvOps();   // محتوى تبويب إدارة المخازن المختار
   },
 
   /* --- تبويب «المبيعات»: السجل + الفلاتر + التسديد --- */

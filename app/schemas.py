@@ -1067,6 +1067,15 @@ class GeneralStockItemBase(BaseModel):
     unit: str = Field("قطعة", description="وحدة القياس")
     unit_cost: float = Field(0, ge=0, description="تكلفة الوحدة")
     expiry_date: Optional[datetime] = Field(None, description="تاريخ انتهاء الصلاحية")
+    # بيانات تفصيلية + مستويات إعادة الطلب (دليل المواد)
+    barcode: Optional[str] = Field(None, max_length=60, description="الباركود")
+    trade_name: Optional[str] = Field(None, max_length=120, description="الاسم التجاري")
+    generic_name: Optional[str] = Field(None, max_length=120, description="الاسم العلمي")
+    storage_condition: Optional[str] = Field(None, max_length=120, description="شروط التخزين")
+    max_quantity: Optional[int] = Field(None, ge=0, description="الحد الأقصى")
+    reorder_point: Optional[int] = Field(None, ge=0, description="نقطة إعادة الطلب")
+    supplier_name: Optional[str] = Field(None, max_length=120, description="المورد الافتراضي")
+    is_active: bool = Field(True, description="الصنف نشط")
 
 
 class GeneralStockItemCreate(GeneralStockItemBase):
@@ -1084,6 +1093,14 @@ class GeneralStockItemUpdate(BaseModel):
     unit: Optional[str] = None
     unit_cost: Optional[float] = Field(None, ge=0)
     expiry_date: Optional[datetime] = None
+    barcode: Optional[str] = Field(None, max_length=60)
+    trade_name: Optional[str] = Field(None, max_length=120)
+    generic_name: Optional[str] = Field(None, max_length=120)
+    storage_condition: Optional[str] = Field(None, max_length=120)
+    max_quantity: Optional[int] = Field(None, ge=0)
+    reorder_point: Optional[int] = Field(None, ge=0)
+    supplier_name: Optional[str] = Field(None, max_length=120)
+    is_active: Optional[bool] = None
 
 
 class GeneralStockItemInDB(GeneralStockItemBase):
@@ -1103,6 +1120,162 @@ class GeneralStockItemMovement(BaseModel):
     note: Optional[str] = None
     made_by: Optional[str] = None
     created_at: datetime
+
+
+# ===== إدارة المخازن والمستودعات والمستندات =====
+class WarehouseCreate(BaseModel):
+    name: str = Field(..., min_length=2, max_length=80)
+    kind: str = Field("main", description="main|pharmacy|emergency|or|dept")
+    location: Optional[str] = None
+    is_default: bool = False
+
+
+class WarehouseUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=2, max_length=80)
+    kind: Optional[str] = None
+    location: Optional[str] = None
+    is_default: Optional[bool] = None
+    is_active: Optional[bool] = None
+
+
+class WarehouseOut(BaseModel):
+    id: int
+    name: str
+    kind: str
+    location: Optional[str] = None
+    is_default: bool
+    is_active: bool
+    items_count: int = 0
+    total_quantity: int = 0
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StockDocLineIn(BaseModel):
+    """سطر مستند: صنف + كمية (+ رقم التشغيلة وتاريخ الانتهاء ووحدة التكلفة)."""
+    item_id: int = Field(..., gt=0)
+    quantity: int = Field(0, ge=0, description="الكمية (في الجرد: يتجاهلها counted_quantity)")
+    counted_quantity: Optional[int] = Field(None, ge=0, description="العدّ الفعلي (الجرد)")
+    unit_cost: Optional[float] = Field(None, ge=0)
+    batch_no: Optional[str] = Field(None, max_length=60)
+    expiry_date: Optional[datetime] = None
+    note: Optional[str] = None
+
+
+class StockDocCreate(BaseModel):
+    """إنشاء مستند مخزون بأنواعه الثمانية."""
+    doc_type: str = Field(..., description="grn|transfer|issue|return|supplier_return|stocktake|pr|po")
+    from_warehouse_id: Optional[int] = Field(None, gt=0)
+    to_warehouse_id: Optional[int] = Field(None, gt=0)
+    vendor_id: Optional[int] = Field(None, gt=0)
+    department_id: Optional[int] = Field(None, gt=0)
+    patient_id: Optional[int] = Field(None, gt=0)
+    source_doc_id: Optional[int] = Field(None, gt=0, description="طلب الشراء المصدر (لأمر الشراء)")
+    reference: Optional[str] = Field(None, max_length=80)
+    notes: Optional[str] = None
+    needed_at: Optional[datetime] = None
+    expected_at: Optional[datetime] = None
+    lines: List[StockDocLineIn] = Field(..., min_length=1)
+
+
+class StockDocLineOut(BaseModel):
+    id: int
+    item_id: int
+    item_name: Optional[str] = None
+    item_code: Optional[str] = None
+    unit: Optional[str] = None
+    quantity: int
+    counted_quantity: Optional[int] = None
+    unit_cost: float
+    batch_no: Optional[str] = None
+    expiry_date: Optional[datetime] = None
+    note: Optional[str] = None
+
+
+class StockDocOut(BaseModel):
+    id: int
+    doc_type: str
+    doc_no: str
+    status: str
+    from_warehouse: Optional[str] = None
+    to_warehouse: Optional[str] = None
+    vendor_id: Optional[int] = None
+    vendor_name: Optional[str] = None
+    department_id: Optional[int] = None
+    patient_id: Optional[int] = None
+    reference: Optional[str] = None
+    notes: Optional[str] = None
+    needed_at: Optional[datetime] = None
+    expected_at: Optional[datetime] = None
+    created_by: Optional[str] = None
+    approved_by: Optional[str] = None
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+    total_quantity: int = 0
+    total_value: float = 0.0
+    lines: List[StockDocLineOut] = []
+
+
+class StockDocAction(BaseModel):
+    """اعتماد/إلغاء مستند."""
+    action: str = Field(..., description="approve|cancel|complete")
+
+
+class GeneralStockMovementOut(BaseModel):
+    id: int
+    item_id: int
+    item_name: Optional[str] = None
+    item_code: Optional[str] = None
+    warehouse: Optional[str] = None
+    type: str
+    change: int
+    quantity_after: int
+    doc_id: Optional[int] = None
+    doc_no: Optional[str] = None
+    batch_no: Optional[str] = None
+    expiry_date: Optional[datetime] = None
+    patient_id: Optional[int] = None
+    department_id: Optional[int] = None
+    note: Optional[str] = None
+    made_by: Optional[str] = None
+    created_at: datetime
+
+
+class ExpiryAlertRow(BaseModel):
+    item_id: int
+    item_name: Optional[str] = None
+    code: Optional[str] = None
+    warehouse: Optional[str] = None
+    quantity: int
+    batch_no: Optional[str] = None
+    expiry_date: Optional[datetime] = None
+    days_left: int
+    value: float = 0.0
+
+
+class ValuationRow(BaseModel):
+    item_id: int
+    item_name: Optional[str] = None
+    code: Optional[str] = None
+    quantity: int
+    average_cost: float
+    fifo_cost: float
+    total_average: float
+    total_fifo: float
+
+
+class SlowMovingRow(BaseModel):
+    item_id: int
+    item_name: Optional[str] = None
+    code: Optional[str] = None
+    quantity: int
+    issued_qty: int
+    received_qty: int
+    last_issue_at: Optional[datetime] = None
+    days_since_issue: Optional[int] = None
+    value: float = 0.0
+    is_slow: bool = False
 
 
 class DispenseCreate(BaseModel):

@@ -986,8 +986,158 @@ class GeneralStockItem(Base):
     unit = Column(String, nullable=False, default="قطعة")
     unit_cost = Column(Float, nullable=False, default=0)
     expiry_date = Column(DateTime, nullable=True)
+    # ===== دليل المواد: بيانات تفصيلية + مستويات إعادة الطلب =====
+    barcode = Column(String, nullable=True)               # باركود / رمز ثانٍ
+    trade_name = Column(String, nullable=True)            # الاسم التجاري
+    generic_name = Column(String, nullable=True)          # الاسم العلمي / المادة الفعّالة
+    storage_condition = Column(String, nullable=True)     # شروط التخزين (ثلاجة 2–8° …)
+    max_quantity = Column(Integer, nullable=True)         # الحد الأقصى للمخزون
+    reorder_point = Column(Integer, nullable=True)        # نقطة إعادة الطلب
+    supplier_name = Column(String, nullable=True)         # المورد الافتراضي
+    is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+# ===== إدارة المخازن: المستودعات والأرصدة والدفعات =====
+class Warehouse(Base):
+    """مستودع أو فرع (الرئيسي، الصيدلية، الطوارئ، العمليات، قسم)."""
+    __tablename__ = "warehouses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, unique=True)
+    kind = Column(String, nullable=False, default="main")   # main|pharmacy|emergency|or|dept
+    location = Column(String, nullable=True)
+    is_default = Column(Boolean, nullable=False, default=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    balances = relationship("StockBalance", back_populates="warehouse",
+                            cascade="all, delete-orphan")
+
+
+class StockBalance(Base):
+    """رصيد صنف داخل مخزن — مصدر الحقيقة لأرصدة المستودعات."""
+    __tablename__ = "stock_balances"
+    __table_args__ = (UniqueConstraint("item_id", "warehouse_id",
+                                       name="uq_stock_balance_item_warehouse"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    item_id = Column(Integer, ForeignKey("general_stock_items.id", ondelete="CASCADE"),
+                     nullable=False, index=True)
+    warehouse_id = Column(Integer, ForeignKey("warehouses.id", ondelete="CASCADE"),
+                          nullable=False, index=True)
+    quantity = Column(Integer, nullable=False, default=0)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    item = relationship("GeneralStockItem")
+    warehouse = relationship("Warehouse", back_populates="balances")
+
+
+class StockBatch(Base):
+    """دفعة/تشغيلة داخل مخزن — أساس رقم التشغيلة وتاريخ الانتهاء وFEFO."""
+    __tablename__ = "stock_batches"
+    __table_args__ = (Index("ix_stock_batches_fefo", "item_id", "warehouse_id", "expiry_date"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    item_id = Column(Integer, ForeignKey("general_stock_items.id", ondelete="CASCADE"),
+                     nullable=False, index=True)
+    warehouse_id = Column(Integer, ForeignKey("warehouses.id", ondelete="CASCADE"),
+                          nullable=False, index=True)
+    batch_no = Column(String, nullable=True)
+    expiry_date = Column(DateTime, nullable=True, index=True)
+    quantity = Column(Integer, nullable=False, default=0)
+    unit_cost = Column(Float, nullable=False, default=0)
+    received_at = Column(DateTime, server_default=func.now())
+
+    item = relationship("GeneralStockItem")
+
+
+class StockDoc(Base):
+    """مستند مخزون موحّد: إذن استلام · تحويل · صرف · مرتجع · جرد · طلب شراء · أمر شراء.
+
+    جدول واحد بأنواعه بدل جدول لكل نوع — فتبقى السجلات والحركات والتقارير
+    على بنية واحدة يسهل استخراجها وتتبّع مسار كل صنف.
+    """
+    __tablename__ = "stock_docs"
+    __table_args__ = (UniqueConstraint("doc_type", "doc_no", name="uq_stock_doc_type_no"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    # grn | transfer | issue | return | supplier_return | stocktake | pr | po
+    doc_type = Column(String, nullable=False, index=True)
+    doc_no = Column(String, nullable=False, index=True)
+    # draft | approved | completed | cancelled
+    status = Column(String, nullable=False, default="draft", index=True)
+    from_warehouse_id = Column(Integer, ForeignKey("warehouses.id", ondelete="RESTRICT"), nullable=True)
+    to_warehouse_id = Column(Integer, ForeignKey("warehouses.id", ondelete="RESTRICT"), nullable=True)
+    vendor_id = Column(Integer, ForeignKey("vendors.id", ondelete="RESTRICT"), nullable=True)
+    department_id = Column(Integer, ForeignKey("departments.id", ondelete="RESTRICT"), nullable=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="RESTRICT"), nullable=True)
+    source_doc_id = Column(Integer, ForeignKey("stock_docs.id", ondelete="SET NULL"), nullable=True)
+    reference = Column(String, nullable=True)      # مرجع خارجي (فاتورة المورد/رقم طلب القسم)
+    notes = Column(String, nullable=True)
+    needed_at = Column(DateTime, nullable=True)    # تاريخ الحاجة (طلب شراء)
+    expected_at = Column(DateTime, nullable=True)   # موعد التوريد المتوقّع (أمر شراء)
+    created_by = Column(String, nullable=True)
+    approved_by = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+    completed_at = Column(DateTime, nullable=True)
+
+    lines = relationship("StockDocLine", back_populates="doc", cascade="all, delete-orphan")
+    from_warehouse = relationship("Warehouse", foreign_keys=[from_warehouse_id])
+    to_warehouse = relationship("Warehouse", foreign_keys=[to_warehouse_id])
+    vendor = relationship("Vendor")
+
+
+class StockDocLine(Base):
+    """سطر مستند مخزون — صنف واحد بكمية (وشِـعدّ فعلي في الجرد)."""
+    __tablename__ = "stock_doc_lines"
+
+    id = Column(Integer, primary_key=True, index=True)
+    doc_id = Column(Integer, ForeignKey("stock_docs.id", ondelete="CASCADE"),
+                    nullable=False, index=True)
+    item_id = Column(Integer, ForeignKey("general_stock_items.id", ondelete="RESTRICT"),
+                     nullable=False, index=True)
+    quantity = Column(Integer, nullable=False, default=0)
+    counted_quantity = Column(Integer, nullable=True)     # الجرد الفعلي (stocktake)
+    unit_cost = Column(Float, nullable=False, default=0)
+    batch_no = Column(String, nullable=True)              # رقم التشغيلة
+    expiry_date = Column(DateTime, nullable=True)         # تاريخ الانتهاء
+    note = Column(String, nullable=True)
+
+    doc = relationship("StockDoc", back_populates="lines")
+    item = relationship("GeneralStockItem")
+
+
+class GeneralStockMovement(Base):
+    """دفتر حركات المخزون العام — سجل دائم لكل تغيّر في رصيد صنف داخل مخزن.
+
+    يُبنى آليًا بقيد المستندات (استلام/تحويل/صرف/مرتجع/إتلاف/تسوية)،
+    ونوع الحركة مع doc_id يسمحان بتتبّع مسار أي صنف وبناء تقييم المخزون.
+    """
+    __tablename__ = "general_stock_movements"
+
+    id = Column(Integer, primary_key=True, index=True)
+    item_id = Column(Integer, ForeignKey("general_stock_items.id", ondelete="CASCADE"),
+                     nullable=False, index=True)
+    warehouse_id = Column(Integer, ForeignKey("warehouses.id", ondelete="CASCADE"),
+                          nullable=False, index=True)
+    # grn|issue|transfer_in|transfer_out|return_in|supplier_return|disposal|adjust
+    type = Column(String, nullable=False, index=True)
+    change = Column(Integer, nullable=False)
+    quantity_after = Column(Integer, nullable=False)
+    doc_id = Column(Integer, ForeignKey("stock_docs.id", ondelete="SET NULL"),
+                    nullable=True, index=True)
+    batch_no = Column(String, nullable=True)
+    expiry_date = Column(DateTime, nullable=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="SET NULL"), nullable=True)
+    department_id = Column(Integer, ForeignKey("departments.id", ondelete="SET NULL"), nullable=True)
+    note = Column(String, nullable=True)
+    made_by = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+
+    item = relationship("GeneralStockItem")
+    warehouse = relationship("Warehouse")
 
 
 # ===== المحاسبة المؤسسية: شجرة الحسابات والقيود المزدوجة =====

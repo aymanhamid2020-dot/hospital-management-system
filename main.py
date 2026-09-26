@@ -261,6 +261,7 @@ from app.routers.dental import router as dental_router
 from app.routers.service_units import router as service_units_router
 
 from app.routers.patient_portal import router as patient_portal_router
+from app.routers.stock_ops import router as stock_ops_router
 
 app.include_router(auth_router)
 app.include_router(patients_router)
@@ -298,6 +299,7 @@ app.include_router(search_router)
 app.include_router(care_plans_router)
 app.include_router(clinical_router)
 app.include_router(patient_portal_router)
+app.include_router(stock_ops_router)
 
 
 # ===== سجل التدقيق (يُسجّل كل عملية تعديلية) =====
