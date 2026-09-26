@@ -313,3 +313,23 @@
   html[data-theme="dark"] .err { background: #4c0519; color: #fda4af; }
   html[data-theme="dark"] .care-plan { background: #0f172a; border-color: #334155; }
   html[data-theme="dark"] .care-goal { background: #1e293b; }
+
+/* ===== مركز العمليات السريعة ⚡ ===== */
+#qo-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+#qo-tiles .qo-tile { cursor: pointer; border: 2px solid transparent; text-align: right; }
+#qo-tiles .qo-tile:hover { border-color: var(--brand, #2c7be5); }
+#qo-tiles .qo-tile .big { font-size: 30px; line-height: 1.1; }
+#qo-tiles .qo-tile .hint { font-size: 12px; opacity: .75; }
+#qo-tiles .qo-tile kbd { font-size: 11px; background: rgba(127,127,127,.18); border-radius: 5px; padding: 1px 6px; }
+.qo-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+.qo-pick .qo-hit { cursor: pointer; border: 1px solid rgba(127,127,127,.25); border-radius: 10px; padding: 8px 10px; }
+.qo-pick .qo-hit:hover { border-color: var(--brand, #2c7be5); background: rgba(44,123,229,.06); }
+.qo-pick .qo-hit .nm { font-weight: 700; }
+.qo-pick .qo-hit .sub { font-size: 12px; opacity: .75; }
+.qo-pick .qo-hit.out { opacity: .55; }
+.qo-money { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }
+.qo-money .field { min-width: 130px; }
+.qo-total { font-size: 22px; font-weight: 800; }
+.qo-kbd { font-size: 11px; opacity: .7; }
+#qo-body table input[type="number"], #qo-body table input[type="text"] { max-width: 110px; }
+.qo-ok { border-inline-start: 5px solid #28a745; }

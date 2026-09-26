@@ -37,6 +37,7 @@
     <nav class="sidebar">
       <div class="brand">🏥 المستشفى</div>
       <a href="#" data-view="dashboard" class="active">📊 لوحة التحكم</a>
+      <a href="#" data-view="quickops" title="بيع · شراء · ترحيل في خطوة واحدة (Ctrl+Alt+S/B/T)">⚡ العمليات السريعة</a>
       <a href="#" data-view="patients">🧑‍🤝‍🧑 المرضى</a>
       <a href="#" data-view="doctors">🩺 الأطباء</a>
       <a href="#" data-view="appointments">📅 المواعيد</a>
@@ -65,6 +66,7 @@
       <header class="topbar">
         <h2 id="page-title">لوحة التحكم</h2>
         <div class="userbox">
+          <button class="btn ghost sm" onclick="qoGo('sale')" title="عمليات سريعة (Ctrl+Alt+S)">⚡</button>
           <button class="btn ghost sm" onclick="openGSearch()" title="بحث سريع (Ctrl+K)">🔍 Ctrl+K</button>
           <button class="btn ghost sm" id="bell" onclick="navigate('notifications')" title="الإشعارات">🔔 <span id="bell-count">0</span></button>
           <span id="ub-name"></span>

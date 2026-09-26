@@ -1879,3 +1879,163 @@ class AuditLogInDB(ORMModel):
     path: str
     status_code: Optional[int] = None
     created_at: datetime
+
+
+# ===== مركز العمليات السريعة: بيع · شراء · ترحيل في عملية واحدة =====
+class QuickOpLine(BaseModel):
+    """سطر عملية سريعة: صنف مخزون أو دواء + كمية + سعر (بيع) أو تكلفة (شراء/ترحيل)."""
+    kind: str = Field("item", description="item = صنف مخزون | med = دواء صيدلية")
+    item_id: Optional[int] = Field(None, gt=0, description="معرّف الصنف (عند kind=item)")
+    medication_id: Optional[int] = Field(None, gt=0, description="معرّف الدواء (عند kind=med)")
+    quantity: int = Field(..., gt=0, description="الكمية الموجبة")
+    unit_price: Optional[float] = Field(None, ge=0, description="سعر الوحدة (بيع) — يُاحتساب من الصنف عند تركه فارغًا")
+    unit_cost: Optional[float] = Field(None, ge=0, description="تكلفة الوحدة (شراء)")
+    batch_no: Optional[str] = Field(None, max_length=60)
+    expiry_date: Optional[datetime] = None
+    note: Optional[str] = None
+
+
+class QuickSaleCreate(BaseModel):
+    """بيع سريع: فاتورة مريض + صرف من المستودع + قيد محاسبي في طلب واحد."""
+    patient_id: int = Field(..., gt=0)
+    warehouse_id: Optional[int] = Field(None, gt=0)
+    discount: float = Field(0, ge=0)
+    tax_rate: float = Field(0, ge=0, le=100)
+    paid_amount: float = Field(0, ge=0, description="المدفوع الآن — الباقي يبقى ذممة على المريض")
+    payment_method: str = Field("cash", description="cash|card|insurance")
+    description: Optional[str] = Field(None, max_length=200)
+    notes: Optional[str] = Field(None, max_length=200)
+    lines: List[QuickOpLine] = Field(..., min_length=1)
+
+
+class QuickPurchaseCreate(BaseModel):
+    """شراء سريع: إذن استلام مرحّل + فاتورة مورد + قيد محاسبي في طلب واحد."""
+    vendor_id: int = Field(..., gt=0)
+    warehouse_id: Optional[int] = Field(None, gt=0)
+    bill_no: Optional[str] = Field(None, max_length=40, description="رقم فاتورة المورد — يُولَّد تلقائيًا عند تركه فارغًا")
+    bill_date: Optional[datetime] = None
+    due_date: Optional[datetime] = None
+    expense_account_code: str = Field("5100", min_length=2, max_length=30)
+    lines: List[QuickOpLine] = Field(..., min_length=1)
+
+
+class QuickTransferCreate(BaseModel):
+    """ترحيل سريع: تحويل بين مستودعين مرحّلًا مع دفتر حركات."""
+    from_warehouse_id: int = Field(..., gt=0)
+    to_warehouse_id: int = Field(..., gt=0)
+    department_id: Optional[int] = Field(None, gt=0)
+    notes: Optional[str] = Field(None, max_length=200)
+    lines: List[QuickOpLine] = Field(..., min_length=1)
+
+
+class QuickSaleLineOut(BaseModel):
+    """سطر بيع مُرحَّل: دواء (kind=med) أو صنف مخزون (kind=item)."""
+    kind: str = "item"
+    ref_id: int = Field(..., description="معرّف الدواء أو الصنف حسب kind")
+    name: str
+    code: Optional[str] = None
+    unit: Optional[str] = None
+    quantity: int
+    unit_price: float
+    total: float
+    available: int = 0
+    paid: float = 0.0
+    record_id: Optional[int] = Field(None, description="معرّف السجل الناتج: صرف دواء أو سطر فاتورة")
+
+
+class QuickSaleOut(BaseModel):
+    """نتيجة البيع السريع — رقم الفاتورة + المحصّل + المتبقي + أرقام الترحيل."""
+    invoice_id: Optional[int] = Field(None, description="فاتورة الأصناف — تُنشأ فقط عند وجود أصناف مخزون في السلة")
+    dispense_ids: List[int] = []
+    dispense_count: int = 0
+    items_total: float = 0.0
+    medicines_total: float = 0.0
+    patient_id: int
+    patient_name: Optional[str] = None
+    doc_id: Optional[int] = Field(None, description="إذن صرف المخزون — يظهر فقط عند وجود أصناف")
+    doc_no: Optional[str] = None
+    warehouse: Optional[str] = None
+    subtotal: float
+    discount: float
+    tax: float
+    total: float
+    paid_amount: float
+    remaining: float
+    status: str
+    payment_method: str
+    journal_entry_id: Optional[int] = None
+    journal_entry_no: Optional[str] = None
+    lines: List[QuickSaleLineOut] = []
+
+
+class QuickPurchaseOut(BaseModel):
+    """نتيجة الشراء السريع — إذن الاستلام + فاتورة المورد + القيد."""
+    doc_id: int
+    doc_no: str
+    warehouse: Optional[str] = None
+    vendor_id: int
+    vendor_name: Optional[str] = None
+    bill_id: int
+    bill_no: str
+    bill_amount: float
+    outstanding: float
+    expense_account_code: str
+    journal_entry_id: Optional[int] = None
+    journal_entry_no: Optional[str] = None
+    total_quantity: int
+    total_value: float
+    lines: List[QuickOpLine] = []
+
+
+class QuickTransferOut(BaseModel):
+    """نتيجة التحويل السريع — رقم المستند وكميات الأسطر المنقولة."""
+    doc_id: int
+    doc_no: str
+    from_warehouse: Optional[str] = None
+    to_warehouse: Optional[str] = None
+    total_quantity: int
+    total_value: float
+    lines: List[QuickOpLine] = []
+
+
+class QuickCatalogItem(BaseModel):
+    """صنف في نتائج البحث السريع — مع المتاح في المستودع وسعره المقترح."""
+    id: int
+    kind: str = "item"
+    code: str
+    name: str
+    unit: Optional[str] = None
+    category: Optional[str] = None
+    trade_name: Optional[str] = None
+    generic_name: Optional[str] = None
+    barcode: Optional[str] = None
+    unit_cost: float
+    suggested_price: float
+    available: int
+    total_quantity: int
+    expiry_date: Optional[datetime] = None
+    low_stock: bool = False
+
+
+class QuickRecentOp(BaseModel):
+    """عملية حديثة في لوحة العمليات السريعة."""
+    kind: str                       # sale|purchase|transfer
+    icon: str
+    title: str
+    subtitle: str
+    amount: float
+    reference: Optional[str] = None
+    created_at: datetime
+
+
+class QuickOpsOverview(BaseModel):
+    """مؤشرات اليوم + الاختصارات + آخر العمليات."""
+    sales_today: float
+    sales_count_today: int
+    purchases_today: float
+    purchases_count_today: int
+    movements_today: int
+    low_stock_count: int
+    expiring_soon_count: int
+    top_items: List[QuickCatalogItem] = []
+    recent: List[QuickRecentOp] = []

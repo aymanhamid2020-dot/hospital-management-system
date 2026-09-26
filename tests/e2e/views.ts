@@ -11,6 +11,7 @@ const TITLES: Record<string, string> = {
   lab: 'المختبر والأشعة',
   accounting: 'المحاسبة',
   departments: 'الأقسام',
+  quickops: 'العمليات السريعة',
   sales: 'المبيعات',
   accounts: 'الحسابات',
   beds: 'الأسرّة',
