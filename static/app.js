@@ -822,6 +822,30 @@ async function clearAccounts() {
 /* ========== المخزون ========== */
 let INV = { q: '', status: '', days: 30 };
 
+/* === تبويبات شاشة المخزون (6 أقسام رئيسية) === */
+let INV_TAB = 'item-master';
+let INV_SUB = 'catalog';
+const INV_TABS = [
+  ['item-master', '📦 دليل المواد والمنتجات', '1'],
+  ['stock-movements', '🔄 حركة وإدارة المخازن', '2'],
+  ['stocktake', '📋 الجرد والجرودات', '3'],
+  ['expiry', '⏰ انتهاء الصلاحية والتالف', '4'],
+  ['procurement', '📋 المشتريات والموردين', '5'],
+  ['reports', '📊 التقارير والإحصائيات', '6'],
+];
+
+const INV_SUBS = {
+  'item-master': [['catalog', 'قائمة المنتجات', '📋'], ['reorder', 'مستويات إعادة الطلب', '🔄']],
+  'stock-movements': [['warehouses', 'المستودعات والفروع', '🏭'], ['grn', 'إذن الاستلام (GRN)', '📥'], ['transfers', 'التحويلات بين المخازن', '🔄'], ['issues', 'الصرف للأقسام/المرضى', '📤'], ['returns', 'المرتجعات', '↩️']],
+  'stocktake': [['physical', 'الجرد الفعلي', '📋'], ['adjustments', 'تسوية المخزون', '🧮']],
+  'expiry': [['tracking', 'متابعة الصلاحية (FEFO)', '⏰'], ['disposal', 'إعدام التالف/المنتهي', '🗑️']],
+  'procurement': [['vendors', 'دليل الموردين', '🏢'], ['purchase-requests', 'طلبات الشراء (PR)', '📝'], ['purchase-orders', 'أوامر الشراء (PO)', '📋']],
+  'reports': [['item-card', 'بطاقة الصنف (حركة)', '📋'], ['expiry-alerts', 'تنبيهات الانتهاء', '⚠️'], ['valuation', 'قيمة المخزون', '💰'], ['slow-moving', 'الركود/الأكثر استخدامًا', '📈']],
+};
+
+function setInvTab(tab) { INV_TAB = tab; return navigate('inventory'); }
+function setInvSub(sub) { INV_SUB = sub; return navigate('inventory'); }
+
 /* ========== الصيدلية: حالة الفلاتر + بيانات مساعدة ========== */
 let PH = { q: '', status: '' };
 let PH_MEDS = [];   // كل الأدوية (للبحث بالباركود)
@@ -3151,6 +3175,8 @@ async function deleteStaffDoc(id) {
             <td>${esc(mv.made_by || '-')}</td>
           </tr>`).join('') || '<tr><td colspan="8" class="empty">لا حركات مخزون بعد</td></tr>'}</tbody>
         </table></div>
+      </div>
+        </div>
       </div>`;
   },
 
