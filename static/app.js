@@ -1,4 +1,4 @@
-const API = '';
+﻿const API = '';
 // الجلسة الافتراضية في الذاكرة فقط: فتح الموقع يعرض شاشة الدخول دائمًا.
 // "تذكرني" وحده ينقل الجلسة إلى localStorage لتُستأنف بعد إعادة التشغيل.
 let TOKEN = '';
@@ -968,6 +968,578 @@ const PAT_TABS = [['list', 'قائمة المرضى', '🧑‍🤝‍🧑'], ...
 
 const emptyRow = (cols, msg) =>
   `<tr><td colspan="${cols}" class="empty">${msg}</td></tr>`;
+
+/* ══════ شاشة ملف الطبيب 🩺 — خمسة تبويبات ══════ */
+let DOC_CHART = null, DOC_CHART_ID = null, DOC_TAB = 'profile';
+const DAYS_AR = ['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة'];
+const SHIFT_LABEL = { emergency: '🛑 طوارئ', inpatient: '🏥 تنويم', oncall: '📟 أونكول' };
+const PAYOUT_LABEL = { cash: 'نقدًا', bank: 'تحويل بنكي', transfer: 'حوالة' };
+const BILING_LABEL = { percent: 'نسبة %', fixed: 'قيمة ثابتة' };
+const DOC_TABS = [
+  ['profile', 'الملف المهني', '🪪'],
+  ['roster', 'المواعيد والجداول', '🗓️'],
+  ['access', 'الصلاحيات والتوقيع', '🔐'],
+  ['finance', 'الحسابات والعمولات', '💰'],
+  ['analytics', 'الأداء والإحصائيات', '📊'],
+];
+
+/* خريطة عربي→إنجليزي ل-tabs ملف الطبيب (تُستخدم في applyI18n) */
+Object.assign(AR2EN, {
+  'الملف المهني': 'Professional profile',
+  'المواعيد والجداول': 'Roster & shifts',
+  'الصلاحيات والتوقيع': 'Permissions & signature',
+  'الحسابات والعمولات': 'Commissions & ledger',
+  'الأداء والإحصائيات': 'Performance & analytics',
+  'الدرجة العلمية': 'Academic rank',
+  'التخصص الدقيق': 'Sub-specialty',
+  'الفرع / العيادة': 'Branch / clinic',
+  'حساب المستخدم': 'User account',
+  'مدة الزيرة (دقائق)': 'Consultation (minutes)',
+  'سعر الكشفية (ر.س)': 'Consultation fee',
+  'سعر الإعادة (ر.س)': 'Follow-up fee',
+  'المناوبات': 'Shifts',
+  'الإجازات': 'Leaves',
+  'أيام حظر الحجز': 'Blocked dates',
+  'العمولات': 'Commissions',
+  'التحويلات': 'Payouts',
+  'كشف الحساب': 'Ledger',
+  'إجمالي الإيراد': 'Revenue',
+  'المستحق': 'Earned',
+  'المحوَّل': 'Paid out',
+  'المتبقي': 'Balance',
+  'مرضى جدد': 'New patients',
+  'مرضى عائدون': 'Returning',
+  'زيارات طوارئ': 'Emergency',
+  'نسبة الإلغاء': 'Cancel rate',
+  'متوسط الانتظار': 'Avg wait',
+  'أكثر الأدوية طلبًا': 'Top medications',
+  'أكثر الفحوصات طلبًا': 'Top tests',
+  'حفظ الملف المهني': 'Save profile',
+  'رفع التوقيع': 'Upload signature',
+  'رفع الختم': 'Upload stamp',
+  'إضافة مناوبة': 'Add shift',
+  'تسجيل إجازة': 'Add leave',
+  'حظر الحجز': 'Block date',
+  'تسجيل تحويل': 'Add payout',
+  'حفظ العمولات': 'Save commissions',
+});
+
+/* ══════ شاشة ملف الطبيب 🩺 — خمسة تبويبات ══════ */
+
+const DOC_MONTH = () => V('doc-month') || new Date().toISOString().slice(0, 7);
+const docCanEdit = () =>
+  isAdmin() || (isDoctor() && USER && DOC_CHART && USER.email === DOC_CHART.email);
+
+/* فتح ملف الطبيب — طلب واحد يغذّي التبويبات الخمسة */
+async function openDoctorChart(id) {
+  DOC_CHART_ID = id;
+  try { DOC_CHART = await api(`/doctors/${id}/chart`); }
+  catch (e) { return toast(e.message, true); }
+  if (!DOC_CHART) return;
+  DOC_TAB = 'profile';
+  openModal(`🩺 ملف الطبيب — ${DOC_CHART.full_name}`, '', true);
+  renderDoctorChart();
+  paintDocTab();
+}
+
+function docHead() {
+  const d = DOC_CHART;
+  return `<div class="chart-head">
+    <div><h3>${esc(d.full_name)}</h3>
+      <p>${esc(d.specialty)}${d.sub_specialty ? ' · ' + esc(d.sub_specialty) : ''}
+         ${d.academic_rank ? ' · 🎓 ' + esc(d.academic_rank) : ''}
+         · 🪪 ${esc(d.license_number)}
+         ${d.department ? ' · ' + esc(d.department.name) : ''}</p></div>
+    <div class="actions">
+      <input type="month" id="doc-month" value="${DOC_MONTH()}" onchange="reloadDoctorChart()">
+    </div></div>`;
+}
+
+function renderDoctorChart() {
+  const body = document.getElementById('modal-body');
+  if (!body) return;
+  body.innerHTML = docHead() + `
+    <div class="tabbar" id="doc-tabs">${DOC_TABS.map(([k, l, i]) =>
+      `<button class="tab${k === DOC_TAB ? ' active' : ''}" data-dtab="${k}"
+        onclick="setDocTab('${k}')">${i} ${tr(l)}</button>`).join('')}</div>
+    <div id="doc-body"></div>`;
+}
+
+function setDocTab(tab) { DOC_TAB = tab; paintDocTab(); }
+
+async function reloadDoctorChart() {
+  try {
+    DOC_CHART = await api(`/doctors/${DOC_CHART_ID}/chart?month=${DOC_MONTH()}`);
+    paintDocTab();
+  } catch (e) { toast(e.message, true); }
+}
+
+function paintDocTab() {
+  const body = document.getElementById('doc-body');
+  if (!body || !DOC_CHART) return;
+  document.querySelectorAll('#doc-tabs .tab').forEach(b =>
+    b.classList.toggle('active', b.dataset.dtab === DOC_TAB));
+  const renderers = { profile: docTabProfile, roster: docTabRoster, access: docTabAccess,
+                      finance: docTabFinance, analytics: docTabAnalytics };
+  try { body.innerHTML = renderers[DOC_TAB](); }
+  catch (e) { body.innerHTML = `<div class="empty" style="color:#dc3545">⚠️ ${esc(e.message)}</div>`; }
+  applyI18n(body);
+}
+
+/* جدول مبسّط: عنوان + رؤوس + صفوف (كل صف مصفوفة خلايا) */
+const docTable = (title, cols, rows, emptyMsg) => `
+  <h3>${title}</h3>
+  <div style="overflow-x:auto"><table>
+    <thead><tr>${cols.map(c => `<th>${c}</th>`).join('')}</tr></thead>
+    <tbody>${rows.length ? rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')
+      : emptyRow(cols.length, emptyMsg)}</tbody>
+  </table></div>`;
+
+const money = n => Number(n || 0).toLocaleString('en-US',
+  { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ر.س';
+const hm = t => t ? String(t).slice(0, 5) : '—';
+const dstr = d => d ? String(d).slice(0, 10) : '—';
+const pct = n => Math.round((Number(n) || 0) * 100) + '%';
+
+/* ══════ (1) الملف الشخصي والمهني ══════ */
+function docTabProfile() {
+  const d = DOC_CHART, ro = docCanEdit();
+  const u = d.user;
+  const fld = (l, id, v, type = 'text') => ro ? `
+    <div class="field"><label>${tr(l)}</label>
+      <input id="dp-${id}" type="${type}" value="${esc(v == null ? '' : v)}"></div>` : `
+    <div class="field"><label>${tr(l)}</label><b>${esc(v == null ? '—' : v)}</b></div>`;
+  const rankOpts = ['استشاري', 'أخصائي', 'طبيب مقيم'];
+  const rank = ro ? `<select id="dp-rank">${rankOpts.map(r =>
+      `<option ${d.academic_rank === r ? 'selected' : ''}>${r}</option>`).join('')}</select>`
+    : `<b>${esc(d.academic_rank || '—')}</b>`;
+
+  return `
+    <div class="form-grid">
+      <div class="field"><label>الاسم الكامل</label><b>${esc(d.full_name)}</b></div>
+      <div class="field"><label>التخصص</label><b>${esc(d.specialty)}</b></div>
+      ${fld('التخصص الدقيق', 'sub', d.sub_specialty)}
+      <div class="field"><label>الدرجة العلمية</label>${rank}</div>
+      <div class="field"><label>رقم الترخيص</label><b>${esc(d.license_number)}</b></div>
+      ${fld('الفرع / العيادة', 'branch', d.branch)}
+      <div class="field"><label>القسم</label><b>${esc(d.department ? d.department.name : '—')}</b></div>
+      ${fld('الهاتف', 'phone', d.phone)}
+      ${fld('البريد الإلكتروني', 'email', d.email, 'email')}
+      ${fld('العنوان', 'address', d.address)}
+      <div class="field"><label>حساب المستخدم</label><b>${u
+        ? esc(u.full_name) + ' · ' + esc(u.username) + (u.is_active ? ' ✅' : ' ⛔')
+        : '— غير مرتبط'}</b></div>
+    </div>
+
+    <h3>أوقات الكشف</h3>
+    <div class="form-grid">
+      ${fld('مدة الزيرة (دقائق)', 'mins', d.consultation_minutes, 'number')}
+      ${fld('سعر الكشفية (ر.س)', 'fee', d.consultation_fee, 'number')}
+      ${fld('سعر الإعادة (ر.س)', 'followup', d.followup_fee, 'number')}
+    </div>
+    ${ro ? `<button class="btn success" onclick="saveDoctorProfile()">💾 حفظ الملف المهني</button>` : ''}`;
+}
+
+async function saveDoctorProfile() {
+  const p = o => (document.getElementById('dp-' + o) || {}).value;
+  try {
+    DOC_CHART = await api(`/doctors/${DOC_CHART_ID}/profile`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        sub_specialty: p('sub') || null, branch: p('branch') || null,
+        academic_rank: p('rank') || null,
+        phone: p('phone') || null, email: p('email') || null,
+        address: p('address') || null,
+        consultation_minutes: Number(p('mins')) || 15,
+        consultation_fee: Number(p('fee')) || 0,
+        followup_fee: Number(p('followup')) || 0,
+      })});
+    toast('حُفظ الملف المهني ✅');
+    renderDoctorChart(); paintDocTab();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ══════ (2) المواعيد وجدول العمل ══════ */
+function docTabRoster() {
+  const d = DOC_CHART, ro = docCanEdit();
+  const byDay = {};
+  d.schedules.forEach(s => { (byDay[s.day_of_week] = byDay[s.day_of_week] || []).push(s); });
+  const week = DAYS_AR.map((name, day) => {
+    const list = (byDay[day] || []).filter(s => s.is_active !== false);
+    return `<tr><td><b>${name}</b></td><td>${list.length
+      ? list.map(s => `${hm(s.start_time)} – ${hm(s.end_time)}` +
+          (s.location ? ` <small>(${esc(s.location)})</small>` : '')).join('<br>')
+      : '<span style="color:#94a3b8">راحة</span>'}</td>
+      ${ro ? `<td><button class="btn sm ghost" onclick="editWeek(${day})">✏️</button></td>` : '<td>—</td>'}</tr>`;
+  });
+
+  const shiftRows = d.shifts.map(s => [
+    dstr(s.shift_date), esc(SHIFT_LABEL[s.shift_type] || s.shift_type),
+    `${hm(s.start_time)} – ${hm(s.end_time)}`, esc(s.location || '—'),
+    esc(s.notes || '—'),
+    ro ? `<button class="btn sm danger" onclick="delDocRow('shifts',${s.id})">🗑️</button>` : '',
+  ]);
+
+  const leaveRows = d.leaves.map(l => [
+    dstr(l.start_date), dstr(l.end_date), esc(l.reason || '—'),
+    l.is_approved ? '✅ معتمدة' : '⏳ بانتظار',
+    ro ? `<button class="btn sm danger" onclick="delDocRow('leaves',${l.id})">🗑️</button>` : '',
+  ]);
+
+  const blockRows = d.blocks.map(b => [
+    dstr(b.block_date),
+    b.start_time ? `${hm(b.start_time)} – ${hm(b.end_time)}` : 'اليوم كامل',
+    esc(b.reason || '—'),
+    ro ? `<button class="btn sm danger" onclick="delDocRow('blocks',${b.id})">🗑️</button>` : '',
+  ]);
+
+  return `
+    <h3>🕐 أوقات الدوام الأسبوعية</h3>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>اليوم</th><th>النوب</th><th></th></tr></thead>
+      <tbody>${week.join('')}</tbody></table></div>
+    ${ro ? `<button class="btn sm" onclick="editWeek(-1)">✏️ تعديل الأسبوع كاملًا</button>` : ''}
+
+    <h3>🚨 المناوبات (طوارئ / تنويم / أونكول)</h3>
+    ${docTable('', ['التاريخ', 'النوع', 'الوقت', 'المكان', 'ملاحظات', ''], shiftRows, 'لا مناوبات مسجّلة')}
+    ${ro ? `
+      <div class="form-grid" style="margin-top:10px">
+        <div class="field"><label>النوع</label><select id="ds-type">
+          <option value="emergency">🛑 طوارئ</option>
+          <option value="inpatient">🏥 تنويم</option>
+          <option value="oncall">📟 أونكول</option></select></div>
+        <div class="field"><label>التاريخ</label><input id="ds-date" type="date"></div>
+        <div class="field"><label>من</label><input id="ds-start" type="time" value="20:00"></div>
+        <div class="field"><label>إلى</label><input id="ds-end" type="time" value="08:00"></div>
+        <div class="field"><label>المكان</label><input id="ds-loc" placeholder="الطوارئ"></div>
+      </div>
+      <button class="btn success sm" onclick="addDocShift()">➕ إضافة مناوبة</button>` : ''}
+
+    <h3>🌴 الإجازات</h3>
+    ${docTable('', ['من', 'إلى', 'السبب', 'الحالة', ''], leaveRows, 'لا إجازات')}
+    ${ro ? `<div class="form-grid" style="margin-top:10px">
+        <div class="field"><label>من</label><input id="dl-start" type="date"></div>
+        <div class="field"><label>إلى</label><input id="dl-end" type="date"></div>
+        <div class="field"><label>السبب</label><input id="dl-reason"></div>
+      </div>
+      <button class="btn success sm" onclick="addDocLeave()">➕ تسجيل إجازة</button>` : ''}
+
+    <h3>🚫 أيام حظر الحجز</h3>
+    ${docTable('', ['التاريخ', 'الوقت', 'السبب', ''], blockRows, 'لا أيام محظورة')}
+    ${ro ? `<div class="form-grid" style="margin-top:10px">
+        <div class="field"><label>التاريخ</label><input id="db-date" type="date"></div>
+        <div class="field"><label>من (اختياري)</label><input id="db-start" type="time"></div>
+        <div class="field"><label>إلى (اختياري)</label><input id="db-end" type="time"></div>
+        <div class="field"><label>السبب</label><input id="db-reason"></div>
+      </div>
+      <button class="btn success sm" onclick="addDocBlock()">🚫 حظر الحجز</button>` : ''}`;
+}
+
+const docDt = id => (document.getElementById(id) || {}).value || '';
+const docTm = id => (document.getElementById(id) || {}).value || null;
+
+async function docPost(path, body) {
+  try {
+    DOC_CHART = await api(`/doctors/${DOC_CHART_ID}/${path}`, {
+      method: 'POST', body: JSON.stringify(body) });
+    toast('تم الحفظ ✅');
+    renderDoctorChart(); paintDocTab();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function addDocShift() {
+  if (!docDt('ds-date')) return toast('اختر تاريخ المناوبة', true);
+  await docPost('shifts', {
+    shift_type: docDt('ds-type'), shift_date: docDt('ds-date'),
+    start_time: docTm('ds-start'), end_time: docTm('ds-end'),
+    location: docDt('ds-loc') || null });
+}
+
+async function addDocLeave() {
+  if (!docDt('dl-start') || !docDt('dl-end')) return toast('حدّد تاريخي الإجازة', true);
+  await docPost('leaves', {
+    start_date: docDt('dl-start'), end_date: docDt('dl-end'),
+    reason: docDt('dl-reason') || null });
+}
+
+async function addDocBlock() {
+  if (!docDt('db-date')) return toast('اختر تاريخ الحظر', true);
+  await docPost('blocks', {
+    block_date: docDt('db-date'),
+    start_time: docTm('db-start'), end_time: docTm('db-end'),
+    reason: docDt('db-reason') || null });
+}
+
+async function delDocRow(kind, id) {
+  if (!confirm('حذف هذا السجل؟')) return;
+  try {
+    DOC_CHART = await api(`/doctors/${DOC_CHART_ID}/${kind}/${id}`, { method: 'DELETE' });
+    toast('حُذف ✅'); renderDoctorChart(); paintDocTab();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* فتح محرّر الأسبوع (day = -1 يعني فتح النافذة الحالية بلا إغلاق) */
+async function editWeek(day) {
+  if (day < 0) { doctorSchedule(DOC_CHART_ID); return; }
+  return doctorSchedule(DOC_CHART_ID);
+}
+
+/* ══════ (3) الصلاحيات والتوقيع والختم ══════ */
+const PERM_FIELDS = [
+  ['own_patients_only', '👥 رؤية ملفات مرضاه فقط'],
+  ['view_emergency', '🚨 الاطلاع على مراد الطوارئ'],
+  ['order_lab', '🧪 طلب فحوصات مخبرية'],
+  ['order_radiology', '🩻 طلب أشعة'],
+  ['prescribe', '💊 وصف وصرف أدوية'],
+  ['view_invoices', '🧾 الاطلاع على فواتير مرضاه'],
+  ['view_doctor_financials', '💰 رؤية كشف حسابه المالي'],
+];
+
+function docTabAccess() {
+  const d = DOC_CHART, ro = docCanEdit(), p = d.permissions || {};
+  const boxes = PERM_FIELDS.map(([k, l]) => `
+    <label class="chk" style="display:flex;gap:6px;align-items:center;margin:4px 0">
+      <input type="checkbox" id="pm-${k}" ${p[k] ? 'checked' : ''} ${ro ? '' : 'disabled'}> ${l}</label>`).join('');
+
+  const stamp = (kind, label, path) => `
+    <div class="field"><label>${label}</label>
+      ${path ? `<img src="/doctors/${d.id}/${kind}/image" alt="${label}"
+             style="max-height:90px;border:1px solid #cbd5e1;border-radius:6px;background:#fff">`
+        : '<span style="color:#94a3b8">لم يُرفع بعد</span>'}
+      ${ro ? `<div style="margin-top:6px">
+        <input type="file" id="up-${kind}" accept="image/*" style="display:none">
+        <button class="btn sm" onclick="document.getElementById('up-${kind}').click()">
+          ${path ? '🔄 استبدال' : '⬆️ رفع'}</button>
+        ${path ? `<button class="btn sm danger" onclick="delDocStamp('${kind}')">🗑️ حذف</button>` : ''}
+      </div>` : ''}
+    </div>`;
+
+  return `
+    <h3>🔑 صلاحيات النظام</h3>
+    ${ro ? '<p style="margin:0 0 8px;color:#64748b">تُحفظ مع ملف الطبيب وتتحكم في ما يراه في النظام.</p>' : ''}
+    <div>${boxes}</div>
+    ${ro ? `<button class="btn success" onclick="saveDocPerms()">💾 حفظ الصلاحيات</button>` : ''}
+
+    <h3>✍️ التوقيع الإلكتروني والختم الطبي</h3>
+    <p style="margin:0 0 8px;color:#64748b">يظهران تلقائيًا على الوصفات والتقارير الطبية (صور حتى 2 ميجابايت).</p>
+    <div class="form-grid">
+      ${stamp('signature', 'التوقيع الإلكتروني', d.signature_path)}
+      ${stamp('stamp', 'الختم الطبي', d.stamp_path)}
+    </div>`;
+}
+
+async function saveDocPerms() {
+  const perms = {};
+  PERM_FIELDS.forEach(([k]) => {
+    perms[k] = !!document.getElementById('pm-' + k)?.checked;
+  });
+  try {
+    DOC_CHART = await api(`/doctors/${DOC_CHART_ID}/profile`, {
+      method: 'PUT', body: JSON.stringify({ permissions: perms }) });
+    toast('حُفظت الصلاحيات ✅'); renderDoctorChart(); paintDocTab();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function uploadDocStamp(kind) {
+  const f = document.getElementById('up-' + kind).files[0];
+  if (!f) return;
+  const fd = new FormData(); fd.append('file', f);
+  try {
+    const res = await fetch(`${API}/doctors/${DOC_CHART_ID}/${kind}`, {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + TOKEN }, body: fd });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || 'فشل الرفع'); }
+    toast('تم الرفع ✅');
+    DOC_CHART = await api(`/doctors/${DOC_CHART_ID}/chart?month=${DOC_MONTH()}`);
+    renderDoctorChart(); paintDocTab();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function delDocStamp(kind) {
+  if (!confirm('حذف الصورة؟')) return;
+  try {
+    await api(`/doctors/${DOC_CHART_ID}/${kind}`, { method: 'DELETE' });
+    toast('حُذفت ✅');
+    DOC_CHART = await api(`/doctors/${DOC_CHART_ID}/chart?month=${DOC_MONTH()}`);
+    renderDoctorChart(); paintDocTab();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* رفع التوقيع/الختم عند اختيار الملف (input تحت زر الرفع) */
+document.addEventListener('change', e => {
+  const id = e.target && e.target.id;
+  if (!id || !id.startsWith('up-')) return;
+  const kind = id.slice(3);
+  if (kind === 'signature' || kind === 'stamp') uploadDocStamp(kind);
+});
+
+/* ══════ (4) الحسابات والعمولات ══════ */
+const SVC_OPTS = [['consultation', 'كشفية'], ['procedure', 'إجراءات'],
+                   ['followup', 'إعادة'], ['surgery', 'عمليات جراحية']];
+
+function docTabFinance() {
+  const d = DOC_CHART, admin = isAdmin();
+  const L = d.ledger || {};
+  const canSee = admin || (d.permissions && d.permissions.view_doctor_financials);
+  if (!canSee) {
+    return `<div class="empty">🔒 لا تملك صلاحية الاطلاع على كشف الحساب — فعّلها من تبويب
+      «الصلاحيات والتوقيع» أو اطلبها من المدير.</div>`;
+  }
+
+  const existing = {};
+  d.commissions.forEach(c => { existing[c.service_type] = c; });
+  const commRows = d.commissions.map(c => [
+    esc(SVC_OPTS.find(s => s[0] === c.service_type)?.[1] || c.service_type),
+    esc(BILING_LABEL[c.billing_type] || c.billing_type),
+    c.billing_type === 'percent' ? c.rate + '%' : money(c.rate),
+    c.is_active ? '✅' : '⏸️',
+  ]);
+
+  const editor = admin ? `
+    <h3>⚙️ بنود العمولة</h3>
+    <p style="margin:0 0 8px;color:#64748b">النسبة تُطبَّق على إيراد الفترة، والقيمة الثابتة على كل فاتورة.</p>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>الخدمة</th><th>النوع</th><th>القيمة</th><th>مفعّل</th></tr></thead>
+      <tbody>${SVC_OPTS.map(([v, l]) => {
+        const c = existing[v] || {};
+        return `<tr><td>${l}</td>
+          <td><select id="cm-t-${v}">
+            <option value="percent" ${c.billing_type !== 'fixed' ? 'selected' : ''}>نسبة %</option>
+            <option value="fixed" ${c.billing_type === 'fixed' ? 'selected' : ''}>قيمة ثابتة</option></select></td>
+          <td><input id="cm-r-${v}" type="number" step="0.01" min="0"
+               value="${c.rate == null ? '' : c.rate}" style="width:100px"></td>
+          <td><input type="checkbox" id="cm-a-${v}" ${c.is_active !== false ? 'checked' : ''}></td>
+        </tr>`; }).join('')}</tbody></table></div>
+    <button class="btn success sm" onclick="saveDocCommissions()">💾 حفظ العمولات</button>` : '';
+
+  const payoutRows = d.payouts.map(p => [
+    dstr(p.paid_at), esc(PAYOUT_LABEL[p.method] || p.method), money(p.amount),
+    esc(p.period), esc(p.reference || '—'), esc(p.note || '—'),
+    admin ? `<button class="btn sm danger" onclick="delDocPayout(${p.id})">🗑️</button>` : '',
+  ]);
+
+  return `
+    <div class="stats">
+      <div class="stat"><div class="num">${money(L.revenue)}</div><div class="lbl">إجمالي الإيراد</div></div>
+      <div class="stat green"><div class="num">${money(L.earned)}</div><div class="lbl">المستحق</div></div>
+      <div class="stat"><div class="num">${money(L.paid)}</div><div class="lbl">المحوَّل</div></div>
+      <div class="stat ${(L.balance || 0) > 0 ? 'amber' : ''}"><div class="num">${money(L.balance)}</div>
+        <div class="lbl">المتبقي</div></div>
+    </div>
+    <p style="margin:6px 0 0;color:#64748b">الشهر ${esc(L.period || DOC_MONTH())} · عدد الفواتير ${L.invoices_count || 0}</p>
+
+    <h3>📊 تفصيل العمولة</h3>
+    ${docTable('', ['الخدمة', 'النوع', 'المعدل', 'المستحق من البند'],
+      (L.by_commission || []).map(c => [esc(c.label),
+        esc(BILING_LABEL[c.billing_type] || c.billing_type),
+        c.billing_type === 'percent' ? c.rate + '%' : money(c.rate) + ' / فاتورة',
+        money(c.amount)]),
+      'لا بنود عمولة — فعّل عمولة لعرض المستحق')}
+
+    ${editor}
+    ${commRows.length ? docTable('📋 العمولات المسجّلة', ['الخدمة', 'النوع', 'القيمة', 'مفعّلة'], commRows, '') : ''}
+
+    <h3>💸 التحويلات</h3>
+    ${docTable('', ['التاريخ', 'الطريقة', 'المبلغ', 'الفترة', 'المرجع', 'ملاحظة', ''],
+      payoutRows, 'لا تحويلات')}
+    ${admin ? `<div class="form-grid" style="margin-top:10px">
+        <div class="field"><label>المبلغ (ر.س)</label><input id="po-amt" type="number" step="0.01" min="0"></div>
+        <div class="field"><label>الفترة</label><input id="po-period" type="month" value="${DOC_MONTH()}"></div>
+        <div class="field"><label>الطريقة</label><select id="po-method">
+          <option value="bank">تحويل بنكي</option>
+          <option value="cash">نقدًا</option>
+          <option value="transfer">حوالة</option></select></div>
+        <div class="field"><label>المرجع</label><input id="po-ref"></div>
+        <div class="field"><label>ملاحظة</label><input id="po-note"></div>
+        <div class="field"><label>تاريخ التحويل</label><input id="po-date" type="date"
+          value="${new Date().toISOString().slice(0, 10)}"></div>
+      </div>
+      <button class="btn success sm" onclick="addDocPayout()">💰 تسجيل تحويل</button>` : ''}`;
+}
+
+async function saveDocCommissions() {
+  const items = [];
+  SVC_OPTS.forEach(([v]) => {
+    const rate = document.getElementById('cm-r-' + v).value;
+    if (rate === '' || rate == null) return;   // بلا قيمة = يُحذف البند
+    items.push({
+      service_type: v,
+      billing_type: document.getElementById('cm-t-' + v).value,
+      rate: Number(rate),
+      is_active: !!document.getElementById('cm-a-' + v).checked });
+  });
+  try {
+    await api(`/doctors/${DOC_CHART_ID}/commissions`, {
+      method: 'PUT', body: JSON.stringify(items) });
+    toast('حُفظت العمولات ✅');
+    await reloadDoctorChart();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function addDocPayout() {
+  const amt = Number(document.getElementById('po-amt').value);
+  if (!amt) return toast('أدخل مبلغ التحويل', true);
+  try {
+    await api(`/doctors/${DOC_CHART_ID}/payouts`, {
+      method: 'POST',
+      body: JSON.stringify({
+        amount: amt, period: document.getElementById('po-period').value,
+        method: document.getElementById('po-method').value,
+        reference: document.getElementById('po-ref').value || null,
+        note: document.getElementById('po-note').value || null,
+        paid_at: document.getElementById('po-date').value + 'T12:00:00' }) });
+    toast('سُجّل التحويل ✅');
+    await reloadDoctorChart();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function delDocPayout(id) {
+  if (!confirm('حذف هذا التحويل؟')) return;
+  try {
+    await api(`/doctors/${DOC_CHART_ID}/payouts/${id}`, { method: 'DELETE' });
+    toast('حُذف ✅'); await reloadDoctorChart();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ══════ (5) تقارير الأداء والإحصائيات ══════ */
+function docTabAnalytics() {
+  const d = DOC_CHART, v = d.visits || {}, o = d.orders || {};
+  const topMeds = o.top_medications || [], topLabs = o.top_lab_tests || [];
+  const maxM = Math.max(1, ...topMeds.map(m => m.quantity));
+  const maxL = Math.max(1, ...topLabs.map(t => t.count));
+  const bar = pctv =>
+    `<div style="background:#2563eb;height:8px;border-radius:4px;width:${pctv}%"></div>`;
+
+  return `
+    <div class="stats">
+      <div class="stat green"><div class="num">${v.new_patients || 0}</div><div class="lbl">مرضى جدد</div></div>
+      <div class="stat"><div class="num">${v.returning_patients || 0}</div><div class="lbl">مرضى عائدون</div></div>
+      <div class="stat amber"><div class="num">${v.emergency_visits || 0}</div><div class="lbl">زيارات طوارئ</div></div>
+      <div class="stat"><div class="num">${v.cancelled || 0}</div><div class="lbl">نسبة الإلغاء ${pct(v.cancel_rate)}</div></div>
+      <div class="stat"><div class="num">${v.avg_wait_minutes || 0}</div><div class="lbl">متوسط الانتظار (دقيقة)</div></div>
+    </div>
+    <p style="margin:6px 0 0;color:#64748b">إحصاءات الشهر ${esc(DOC_MONTH())}</p>
+
+    <div class="form-grid" style="margin-top:14px">
+      <div class="stat"><div class="num">${o.prescriptions_count || 0}</div><div class="lbl">وصفات</div></div>
+      <div class="stat"><div class="num">${o.lab_orders_count || 0}</div><div class="lbl">طلبات فحص</div></div>
+    </div>
+
+    <h3>💊 أكثر الأدوية طلبًا</h3>
+    ${topMeds.length ? topMeds.map(m => `
+      <div style="margin:6px 0">
+        <div style="display:flex;justify-content:space-between;font-size:13px">
+          <span>${esc(m.name)}</span><b>${m.quantity}</b></div>
+        ${bar(Math.round(m.quantity / maxM * 100))}
+      </div>`).join('') : '<div class="empty">لا وصفات في هذه الفترة</div>'}
+
+    <h3>🧪 أكثر الفحوصات طلبًا</h3>
+    ${topLabs.length ? topLabs.map(t => `
+      <div style="margin:6px 0">
+        <div style="display:flex;justify-content:space-between;font-size:13px">
+          <span>${esc(t.name)}</span><b>${t.count}</b></div>
+        ${bar(Math.round(t.count / maxL * 100))}
+      </div>`).join('') : '<div class="empty">لا طلبات فحص في هذه الفترة</div>'}`;
+}
 
 async function openPatientChart(id) {
   CHART_ID = id;
@@ -3141,6 +3713,14 @@ async function deleteStaffDoc(id) {
         <div class="field"><label>العنوان</label><input id="f-addr"></div>
         <div class="field"><label>القسم</label><select id="f-dept"><option value="">—</option>
           ${depts.map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join('')}</select></div>
+        <div class="field"><label>الدرجة العلمية</label><select id="f-rank">
+          <option value="">—</option><option>استشاري</option><option>أخصائي</option>
+          <option>طبيب مقيم</option></select></div>
+        <div class="field"><label>التخصص الدقيق</label><input id="f-sub"></div>
+        <div class="field"><label>الفرع / العيادة</label><input id="f-branch"></div>
+        <div class="field"><label>مدة الزيرة (دقيقة)</label><input id="f-mins" type="number" min="5" max="180" value="15"></div>
+        <div class="field"><label>سعر الكشفية</label><input id="f-fee" type="number" min="0" step="0.01" value="0"></div>
+        <div class="field"><label>سعر الإعادة</label><input id="f-followup" type="number" min="0" step="0.01" value="0"></div>
       </div>
       <button class="btn success" style="margin-top:12px" onclick="addDoctor()">حفظ الطبيب</button>
       </details>` : '';
@@ -3168,20 +3748,23 @@ async function deleteStaffDoc(id) {
         </div>
         ${form}
         <div style="overflow-x:auto"><table id="tbl">
-          <thead><tr><th>#</th><th>الاسم</th><th>التخصص</th><th>الترخيص</th><th>الهاتف</th><th>القسم</th><th>متاح</th><th></th></tr></thead>
+          <thead><tr><th>#</th><th>الاسم</th><th>التخصص</th><th>الدرجة</th><th>الترخيص</th><th>الهاتف</th><th>القسم</th><th>سعر الكشف</th><th>متاح</th><th></th></tr></thead>
           <tbody>${rows.map(d => `<tr data-dept="${d.department_id == null ? 'none' : d.department_id}" data-avail="${d.is_available ? '1' : '0'}">
             <td>${d.id}</td><td><strong>${esc(d.full_name)}</strong></td><td>${esc(d.specialty)}</td>
+            <td>${esc(d.academic_rank || '—')}</td>
             <td>${esc(d.license_number)}</td><td>${esc(d.phone)}</td>
             <td>${esc(d.department ? d.department.name : '-')}</td>
+            <td>${d.consultation_fee ? d.consultation_fee.toLocaleString() + ' ر.س' : '—'}</td>
             <td>${d.is_available ? '✅' : '⛔'}</td>
             <td>
+              <button class="btn sm ghost" onclick="openDoctorChart(${d.id})" title="ملف الطبيب الكامل">🗂️ الملف</button>
               ${isAdmin() ? `<button class="btn sm ghost" onclick="editDoctor(${d.id})">✏️ تعديل</button>` : ''}
               <button class="btn sm ghost" onclick="doctorReport(${d.id})">📈 تقرير</button>
               ${canToggle(d) ? `<button class="btn sm ghost" onclick="doctorSchedule(${d.id})" title="نوبات العمل">🗓️</button>` : ''}
               ${canToggle(d) ? `<button class="btn sm ghost" onclick="toggleDoctorAvail(${d.id},${d.is_available})">${d.is_available ? '⛔ تعطيل' : '✅ تمكين'}</button>` : ''}
               ${isAdmin() ? `<button class="btn sm danger" onclick="del('doctors',${d.id},'doctors')">حذف</button>` : ''}
             </td>
-          </tr>`).join('') || '<tr><td colspan="8" class="empty">لا يوجد أطباء</td></tr>'}</tbody>
+          </tr>`).join('') || '<tr><td colspan="10" class="empty">لا يوجد أطباء</td></tr>'}</tbody>
         </table></div>
       </div>`;
   },
@@ -3730,7 +4313,12 @@ function addDoctor() {
   post('/doctors/', {
     full_name: V('f-name'), specialty: V('f-spec'), license_number: V('f-lic'),
     phone: V('f-phone'), email: V('f-email'), address: V('f-addr') || null,
-    department_id: V('f-dept') ? Number(V('f-dept')) : null
+    department_id: V('f-dept') ? Number(V('f-dept')) : null,
+    academic_rank: V('f-rank') || null, sub_specialty: V('f-sub') || null,
+    branch: V('f-branch') || null,
+    consultation_minutes: Number(V('f-mins')) || 15,
+    consultation_fee: Number(V('f-fee')) || 0,
+    followup_fee: Number(V('f-followup')) || 0
   }, 'doctors');
 }
 
@@ -3763,6 +4351,13 @@ function editDoctor(id) {
       <div class="field"><label>العنوان</label><input id="e-addr" value="${esc(d.address || '')}"></div>
       <div class="field"><label>القسم</label><select id="e-dept"><option value="">—</option>
         ${(DOCTORS_DEPTS || []).map(x => `<option value="${x.id}" ${d.department_id === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>
+      <div class="field"><label>الدرجة العلمية</label><select id="e-rank"><option value="">—</option>
+        ${['استشاري', 'أخصائي', 'طبيب مقيم'].map(r => `<option ${d.academic_rank === r ? 'selected' : ''}>${r}</option>`).join('')}</select></div>
+      <div class="field"><label>التخصص الدقيق</label><input id="e-sub" value="${esc(d.sub_specialty || '')}"></div>
+      <div class="field"><label>الفرع / العيادة</label><input id="e-branch" value="${esc(d.branch || '')}"></div>
+      <div class="field"><label>مدة الزيرة (دقيقة)</label><input id="e-mins" type="number" min="5" max="180" value="${d.consultation_minutes || 15}"></div>
+      <div class="field"><label>سعر الكشفية</label><input id="e-fee" type="number" min="0" step="0.01" value="${d.consultation_fee || 0}"></div>
+      <div class="field"><label>سعر الإعادة</label><input id="e-followup" type="number" min="0" step="0.01" value="${d.followup_fee || 0}"></div>
     </div>
     <button class="btn success" style="margin-top:12px" onclick="saveDoctor(${id})">حفظ التعديلات</button>`);
 }
@@ -3776,7 +4371,12 @@ async function saveDoctor(id) {
       body: JSON.stringify({
         full_name: V('e-name'), specialty: V('e-spec'), license_number: V('e-lic'),
         phone: V('e-phone'), email: V('e-email'), address: V('e-addr') || null,
-        department_id: V('e-dept') ? Number(V('e-dept')) : null
+        department_id: V('e-dept') ? Number(V('e-dept')) : null,
+        academic_rank: V('e-rank') || null, sub_specialty: V('e-sub') || null,
+        branch: V('e-branch') || null,
+        consultation_minutes: Number(V('e-mins')) || 15,
+        consultation_fee: Number(V('e-fee')) || 0,
+        followup_fee: Number(V('e-followup')) || 0
       })
     });
     toast('تم حفظ التعديلات ✅');
