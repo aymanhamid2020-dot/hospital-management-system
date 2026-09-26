@@ -2279,9 +2279,16 @@ async function renderOps(main, group) {
   const cards = defs.map(([p,t,i,k]) => `<button class="stat" style="cursor:pointer;border:2px solid ${OP_PATH===p?'#2c7be5':'transparent'}" onclick="selectOps('${p}')"><div class="num">${k ? Number(ov[k] || 0) : '∞'}</div><div class="lbl">${i} ${t}</div></button>`).join('');
   const [path,title,icon] = defs.find(x => x[0] === OP_PATH) || defs[0]; OP_PATH = path;
   if (path === 'care-plans') { await renderCarePlans(main, cards); return; }
-  const rows = await api(opUrl(path));
-  const canAdd = (isAdmin() || isDoctor()) && path !== 'patient-portal-accounts' && !(isDoctor() && ['budgets','assets'].includes(path));
-  main.innerHTML = `<div class="stats">${cards}</div><div class="card"><div class="toolbar"><h3 style="margin:0">${icon} ${title}</h3>${canAdd?'<button class="btn success" onclick="opForm()">➕ إضافة</button>':''}<input oninput="filterTable('ops-table',this.value)" placeholder="🔍 بحث…"></div><div style="overflow-x:auto"><table id="ops-table"><thead><tr><th>#</th><th>التفاصيل</th><th>الحالة</th><th>التاريخ</th><th>الإجراء</th></tr></thead><tbody>${rows.map(r => `<tr><td>${r.id}</td><td>${esc(opLabel(r))}</td><td>${pill(r.status || 'نشط')}</td><td>${fmtDate(r.created_at || r.started_at || r.purchase_date || r.admission_date)}</td><td><div class="actions">${canAdd?(OP_STATUS[path] || []).map(s => `<button class="btn sm ghost" onclick="opStatus('${path}',${r.id},'${s}')">${s}</button>`).join(''):'—'}</div></td></tr>`).join('') || `<tr><td colspan="5" class="empty">لا توجد سجلات</td></tr>`}</tbody></table></div></div>`;
+  // حسابات البوابة: نقطة مخصّصة تُعيد اسم المريض وآخر دخول (لا تعيدهما /clinical)
+  const rows = path === 'patient-portal-accounts'
+    ? await api('/patient-portal/accounts')
+    : await api(opUrl(path));
+  const canAdd = path === 'patient-portal-accounts'
+    ? isAdmin()
+    : (isAdmin() || isDoctor()) && !(isDoctor() && ['budgets', 'assets'].includes(path));
+  main.innerHTML = `<div class="stats">${cards}</div><div class="card"><div class="toolbar"><h3 style="margin:0">${icon} ${title}</h3>${canAdd?'<button class="btn success" onclick="opForm()">➕ إضافة</button>':''}<input oninput="filterTable('ops-table',this.value)" placeholder="🔍 بحث…"></div><div style="overflow-x:auto"><table id="ops-table"><thead><tr><th>#</th><th>التفاصيل</th><th>الحالة</th><th>التاريخ</th><th>الإجراء</th></tr></thead><tbody>${rows.map(r => `<tr><td>${r.id}</td><td>${path === 'patient-portal-accounts' ? opLabelPortal(r) : esc(opLabel(r))}</td><td>${path === 'patient-portal-accounts' ? pill(r.is_active ? 'نشط' : 'معطّل') : pill(r.status || 'نشط')}</td><td>${fmtDate(r.created_at || r.started_at || r.purchase_date || r.admission_date)}</td><td><div class="actions">${canAdd?(OP_STATUS[path] || []).map(s => `<button class="btn sm ghost" onclick="opStatus('${path}',${r.id},'${s}')">${s}</button>`).join(''):'—'}${
+  path === 'patient-portal-accounts' && isAdmin() ? `<button class="btn sm ghost" onclick="resetPortalPassword(${r.id},'${esc(r.username)}')" title="إعادة تعيين كلمة المرور">🔑 كلمة المرور</button>
+  <button class="btn sm ${r.is_active ? 'ghost' : 'success'}" onclick="togglePortalAccount(${r.id},${r.is_active})" title="${r.is_active ? 'تعطيل الدخول' : 'تنشيط الدخول'}">${r.is_active ? '⛔ تعطيل' : '✅ تنشيط'}</button>` : ''}</div></td></tr>`).join('') || `<tr><td colspan="5" class="empty">لا توجد سجلات</td></tr>`}</tbody></table></div></div>`;
 async function renderCarePlans(main, cards) {
   const plans = await api('/clinical/care-plans?limit=200');
   const canManage = isAdmin() || isDoctor();
@@ -2357,6 +2364,7 @@ function opLabel(r) { return esc(r.title || r.procedure_name || r.issue || r.loa
 function selectOps(path) { OP_PATH = path; navigate(CURRENT_VIEW); }
 async function opStatus(path,id,status) { try { await api(opUrl(path,id),{method:'POST',body:JSON.stringify({status})}); toast('تم تحديث الحالة ✅'); await navigate(CURRENT_VIEW); } catch(e) { toast(e.message,true); } }
 function opForm() {
+  if (OP_PATH === 'patient-portal-accounts') return portalAccountForm();
   const defs = OP_FIELDS[OP_PATH] || [];
   const fields = defs.map(([n,l,t,opts]) => `<div class="field"><label>${l}</label>${t==='select'?`<select id="op-${n}">${opts.map(o=>`<option>${o}</option>`).join('')}</select>`:`<input id="op-${n}" type="${t||'text'}" ${t==='number'?'step="any"':''}>`}</div>`).join('');
   openModal('➕ إضافة سجل', `<div class="form-grid">${fields}</div><div class="row2" style="margin-top:12px"><button class="btn success" onclick="submitOp()">حفظ</button><button class="btn ghost" onclick="closeModal()">إلغاء</button></div>`);
@@ -2364,6 +2372,72 @@ function opForm() {
 async function submitOp() {
   const data = {}; (OP_FIELDS[OP_PATH] || []).forEach(([n,,t]) => { const v=V('op-'+n); if(v!=='' && v!=null) data[n]=t==='number'?Number(v):v; });
   try { await api(opUrl(OP_PATH),{method:'POST',body:JSON.stringify(data)}); closeModal(); toast('تمت الإضافة ✅'); await navigate(CURRENT_VIEW); } catch(e) { toast(e.message,true); }
+}
+
+/* ===== حسابات بوابة المريض: إنشاء/إعادة تعيين/تعطيل (المدير) ===== */
+// الاسم وحده لا يكفي في الجدول — نعرض «المريض — اسم المستخدم» وتاريخ آخر دخول
+function opLabelPortal(r) {
+  return esc(`${r.patient_name || ('مريض #' + r.patient_id)} — ${r.username}`
+    + (r.last_login_at ? ` · آخر دخول ${fmtDate(r.last_login_at)}` : ' · لم يدخل بعد'));
+}
+
+async function portalAccountForm() {
+  const patients = await api('/patients/?limit=500');
+  const taken = new Set((await api('/patient-portal/accounts')).map(a => a.patient_id));
+  const free = patients.filter(p => !taken.has(p.id));
+  openModal('👤 إنشاء حساب بوابة مريض', `
+    <p style="margin:0 0 10px;color:#64748b">يتيح الحساب للمريض رؤية مواعيده وفواتيره
+       ووصفاته فقط. يُنشأ من هنا للمدير — لا تسجيل ذاتي في البوابة.</p>
+    <div class="form-grid">
+      <div class="field"><label>المريض *</label><select id="pa-patient">
+        ${free.map(p => `<option value="${p.id}">${esc(p.full_name)} — #${p.id}</option>`).join('')
+          || '<option value="">— كل المرضى لديك حساب بوابة —</option>'}
+      </select></div>
+      <div class="field"><label>اسم المستخدم *</label>
+        <input id="pa-user" placeholder="مثال: a.ahmed" autocomplete="off"></div>
+      <div class="field"><label>كلمة المرور * (8 أحرف فأكثر)</label>
+        <input id="pa-pass" type="text" placeholder="مثال: SahH@2026" autocomplete="off"></div>
+    </div>
+    <div class="row2" style="margin-top:12px">
+      <button class="btn success" onclick="createPortalAccount()">حفظ الحساب</button>
+      <button class="btn ghost" onclick="closeModal()">إلغاء</button>
+    </div>`);
+}
+
+async function createPortalAccount() {
+  const body = {
+    patient_id: Number(V('pa-patient')),
+    username: (V('pa-user') || '').trim(),
+    password: V('pa-pass') || '',
+  };
+  if (!body.patient_id) return toast('اختر مريضًا', true);
+  if (body.username.length < 3) return toast('اسم المستخدم 3 أحرف فأكثر', true);
+  if (body.password.length < 8) return toast('كلمة المرور 8 أحرف فأكثر', true);
+  try {
+    await api('/patient-portal/accounts', { method: 'POST', body: JSON.stringify(body) });
+    closeModal(); toast('أُنشئ حساب البوابة ✅');
+    await navigate(CURRENT_VIEW);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function resetPortalPassword(id, username) {
+  const pw = prompt(`كلمة المرور الجديدة لحساب «${username}» (8 أحرف فأكثر):`);
+  if (!pw) return;
+  if (pw.length < 8) return toast('كلمة المرور قصيرة — 8 أحرف فأكثر', true);
+  try {
+    await api(`/patient-portal/accounts/${id}/password`, {
+      method: 'PUT', body: JSON.stringify({ password: pw }) });
+    toast('أُعيد تعيين كلمة المرور ✅'); await navigate(CURRENT_VIEW);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function togglePortalAccount(id, active) {
+  if (!confirm(active ? 'تعطيل الحساب؟ لن يتمكن المريض من الدخول.' : 'تنشيط الحساب؟')) return;
+  try {
+    await api(`/patient-portal/accounts/${id}`, {
+      method: 'PATCH', body: JSON.stringify({ is_active: !active }) });
+    toast(active ? 'عُطّل الحساب ⛔' : 'نُشّط الحساب ✅'); await navigate(CURRENT_VIEW);
+  } catch (e) { toast(e.message, true); }
 }
 async function carePlanAction(action, planId, itemId) {
   try {
