@@ -1,21 +1,64 @@
-"""بوابة المريض: دخول وتوكن منفصل عن حسابات الموظفين، وعرض بيانات المريض نفسه فقط."""
+"""بوابة المريض: إدارة حسابات المريض (للمدير) + دخول وتوكن منفصل عن حسابات الموظفين.
+
+الحساب يربط سجل مريض واحدًا فقط، وكلمة المرور مُجزَّأة (hash) فلا تُقرأ من
+أي استعلام قائمة. إنشاء الحساب وإعادة تعيين كلمة المرور متاحان للمدير
+فقط، فلا يستطيع المريض التسجيل بنفسه ولا انتحال سجل غيره.
+"""
 from datetime import datetime, timedelta, timezone
+from typing import List
 
 import jwt
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.auth import bearer_scheme, decode_token, verify_password
+from app.auth import (bearer_scheme, decode_token, hash_password,
+                      require_admin, verify_password)
 from app.clinical_schemas import PatientAppointmentCreate, PatientPortalLogin
 from app.config import ALGORITHM, SECRET_KEY
 from app.database import get_db
 from app.models import (
     Admission, Appointment, Doctor, Invoice, LabOrder, Patient,
-    PatientPortalAccount, Prescription, ServiceRequest,
+    PatientPortalAccount, Prescription, ServiceRequest, User,
 )
 
 router = APIRouter(prefix="/patient-portal", tags=["بوابة المريض"])
+
+
+class PortalAccountCreate(BaseModel):
+    """إنشاء حساب بوابة لمريض موجود (المدير فقط)."""
+    patient_id: int = Field(..., gt=0, description="معرّف المريض من سجل المرضى")
+    username: str = Field(..., min_length=3, max_length=80)
+    password: str = Field(..., min_length=8, max_length=128,
+                          description="8 أحرف فأكثر")
+
+
+class PortalPasswordReset(BaseModel):
+    """إعادة تعيين كلمة مرور حساب بوابة (المدير فقط)."""
+    password: str = Field(..., min_length=8, max_length=128)
+
+
+class PortalAccountOut(BaseModel):
+    """عرض الحساب بلا كلمة المرور."""
+    id: int
+    patient_id: int
+    patient_name: str
+    username: str
+    is_active: bool
+    last_login_at: datetime = None
+    created_at: datetime
+
+
+def _out(account: PatientPortalAccount, db: Session) -> dict:
+    patient = db.query(Patient).filter(Patient.id == account.patient_id).first()
+    return {
+        "id": account.id, "patient_id": account.patient_id,
+        "patient_name": patient.full_name if patient else "—",
+        "username": account.username, "is_active": account.is_active,
+        "last_login_at": account.last_login_at,
+        "created_at": account.created_at,
+    }
 
 
 def _token(account: PatientPortalAccount) -> str:
