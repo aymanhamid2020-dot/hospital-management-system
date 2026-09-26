@@ -46,11 +46,16 @@ async def list_attachments(
 async def upload_attachment(
     patient_id: int = Form(..., description="معرّف المريض"),
     record_id: Optional[int] = Form(None, description="السجل الطبي المرتبط"),
+    dicom_study_uid: Optional[str] = Form(None, description="DICOM StudyInstanceUID"),
+    dicom_series_uid: Optional[str] = Form(None, description="DICOM SeriesInstanceUID"),
+    dicom_sop_uid: Optional[str] = Form(None, description="DICOM SOPInstanceUID"),
+    modality: Optional[str] = Form(None, description="نوع الجهاز (XRAY|CT|MRI|ULTRASOUND)"),
+    body_part: Optional[str] = Form(None, description="المنطقة التشريحية"),
     file: UploadFile = File(..., description="الملف (حد أقصى 10MB)"),
     db = Depends(get_db),
     _ = Depends(get_current_user),
 ):
-    """رفع ملف طبي (تحليل، أشعة، تقرير) مرتبط بمريض"""
+    """رفع ملف طبي (تحليل، أشعة، تقرير) مرتبط بمريض — يدعم بيانات DICOM للمرفقات الأشعة"""
     # التحقق من المريض
     if not db.query(Patient).filter(Patient.id == patient_id).first():
         raise HTTPException(status_code=404, detail="المريض غير موجود")
@@ -79,6 +84,25 @@ async def upload_attachment(
     with open(os.path.join(UPLOAD_DIR, stored), "wb") as f:
         f.write(content)
 
+    # استخراج بيانات DICOM أساسية من الملف إذا كان .dcm
+    dicom_study_uid = dicom_study_uid or None
+    dicom_series_uid = dicom_series_uid or None
+    dicom_sop_uid = dicom_sop_uid or None
+    modality_val = modality or None
+    body_part_val = body_part or None
+
+    if ext == ".dcm":
+        try:
+            import pydicom
+            ds = pydicom.dcmread(content, stop_before_pixels=True, force=True)
+            dicom_study_uid = dicom_study_uid or getattr(ds, "StudyInstanceUID", None)
+            dicom_series_uid = dicom_series_uid or getattr(ds, "SeriesInstanceUID", None)
+            dicom_sop_uid = dicom_sop_uid or getattr(ds, "SOPInstanceUID", None)
+            modality_val = modality_val or getattr(ds, "Modality", None)
+            body_part_val = body_part_val or getattr(ds, "BodyPartExamined", None)
+        except Exception:
+            pass  # تجاهل أخطاء قراءة DICOM — البيانات الاختيارية تُحفظ كما أرسلها المستخدم
+
     att = Attachment(
         patient_id=patient_id,
         record_id=record_id,
@@ -86,6 +110,11 @@ async def upload_attachment(
         stored_name=stored,
         content_type=file.content_type or "application/octet-stream",
         size_bytes=len(content),
+        dicom_study_uid=dicom_study_uid,
+        dicom_series_uid=dicom_series_uid,
+        dicom_sop_uid=dicom_sop_uid,
+        modality=modality_val,
+        body_part=body_part_val,
     )
     db.add(att)
     db.commit()

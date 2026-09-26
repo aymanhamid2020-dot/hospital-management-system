@@ -279,7 +279,14 @@ class DoctorBase(BaseModel):
 
 
 class DoctorCreate(DoctorBase):
-    pass
+    sub_specialty: Optional[str] = Field(None, description="التخصص الدقيق")
+    academic_rank: Optional[Literal["استشاري", "أخصائي", "طبيب مقيم"]] = Field(
+        None, description="الدرجة العلمية")
+    branch: Optional[str] = Field(None, description="الفرع/العيادة")
+    user_id: Optional[int] = Field(None, description="حساب المستخدم المرتبط")
+    consultation_minutes: int = Field(15, ge=5, le=180, description="مدة الزيرة (دقائق)")
+    consultation_fee: float = Field(0, ge=0, description="سعر الكشفية")
+    followup_fee: float = Field(0, ge=0, description="سعر الإعادة")
 
 
 class DoctorUpdate(BaseModel):
@@ -291,6 +298,13 @@ class DoctorUpdate(BaseModel):
     address: Optional[str] = None
     is_available: Optional[bool] = None
     department_id: Optional[int] = None
+    sub_specialty: Optional[str] = None
+    academic_rank: Optional[Literal["استشاري", "أخصائي", "طبيب مقيم"]] = None
+    branch: Optional[str] = None
+    user_id: Optional[int] = None
+    consultation_minutes: Optional[int] = Field(None, ge=5, le=180)
+    consultation_fee: Optional[float] = Field(None, ge=0)
+    followup_fee: Optional[float] = Field(None, ge=0)
 
 
 class DoctorAvailability(BaseModel):
@@ -307,6 +321,16 @@ class DoctorInDB(DoctorBase):
     created_at: datetime
     updated_at: datetime
     department: Optional[DepartmentBrief] = None
+    # الملف المهني وأوقات الكشف — تظهر في القائمة والتفاصيل
+    sub_specialty: Optional[str] = None
+    academic_rank: Optional[str] = None
+    branch: Optional[str] = None
+    user_id: Optional[int] = None
+    signature_path: Optional[str] = None
+    stamp_path: Optional[str] = None
+    consultation_minutes: int = 15
+    consultation_fee: float = 0
+    followup_fee: float = 0
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -374,6 +398,206 @@ class DoctorScheduleEntry(ORMModel):
 class DoctorScheduleUpdate(BaseModel):
     """استبدال جدول نوبات الأسبوع كاملًا."""
     entries: List[DoctorScheduleEntry]
+
+
+# ===== شاشة ملف الطبيب (الأقسام الخمسة) =====
+class UserBrief(ORMModel):
+    """حساب المستخدم المرتبط بالطبيب — بلا كلمة مرور."""
+    id: int
+    username: str
+    full_name: str
+    role: UserRole
+    is_active: bool
+
+
+class DoctorPermissions(BaseModel):
+    """صلاحيات الطبيب الدقيقة — تُحفظ JSON نصيًا في doctors.permissions."""
+    own_patients_only: bool = Field(True, description="رؤية ملفات مرضاه فقط")
+    view_emergency: bool = Field(False, description="الاطلاع على مراد الطوارئ")
+    order_lab: bool = Field(True, description="طلب فحوصات")
+    order_radiology: bool = Field(True, description="طلب أشعة")
+    prescribe: bool = Field(True, description="صرف أدوية")
+    view_invoices: bool = Field(False, description="الاطلاع على فواتير مرضاه")
+    view_doctor_financials: bool = Field(False, description="رؤية كشف حسابه")
+
+
+class DoctorProfileUpdate(BaseModel):
+    """حفظ الملف المهني (PUT /doctors/{id}/profile) — المدير أو الطبيب نفسه."""
+    sub_specialty: Optional[str] = Field(None, max_length=160)
+    academic_rank: Optional[Literal["استشاري", "أخصائي", "طبيب مقيم"]] = None
+    branch: Optional[str] = Field(None, max_length=160)
+    phone: Optional[str] = Field(None, max_length=40)
+    email: Optional[EmailStr] = None
+    address: Optional[str] = Field(None, max_length=300)
+    user_id: Optional[int] = None
+    consultation_minutes: Optional[int] = Field(None, ge=5, le=180)
+    consultation_fee: Optional[float] = Field(None, ge=0)
+    followup_fee: Optional[float] = Field(None, ge=0)
+    permissions: Optional[DoctorPermissions] = None
+
+
+class DoctorShiftCreate(BaseModel):
+    """مناوبة طوارئ/تنويم/أونكول."""
+    shift_type: Literal["emergency", "inpatient", "oncall"] = Field(
+        "emergency", description="نوع المناوبة")
+    shift_date: datetime = Field(..., description="تاريخ المناوبة")
+    start_time: time
+    end_time: time
+    location: Optional[str] = Field(None, max_length=160)
+    notes: Optional[str] = Field(None, max_length=300)
+
+
+class DoctorShiftInDB(ORMModel):
+    id: int
+    doctor_id: int
+    shift_type: str
+    shift_date: datetime
+    start_time: time
+    end_time: time
+    location: Optional[str] = None
+    notes: Optional[str] = None
+    created_by: str
+    created_at: datetime
+
+
+class DoctorLeaveCreate(BaseModel):
+    """إجازة الطبيب — end_date يجب أن يكون بعد start_date (أو مساويًا)."""
+    start_date: datetime
+    end_date: datetime
+    reason: Optional[str] = Field(None, max_length=300)
+    is_approved: bool = True
+
+
+class DoctorLeaveInDB(ORMModel):
+    id: int
+    doctor_id: int
+    start_date: datetime
+    end_date: datetime
+    reason: Optional[str] = None
+    is_approved: bool
+    created_by: str
+    created_at: datetime
+
+
+class DoctorBlockCreate(BaseModel):
+    """يوم حظر حجز — بلا وقت = اليوم كامل."""
+    block_date: datetime
+    start_time: Optional[time] = None
+    end_time: Optional[time] = None
+    reason: Optional[str] = Field(None, max_length=300)
+
+
+class DoctorBlockInDB(ORMModel):
+    id: int
+    doctor_id: int
+    block_date: datetime
+    start_time: Optional[time] = None
+    end_time: Optional[time] = None
+    reason: Optional[str] = None
+    created_by: str
+    created_at: datetime
+
+
+class DoctorCommissionCreate(BaseModel):
+    """نسبة أو قيمة ثابتة للطبيب عن كل نوع خدمة."""
+    service_type: Literal["consultation", "procedure", "followup", "surgery"]
+    billing_type: Literal["percent", "fixed"] = Field(
+        "percent", description="نسبة مئوية أم قيمة ثابتة")
+    rate: float = Field(..., ge=0, description="النسبة (0..100) أو المبلغ الثابت")
+    is_active: bool = True
+
+
+class DoctorCommissionInDB(ORMModel):
+    id: int
+    doctor_id: int
+    service_type: str
+    billing_type: str
+    rate: float
+    is_active: bool
+    created_at: datetime
+
+
+class DoctorPayoutCreate(BaseModel):
+    """تحويل مستحق للطبيب — يجب ألا يتجاوز رصيد كشف حسابه."""
+    amount: float = Field(..., gt=0, description="مبلغ التحويل")
+    period: str = Field(..., description="الشهر المستحق YYYY-MM")
+    method: Literal["cash", "bank", "transfer"] = "bank"
+    reference: Optional[str] = Field(None, max_length=120)
+    note: Optional[str] = Field(None, max_length=300)
+    paid_at: datetime
+
+
+class DoctorPayoutInDB(ORMModel):
+    id: int
+    doctor_id: int
+    amount: float
+    period: str
+    method: str
+    reference: Optional[str] = None
+    note: Optional[str] = None
+    paid_at: datetime
+    created_by: str
+    created_at: datetime
+
+
+class DoctorVisitStats(BaseModel):
+    """إحصاءات الزيارات (جدد/إعادة/طوارئ) + الإلغاء والانتظار."""
+    new_patients: int = Field(0, description="مرضى جدد (أول زيارة للطبيب)")
+    returning_patients: int = Field(0, description="مرضى عائدون (سبقت لهم زيارة)")
+    emergency_visits: int = Field(0, description="زيارات طوارئ (السبب يبدأ بكلمة طوارئ)")
+    cancelled: int = Field(0, description="مواعيد ملغاة")
+    cancel_rate: float = Field(0, description="نسبة الإلغاء (0..1)")
+    avg_wait_minutes: float = Field(0, description="متوسط الانتظار بين الوصول والموعد (دقائق)")
+
+
+class DoctorOrderStats(BaseModel):
+    """أكثر الأدوية والفحوصات طلبًا من الطبيب خلال الشهر."""
+    top_medications: List[dict] = Field(default_factory=list)
+    top_lab_tests: List[dict] = Field(default_factory=list)
+    prescriptions_count: int = 0
+    lab_orders_count: int = 0
+
+
+class DoctorLedger(BaseModel):
+    """كشف حساب الطبيب: الإيراد، المستحق، المحوَّل، المتبقي."""
+    period: str = Field("", description="الشهر YYYY-MM (يفرّغ عند غياب الصلاحية)")
+    revenue: float = Field(0, description="إجمالي إيرادات الفترة من فواتير مرضاه")
+    earned: float = Field(0, description="المستحق بعد تطبيق نسب العمولة")
+    paid: float = Field(0, description="المحوَّل فعليًا")
+    balance: float = Field(0, description="المتبقي = earned - paid")
+    invoices_count: int = 0
+    by_commission: List[dict] = Field(default_factory=list)
+
+
+class DoctorChart(DoctorInDB):
+    """ملف الطبيب الكامل — طلب واحد يغذّي التبويبات الخمسة.
+
+    يرث بيانات التعريف من DoctorInDB ويضيف الجداول والإحصاءات، حتى لا
+    تتكرر الحقول بين قائمتَي الإخراج. الحقول الموروثة (الدرجة العلمية،
+    التوقيع، …) تُقرأ من نموذج `Doctor` مباشرة.
+    """
+    # الصلاحيات مخزَّنة نصيًا في doctors.permissions، والراوتر يمرّرها
+    # منفصلة عبر from_doctor — فنمنع قراءة السمة الخام (نص) عند التحقق.
+    permissions: DoctorPermissions = Field(default_factory=DoctorPermissions)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+    user: Optional[UserBrief] = None
+    schedules: List[DoctorScheduleEntry] = Field(default_factory=list)
+    shifts: List[DoctorShiftInDB] = Field(default_factory=list)
+    leaves: List[DoctorLeaveInDB] = Field(default_factory=list)
+    blocks: List[DoctorBlockInDB] = Field(default_factory=list)
+    commissions: List[DoctorCommissionInDB] = Field(default_factory=list)
+    payouts: List[DoctorPayoutInDB] = Field(default_factory=list)
+    visits: DoctorVisitStats = Field(default_factory=DoctorVisitStats)
+    orders: DoctorOrderStats = Field(default_factory=DoctorOrderStats)
+    ledger: DoctorLedger = Field(default_factory=DoctorLedger)
+
+    @classmethod
+    def from_doctor(cls, doctor, permissions: "DoctorPermissions") -> "DoctorChart":
+        """بناء الملف من نموذج الطبيب مع الصلاحيات المحلَّلة (لا نص JSON)."""
+        data = cls.model_validate(
+            {k: v for k, v in vars(doctor).items() if k != "permissions"})
+        data.permissions = permissions
+        return data
 
 
 # ===== المواعيد =====
@@ -605,6 +829,11 @@ class AttachmentInDB(ORMModel):
     content_type: str
     size_bytes: int
     uploaded_at: datetime
+    dicom_study_uid: Optional[str] = None
+    dicom_series_uid: Optional[str] = None
+    dicom_sop_uid: Optional[str] = None
+    modality: Optional[str] = None
+    body_part: Optional[str] = None
     patient: Optional[PatientBrief] = None
 
 
@@ -668,6 +897,31 @@ class LabTestUpdate(BaseModel):
 
 class LabTestInDB(LabTestBase):
     id: int
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ===== غرف/أجهزة الأشعة (RIS) =====
+class RadiologyRoomBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100, description="اسم الغرفة")
+    modality: str = Field(..., pattern="^(XRAY|CT|MRI|ULTRASOUND)$", description="نوع الجهاز")
+    description: Optional[str] = Field(None, description="وصف إضافي")
+    is_active: bool = Field(True, description="متاح للجدولة")
+
+
+class RadiologyRoomCreate(RadiologyRoomBase):
+    pass
+
+
+class RadiologyRoomUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    modality: Optional[str] = Field(None, pattern="^(XRAY|CT|MRI|ULTRASOUND)$")
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class RadiologyRoomInDB(RadiologyRoomBase):
+    id: int
+    created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
 

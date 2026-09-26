@@ -73,6 +73,21 @@ PENDING_COLUMNS = {
         # شكوى المريض في كل زيارة
         "chief_complaint": "VARCHAR",
     },
+    "doctors": {
+        # الملف المهني والسريري + أوقات الكشف (شاشة ملف الطبيب)
+        "sub_specialty": "VARCHAR",
+        "academic_rank": "VARCHAR",
+        "branch": "VARCHAR",
+        # SQLite لا يدعم REFERENCES في ALTER TABLE — يُضاف العمود بلا قيد FK،
+        # والروابط المكسورة تُرجع None بأمان (يتحقق الخادم من وجود المستخدم عند الربط)
+        "user_id": "INTEGER",
+        "signature_path": "VARCHAR",
+        "stamp_path": "VARCHAR",
+        "permissions": "TEXT NOT NULL DEFAULT '{}'",
+        "consultation_minutes": "INTEGER NOT NULL DEFAULT 15",
+        "consultation_fee": "FLOAT NOT NULL DEFAULT 0",
+        "followup_fee": "FLOAT NOT NULL DEFAULT 0",
+    },
     "appointments": {
         "checked_in_at": "TIMESTAMP",
         "queue_number": "INTEGER",
@@ -128,6 +143,14 @@ PENDING_COLUMNS = {
         "report": "TEXT",
         "reported_by": "VARCHAR",
         "reported_at": "TIMESTAMP",
+    },
+    "attachments": {
+        # DICOM/PACS metadata
+        "dicom_study_uid": "VARCHAR",
+        "dicom_series_uid": "VARCHAR",
+        "dicom_sop_uid": "VARCHAR",
+        "modality": "VARCHAR",
+        "body_part": "VARCHAR",
     },
 }
 
@@ -238,6 +261,7 @@ INDEXES = {
     "notifications": ["is_read", "appointment_id", "patient_id", "prescription_id"],
     "lab_orders": ["patient_id", "status", "barcode", "sample_status", "priority"],
     "lab_tests": ["category", "active"],
+    "radiology_rooms": ["modality", "is_active"],
     "dispenses": ["patient_id", "medication_id", "created_at", "prescription_id"],
     "stock_movements": ["medication_id", "created_at"],
     "prescriptions": ["patient_id", "status", "doctor_id"],
@@ -262,6 +286,11 @@ INDEXES = {
     "housekeeping_tasks": ["room_number", "status", "priority"],
     "vital_signs": ["patient_id", "recorded_at"],
     "insurance_claims": ["patient_id", "status", "invoice_id"],
+    "doctors": ["department_id", "academic_rank", "is_available"],
+    "doctor_shifts": ["doctor_id", "shift_date"],
+    "doctor_leaves": ["doctor_id", "start_date"],
+    "doctor_blocks": ["doctor_id", "block_date"],
+    "doctor_payouts": ["doctor_id", "period"],
 
     "budgets": ["fiscal_year", "department"],
 }

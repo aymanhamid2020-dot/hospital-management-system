@@ -212,6 +212,23 @@ class Doctor(Base):
     address = Column(String, nullable=True)
     is_available = Column(Boolean, default=True)
     department_id = Column(Integer, ForeignKey("departments.id", ondelete="SET NULL"), nullable=True)
+
+    # ===== الملف المهني والسريري (شاشة ملف الطبيب) =====
+    sub_specialty = Column(String, nullable=True)        # التخصص الدقيق
+    academic_rank = Column(String, nullable=True)        # استشاري / أخصائي / مقيم
+    branch = Column(String, nullable=True)               # الفرع / العيادة
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"),
+                     nullable=True, index=True)         # حساب الدخول المرتبط
+    signature_path = Column(String, nullable=True)       # صورة التوقيع الإلكتروني
+    stamp_path = Column(String, nullable=True)          # صورة الختم الطبي
+    # الصلاحيات التفصيلية تُحفظ JSON نصيًا ليعمل SQLite وPostgreSQL معًا
+    permissions = Column(Text, nullable=False, default="{}")
+
+    # ===== أوقات الكشف =====
+    consultation_minutes = Column(Integer, nullable=False, default=15)
+    consultation_fee = Column(Float, nullable=False, default=0)
+    followup_fee = Column(Float, nullable=False, default=0)
+
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -219,6 +236,19 @@ class Doctor(Base):
     department = relationship("Department", back_populates="doctors")
     appointments = relationship("Appointment", back_populates="doctor", cascade="all, delete-orphan")
     medical_records = relationship("MedicalRecord", back_populates="doctor")
+    user = relationship("User")
+    schedules = relationship("DoctorSchedule", back_populates="doctor",
+                             cascade="all, delete-orphan")
+    shifts = relationship("DoctorShift", back_populates="doctor",
+                          cascade="all, delete-orphan")
+    leaves = relationship("DoctorLeave", back_populates="doctor",
+                          cascade="all, delete-orphan")
+    blocks = relationship("DoctorBlock", back_populates="doctor",
+                          cascade="all, delete-orphan")
+    commissions = relationship("DoctorCommission", back_populates="doctor",
+                               cascade="all, delete-orphan")
+    payouts = relationship("DoctorPayout", back_populates="doctor",
+                           cascade="all, delete-orphan")
 
 
 # ===== المواعيد =====
@@ -360,6 +390,12 @@ class Attachment(Base):
     content_type = Column(String, nullable=False)
     size_bytes = Column(Integer, nullable=False)
     uploaded_at = Column(DateTime, server_default=func.now())
+    # DICOM/PACS metadata
+    dicom_study_uid = Column(String, nullable=True, index=True)       # StudyInstanceUID
+    dicom_series_uid = Column(String, nullable=True, index=True)     # SeriesInstanceUID
+    dicom_sop_uid = Column(String, nullable=True)                    # SOPInstanceUID
+    modality = Column(String, nullable=True)                          # XRAY|CT|MRI|ULTRASOUND|...
+    body_part = Column(String, nullable=True)                         # anatomic region
 
     patient = relationship("Patient")
     record = relationship("MedicalRecord")
@@ -448,6 +484,18 @@ class LabTest(Base):
     active = Column(Boolean, default=True)               # مفعّل في نموذج الطلب
 
     orders = relationship("LabOrder", backref="test_catalog")
+
+
+# ===== غرف/أجهزة الأشعة (RIS) =====
+class RadiologyRoom(Base):
+    __tablename__ = "radiology_rooms"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)          # اسم الغرفة (غرفة أشعة 1، غرفة مقطعية…)
+    modality = Column(String(20), nullable=False)       # نوع الجهاز: XRAY|CT|MRI|ULTRASOUND
+    description = Column(String, nullable=True)         # وصف إضافي
+    is_active = Column(Boolean, default=True)           # متاح للجدولة
+    created_at = Column(DateTime, server_default=func.now())
 
 
 # ===== أدوية الصيدلية =====
@@ -1083,6 +1131,100 @@ class DoctorSchedule(Base):
     __table_args__ = (
         Index("ix_schedule_doctor_day", "doctor_id", "day_of_week"),
     )
+
+    doctor = relationship("Doctor", back_populates="schedules")
+
+
+# ===== جداول الطبيب الإضافية (شاشة ملف الطبيب) =====
+class DoctorShift(Base):
+    """مناوبة طوارئ/تنويم/أونكول — منفصلة عن نوبات العيادة الخارجية الأسبوعية."""
+    __tablename__ = "doctor_shifts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    doctor_id = Column(Integer, ForeignKey("doctors.id", ondelete="CASCADE"),
+                       nullable=False, index=True)
+    shift_type = Column(String, nullable=False, default="emergency")  # emergency|inpatient|oncall
+    shift_date = Column(DateTime, nullable=False, index=True)
+    start_time = Column(Time, nullable=False)
+    end_time = Column(Time, nullable=False)
+    location = Column(String, nullable=True)          # قسم التنويم/الطوارئ
+    notes = Column(String, nullable=True)
+    created_by = Column(String, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    doctor = relationship("Doctor", back_populates="shifts")
+
+
+class DoctorLeave(Base):
+    """إجازة الطبيب — نطاق [start_date, end_date] شامل الطرفين."""
+    __tablename__ = "doctor_leaves"
+
+    id = Column(Integer, primary_key=True, index=True)
+    doctor_id = Column(Integer, ForeignKey("doctors.id", ondelete="CASCADE"),
+                       nullable=False, index=True)
+    start_date = Column(DateTime, nullable=False)
+    end_date = Column(DateTime, nullable=False)
+    reason = Column(String, nullable=True)
+    is_approved = Column(Boolean, nullable=False, default=True)
+    created_by = Column(String, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    doctor = relationship("Doctor", back_populates="leaves")
+
+
+class DoctorBlock(Base):
+    """أيام حظر الحجز (Block Time) — يمنع حجز المواعيد فيها تلقائيًا."""
+    __tablename__ = "doctor_blocks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    doctor_id = Column(Integer, ForeignKey("doctors.id", ondelete="CASCADE"),
+                       nullable=False, index=True)
+    block_date = Column(DateTime, nullable=False, index=True)
+    start_time = Column(Time, nullable=True)          # فارغ = اليوم كامل
+    end_time = Column(Time, nullable=True)
+    reason = Column(String, nullable=True)
+    created_by = Column(String, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    doctor = relationship("Doctor", back_populates="blocks")
+
+
+class DoctorCommission(Base):
+    """نسبة أو قيمة ثابتة للطبيب عن كل نوع خدمة — تُستخدم في كشف الحساب."""
+    __tablename__ = "doctor_commissions"
+    __table_args__ = (
+        UniqueConstraint("doctor_id", "service_type", name="uq_doctor_commission_service"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    doctor_id = Column(Integer, ForeignKey("doctors.id", ondelete="CASCADE"),
+                       nullable=False, index=True)
+    service_type = Column(String, nullable=False)     # consultation|procedure|followup|surgery
+    billing_type = Column(String, nullable=False, default="percent")  # percent|fixed
+    rate = Column(Float, nullable=False, default=0)    # 0..100 للنسبة أو مبلغ ثابت
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    doctor = relationship("Doctor", back_populates="commissions")
+
+
+class DoctorPayout(Base):
+    """تحويل مستحق للطبيب — يخصم من رصيد كشف حسابه."""
+    __tablename__ = "doctor_payouts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    doctor_id = Column(Integer, ForeignKey("doctors.id", ondelete="CASCADE"),
+                       nullable=False, index=True)
+    amount = Column(Float, nullable=False)
+    period = Column(String, nullable=False, index=True)  # YYYY-MM
+    method = Column(String, nullable=False, default="bank")
+    reference = Column(String, nullable=True)
+    note = Column(String, nullable=True)
+    paid_at = Column(DateTime, nullable=False)
+    created_by = Column(String, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    doctor = relationship("Doctor", back_populates="payouts")
 
 
 # ===== وحدات تشغيل مستقلة للخدمات المكملة =====

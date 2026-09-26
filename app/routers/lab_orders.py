@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -8,6 +8,7 @@ from app.auth import get_current_user, get_user_role, require_admin
 from app.database import get_db
 from app.models import (
     LabOrder, LabStatus, LabTest, Notification, Patient, Doctor, TestType, User,
+    RadiologyRoom,
 )
 from app.schemas import (
     LabOrderCreate, LabOrderInDB, LabOrderUpdate,
@@ -37,6 +38,37 @@ def _who(current_user: User) -> str:
 def _barcode_for(order: LabOrder) -> str:
     """باركود العيّنة: ثابت لكل طلب (Code39 يقبل الأرقام والأحرف اللاتينية الكبيرة)."""
     return order.barcode or f"BC{order.id:07d}"
+
+
+def _check_schedule_conflict(
+    db: Session,
+    modality: Optional[str],
+    room: Optional[str],
+    scheduled_at: Optional[datetime],
+    exclude_order_id: Optional[int] = None,
+) -> Optional[str]:
+    """
+    التحقق من تضارب الموعد: نفس الغرفة + نفس الموعد ±30 دقيقة.
+    يعيد رسالة الخطأ إن وُجد تضارب، وإلا None.
+    """
+    if not (modality and room and scheduled_at):
+        return None
+    window_start = scheduled_at - timedelta(minutes=30)
+    window_end = scheduled_at + timedelta(minutes=30)
+    q = db.query(LabOrder).filter(
+        LabOrder.modality == modality,
+        LabOrder.room == room,
+        LabOrder.scheduled_at.between(window_start, window_end),
+        LabOrder.status.notin_([LabStatus.CANCELLED, LabStatus.REVIEWED]),
+    )
+    if exclude_order_id:
+        q = q.filter(LabOrder.id != exclude_order_id)
+    clash = q.first()
+    if clash:
+        return (f"تعارض جدولة: {clash.modality} في {clash.room} "
+                f"في {clash.scheduled_at.strftime('%Y-%m-%d %H:%M')} "
+                f"(طلب #{clash.id} — {clash.patient.full_name})")
+    return None
 
 
 def _flags_for(value, ref_min, ref_max):
@@ -110,6 +142,43 @@ async def list_lab_orders(
         q = q.filter(LabOrder.abnormal.is_(bool(abnormal)))
 
     return q.order_by(LabOrder.ordered_at.desc()).all()
+
+
+@router.get("/worklist", response_model=List[LabOrderInDB], summary="قائمة عملية الأجهزة (Modality Worklist)")
+async def modality_worklist(
+    modality: Optional[str] = Query(None, pattern="^(XRAY|CT|MRI|ULTRASOUND)$",
+                                    description="نوع الجهاز للفلترة"),
+    from_date: Optional[datetime] = Query(None, description="من تاريخ (شامل)"),
+    to_date: Optional[datetime] = Query(None, description="إلى تاريخ (شامل)"),
+    status_filter: Optional[str] = Query(None, description="حالة الطلب"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    قائمة العملية لجهاز أشعة — تُستخدم كـ Modality Worklist (MWL) للجهاز.
+    تعيد طلبات الأشعة المجدولة للجهاز المحدد في النطاق الزمني.
+    """
+    if get_user_role(current_user) == "doctor":
+        linked = db.query(Doctor).filter(Doctor.email == current_user.email).first()
+        if linked is None:
+            return []
+        doctor_id = linked.id
+    else:
+        doctor_id = None
+
+    q = db.query(LabOrder).filter(LabOrder.test_type == TestType.RADIOLOGY)
+    if modality:
+        q = q.filter(LabOrder.modality == modality)
+    if from_date:
+        q = q.filter(LabOrder.scheduled_at >= from_date)
+    if to_date:
+        q = q.filter(LabOrder.scheduled_at <= to_date)
+    if status_filter:
+        q = q.filter(LabOrder.status == status_filter)
+    if doctor_id:
+        q = q.filter(LabOrder.doctor_id == doctor_id)
+
+    return q.order_by(LabOrder.scheduled_at.asc()).all()
 
 
 @router.get("/{order_id}", response_model=LabOrderInDB, summary="عرض طلب معين")
@@ -363,6 +432,15 @@ async def update_lab_order(
     became_ready = (
         new_status == LabStatus.READY and order.status != LabStatus.READY
     )
+
+    # التحقق من تضارب الجدولة عند تحديث modality/room/scheduled_at
+    if any(k in data for k in ("modality", "room", "scheduled_at")):
+        new_modality = data.get("modality", order.modality)
+        new_room = data.get("room", order.room)
+        new_scheduled = data.get("scheduled_at", order.scheduled_at)
+        conflict = _check_schedule_conflict(db, new_modality, new_room, new_scheduled, order_id)
+        if conflict:
+            raise HTTPException(status_code=409, detail=conflict)
 
     for field, value in data.items():
         setattr(order, field, value)
