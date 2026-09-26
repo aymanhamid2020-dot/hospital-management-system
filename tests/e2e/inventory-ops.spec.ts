@@ -26,7 +26,8 @@ test.describe('إدارة المخازن (الأقسام الستة)', () => {
     await expect(page.locator('[data-invtab]')).toHaveCount(6);
     await expect(page.locator('#inv-ops')).toBeVisible();
 
-    // التبويب الافتراضي: قائمة المنتجات
+    // تبويب المنتجات: قائمة الأصناف المستلزمات ببياناتها التفصيلية
+    await page.click('[data-invsub="catalog"]');
     await expect(page.locator('#inv-ops h3').first()).toContainText('قائمة المنتجات');
 
     // المرور على الأقسام كلها: كل واحد يعرض محتواه بلا رسالة فشل
@@ -56,6 +57,33 @@ test.describe('إدارة المخازن (الأقسام الستة)', () => {
     await page.click('[data-invtab="item-master"]');
     await page.click('[data-invsub="reorder"]');
     await expect(page.locator('#inv-ops h3').first()).toContainText('مستويات إعادة الطلب');
+  });
+
+  test('مخزون الأدوية يظهر في تبويبه وحده لا في كل التبويبات', async ({ page }) => {
+    await login(page);
+    await openView(page, 'inventory');
+
+    // الافتراضي: تبويب الأدوية هو الوحيد الذي يحمل بطاقاته وحركاته
+    await expect(page.locator('[data-invsub="medications"]')).toHaveClass(/active/);
+    expect(await page.locator('#main .stats .stat').count()).toBeGreaterThanOrEqual(6);
+    await expect(page.locator('#main h3', { hasText: 'حركات المخزون' })).toBeVisible();
+
+    // أي تبويب آخر: لا بطاقات الأدوية ولا دفتر حركاته
+    for (const [tab, sub] of [['item-master', 'catalog'],
+      ['item-master', 'reorder'], ['stock-movements', 'warehouses'],
+      ['reports', 'valuation']]) {
+      await page.click(`[data-invtab="${tab}"]`);
+      await page.click(`[data-invsub="${sub}"]`);
+      await expect(page.locator(`[data-invsub="${sub}"]`)).toHaveClass(/active/);
+      await expect(page.locator('#main h3', { hasText: 'حركات المخزون' })).toHaveCount(0);
+      await expect(page.locator('#inv-ops')).toBeVisible();
+      await expectNoUiError(page);
+    }
+
+    // والعودة له تعيده كما كان
+    await page.click('[data-invtab="item-master"]');
+    await page.click('[data-invsub="medications"]');
+    await expect(page.locator('#main h3', { hasText: 'حركات المخزون' })).toBeVisible();
   });
 
   test('إنشاء مستودع وصنف وإذن استلام من الواجهة', async ({ page, request }) => {

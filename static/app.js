@@ -1,4 +1,4 @@
-﻿const API = '';
+const API = '';
 // الجلسة الافتراضية في الذاكرة فقط: فتح الموقع يعرض شاشة الدخول دائمًا.
 // "تذكرني" وحده ينقل الجلسة إلى localStorage لتُستأنف بعد إعادة التشغيل.
 let TOKEN = '';
@@ -824,7 +824,7 @@ let INV = { q: '', status: '', days: 30 };
 
 /* === تبويبات شاشة المخزون (6 أقسام رئيسية) === */
 let INV_TAB = 'item-master';
-let INV_SUB = 'catalog';
+let INV_SUB = 'medications';   // يبدأ من مخزون الأدوية (كما كان) وبقية الأقسام بنقرة
 const INV_TABS = [
   ['item-master', '📦 دليل المواد والمنتجات', '1'],
   ['stock-movements', '🔄 حركة وإدارة المخازن', '2'],
@@ -835,7 +835,9 @@ const INV_TABS = [
 ];
 
 const INV_SUBS = {
-  'item-master': [['catalog', 'قائمة المنتجات', '📋'], ['reorder', 'مستويات إعادة الطلب', '🔄']],
+  'item-master': [['catalog', 'قائمة المنتجات (المستلزمات)', '📋'],
+    ['medications', 'الأدوية (مخزون الصيدلية)', '💊'],
+    ['reorder', 'مستويات إعادة الطلب', '🔄']],
   'stock-movements': [['warehouses', 'المستودعات والفروع', '🏭'], ['grn', 'إذن الاستلام (GRN)', '📥'], ['transfers', 'التحويلات بين المخازن', '🔄'], ['issues', 'الصرف للأقسام/المرضى', '📤'], ['returns', 'المرتجعات', '↩️']],
   'stocktake': [['physical', 'الجرد الفعلي', '📋'], ['adjustments', 'تسوية المخزون', '🧮']],
   'expiry': [['tracking', 'متابعة الصلاحية (FEFO)', '⏰'], ['disposal', 'إعدام التالف/المنتهي', '🗑️']],
@@ -4349,7 +4351,7 @@ async function deleteStaffDoc(id) {
       </div>
       <button class="btn success" style="margin-top:12px" onclick="addMedication('inventory')">حفظ الدواء</button>
       </details>` : '';
-    main.innerHTML = `
+    const legacyHTML = `
       <div class="stats">
         <div class="stat"><div class="num">${sum.total_value.toLocaleString()} ر.س</div><div class="lbl">قيمة المخزون (ر.س)</div></div>
         <div class="stat green"><div class="num">${sum.items}</div><div class="lbl">عدد الأصناف</div></div>
@@ -4359,8 +4361,6 @@ async function deleteStaffDoc(id) {
         <div class="stat amber"><div class="num">${sum.expiring}</div><div class="lbl">أصناف تنتهي قريبًا</div></div>
         <div class="stat red"><div class="num">${sum.expired}</div><div class="lbl">أصناف منتهية</div></div>
       </div>
-      ${invBarsHTML()}
-      <div id="inv-ops"><div class="empty">جارٍ التحميل…</div></div>
       <div class="card">
         <div class="toolbar">
           <input id="f-inv-q" placeholder="ابحث بالاسم أو الرمز" value="${esc(INV.q)}" style="min-width:200px">
@@ -4412,7 +4412,13 @@ async function deleteStaffDoc(id) {
       </div>
         </div>
       </div>`;
-    await renderInvOps();   // محتوى تبويب إدارة المخازن المختار
+    // كل قسم له مكانه: مخزون الأدوية في تبويبه وحده، والباقي في موزّع الأقسام
+    main.innerHTML = `${invBarsHTML()}<div id="inv-ops"><div class="empty">جارٍ التحميل…</div></div>`;
+    if (INV_TAB === 'item-master' && INV_SUB === 'medications') {
+      document.getElementById('inv-ops').innerHTML = legacyHTML;
+    } else {
+      await renderInvOps();
+    }
   },
 
   /* --- تبويب «المبيعات»: السجل + الفلاتر + التسديد --- */
