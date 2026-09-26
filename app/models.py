@@ -88,9 +88,126 @@ class Department(Base):
     floor = Column(String, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
+    # ===== مركز الأقسام: الهيكل والكادر =====
+    parent_id = Column(Integer, ForeignKey("departments.id", ondelete="SET NULL"),
+                       nullable=True, index=True)      # قسم فرعي/وحدة
+    # clinical | diagnostic | administrative | supportive
+    dept_type = Column(String, nullable=False, default="clinical")
+    head_doctor_id = Column(Integer, ForeignKey("doctors.id", ondelete="SET NULL"),
+                            nullable=True)              # رئيس القسم (HOD)
+    is_active = Column(Boolean, nullable=False, default=True)
+    monthly_operating_cost = Column(Float, nullable=False, default=0)  # مصروف تشغيل شهري
+
     # علاقات
+    # foreign_keys صريحة: قسم↔طبيب لها مساران (منتسَب + رئيس القسم)
     beds = relationship("Bed", back_populates="department", cascade="all, delete-orphan")
-    doctors = relationship("Doctor", back_populates="department")
+    doctors = relationship("Doctor", back_populates="department",
+                           foreign_keys="Doctor.department_id")
+    head_doctor = relationship("Doctor", foreign_keys=[head_doctor_id],
+                               post_update=True)
+    children = relationship("Department", backref="parent", remote_side=[id])
+    rooms = relationship("DepartmentRoom", back_populates="department",
+                         cascade="all, delete-orphan")
+    services = relationship("DepartmentService", back_populates="department",
+                            cascade="all, delete-orphan")
+    schedules = relationship("DepartmentSchedule", back_populates="department",
+                             cascade="all, delete-orphan")
+    staff = relationship("DepartmentStaff", back_populates="department",
+                         cascade="all, delete-orphan")
+
+
+# ===== مركز الأقسام: الغرف والخدمات والجداول والكادر =====
+class DepartmentRoom(Base):
+    """غرفة/جناح داخل القسم مع فئته (ملكي/خاص/مشترك/عناية/عمليات)."""
+    __tablename__ = "department_rooms"
+
+    id = Column(Integer, primary_key=True, index=True)
+    department_id = Column(Integer, ForeignKey("departments.id", ondelete="CASCADE"),
+                          nullable=False, index=True)
+    name = Column(String, nullable=False)
+    room_number = Column(String, nullable=True)
+    # royal | private | shared | icu | er | operating
+    category = Column(String, nullable=False, default="shared")
+    capacity = Column(Integer, nullable=False, default=1)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    department = relationship("Department", back_populates="rooms")
+    bookings = relationship("DepartmentRoomBooking", back_populates="room",
+                            cascade="all, delete-orphan")
+
+
+class DepartmentRoomBooking(Base):
+    """حجز غرفة قسم (غرف العمليات/الفحص المشتركة) — يرفض التداخل الزمني."""
+    __tablename__ = "department_room_bookings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    room_id = Column(Integer, ForeignKey("department_rooms.id", ondelete="CASCADE"),
+                     nullable=False, index=True)
+    starts_at = Column(DateTime, nullable=False, index=True)
+    ends_at = Column(DateTime, nullable=False)
+    purpose = Column(String, nullable=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="SET NULL"),
+                        nullable=True)
+    created_by = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    room = relationship("DepartmentRoom", back_populates="bookings")
+
+
+class DepartmentService(Base):
+    """خدمة/إجراء يقدمه القسم بسعره ونسبتَي التأمين والطبيب."""
+    __tablename__ = "department_services"
+
+    id = Column(Integer, primary_key=True, index=True)
+    department_id = Column(Integer, ForeignKey("departments.id", ondelete="CASCADE"),
+                          nullable=False, index=True)
+    code = Column(String, nullable=True)
+    name = Column(String, nullable=False)
+    price = Column(Float, nullable=False, default=0)
+    doctor_share_pct = Column(Float, nullable=False, default=0)   # حصة الطبيب %
+    insurance_pct = Column(Float, nullable=False, default=0)      # تغطية التأمين %
+    procedure_note = Column(Text, nullable=True)                  # نموذج/خطوات الإجراء
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    department = relationship("Department", back_populates="services")
+
+
+class DepartmentSchedule(Base):
+    """جدول تشغيل عيادة القسم: يوم + فترة (صباحية/مسائية) + وقت الفتح والإغلاق."""
+    __tablename__ = "department_schedules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    department_id = Column(Integer, ForeignKey("departments.id", ondelete="CASCADE"),
+                          nullable=False, index=True)
+    day_of_week = Column(Integer, nullable=False)      # 0=الأحد … 6=السبت
+    session = Column(String, nullable=False, default="morning")  # morning|evening
+    open_time = Column(String, nullable=False, default="08:00")
+    close_time = Column(String, nullable=False, default="14:00")
+    room_name = Column(String, nullable=True)          # العيادة/الغرفة داخل القسم
+    created_at = Column(DateTime, server_default=func.now())
+
+    department = relationship("Department", back_populates="schedules")
+
+
+class DepartmentStaff(Base):
+    """توزيع كادر مساند (تمريض/تقني/إداري) على الأقسام + رئيس إداري."""
+    __tablename__ = "department_staff"
+    __table_args__ = (UniqueConstraint("department_id", "staff_id",
+                                       name="uq_department_staff"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    department_id = Column(Integer, ForeignKey("departments.id", ondelete="CASCADE"),
+                          nullable=False, index=True)
+    staff_id = Column(Integer, ForeignKey("staff.id", ondelete="CASCADE"),
+                      nullable=False, index=True)
+    role_in_dept = Column(String, nullable=False, default="ممرض")  # ممرض/تقني/إداري
+    is_head = Column(Boolean, nullable=False, default=False)        # رئيس إداري للقسم
+    created_at = Column(DateTime, server_default=func.now())
+
+    department = relationship("Department", back_populates="staff")
+    staff = relationship("Staff")
 
 
 # ===== الأسرّة =====
@@ -102,10 +219,14 @@ class Bed(Base):
     department_id = Column(Integer, ForeignKey("departments.id", ondelete="CASCADE"), nullable=False)
     status = Column(SAEnum(BedStatus), default=BedStatus.AVAILABLE)
     patient_id = Column(Integer, ForeignKey("patients.id", ondelete="SET NULL"), nullable=True)
+    # مركز الأقسام: السرير داخل غرفة/جناح (توزيع الغرف)
+    room_id = Column(Integer, ForeignKey("department_rooms.id", ondelete="SET NULL"),
+                     nullable=True, index=True)
     created_at = Column(DateTime, server_default=func.now())
 
     department = relationship("Department", back_populates="beds")
     patient = relationship("Patient")
+    room = relationship("DepartmentRoom")
 
 
 # ===== المرضى =====
@@ -233,7 +354,8 @@ class Doctor(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     # علاقات
-    department = relationship("Department", back_populates="doctors")
+    department = relationship("Department", back_populates="doctors",
+                              foreign_keys="Doctor.department_id")
     appointments = relationship("Appointment", back_populates="doctor", cascade="all, delete-orphan")
     medical_records = relationship("MedicalRecord", back_populates="doctor")
     user = relationship("User")

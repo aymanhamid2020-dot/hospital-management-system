@@ -10,6 +10,8 @@ const TITLES: Record<string, string> = {
   inventory: 'المخزون',
   lab: 'المختبر والأشعة',
   accounting: 'المحاسبة',
+  departments: 'الأقسام',
+  beds: 'الأسرّة',
   /* الفواتير تبويب داخل شاشة المحاسبة — تُفتح الشاشة بعنوانها */
   invoices: 'المحاسبة',
   clinical: 'الرعاية والتشغيل',

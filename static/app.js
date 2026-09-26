@@ -1430,6 +1430,514 @@ async function renderInvOps() {
   box.innerHTML = await invOpsHTML();
 }
 
+/* ══════════ مركز الأقسام: ستة تبويبات (قائمة الأقسام) ══════════
+   1 دليل الأقسام والهيكل · 2 الأطباء والكادر · 3 الغرف والأسرّة
+   4 الخدمات والأسعار · 5 الجداول والمواعيد · 6 التقارير والإحصائيات */
+let DEPT = { tab: 'directory', id: 0, days: 30 };
+
+const DEPT_TABS = [
+  ['directory', '📂 دليل الأقسام والهيكل', '1'],
+  ['team', '👨‍⚕️ الأطباء والكادر', '2'],
+  ['rooms', '🛏️ الغرف والأسرّة', '3'],
+  ['services', '💲 الخدمات والأسعار', '4'],
+  ['schedule', '🗓️ الجداول والمواعيد', '5'],
+  ['analytics', '📊 التقارير والإحصائيات', '6'],
+];
+const DEPT_TYPE_AR = { clinical: 'طبي/عيادي', diagnostic: 'تشخيصي', administrative: 'إداري', supportive: 'خدمي/مساند' };
+const ROOM_CAT_AR = { royal: 'جناح ملكي', private: 'غرفة خاصة', shared: 'غرفة مشتركة', icu: 'عناية مركزة', er: 'طوارئ/صدمات', operating: 'غرف عمليات' };
+const DEPT_DAYS = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+const BED_AR = { available: 'متاح', occupied: 'مشغول', maintenance: 'صيانة' };
+
+let DEPT_ALL = [];
+
+function setDeptTab(tab) { DEPT.tab = tab; return navigate('departments'); }
+function setDeptPick(id) { DEPT.id = Number(id) || 0; return renderDeptHub(); }
+
+function deptBarsHTML() {
+  return `<div class="tabbar" role="tablist">${DEPT_TABS.map(([k, l, n]) =>
+    `<button type="button" role="tab" aria-selected="${k === DEPT.tab}"
+       class="tab${k === DEPT.tab ? ' active' : ''}" data-depttab="${k}"
+       onclick="setDeptTab('${k}')">${n}. ${l}</button>`).join('')}</div>`;
+}
+
+function deptPickerHTML() {
+  const opts = DEPT_ALL.map(d => `<option value="${d.id}" ${d.id === DEPT.id ? 'selected' : ''}>${esc(d.name)}</option>`).join('');
+  return `<select id="dept-pick" onchange="setDeptPick(this.value)" style="min-width:190px">
+    <option value="0">— كل الأقسام —</option>${opts}</select>`;
+}
+
+async function renderDeptHub() {
+  const box = document.getElementById('dept-hub');
+  if (!box) return;
+  box.innerHTML = await deptHubHTML();
+}
+
+async function deptHubHTML() {
+  if (!DEPT_ALL.length) {
+    DEPT_ALL = await api('/departments/').catch(() => []);
+    if (!DEPT.id && DEPT_ALL.length) DEPT.id = DEPT_ALL[0].id;
+  }
+  const tab = DEPT.tab;
+  try {
+    if (tab === 'directory') return await deptDirectoryHTML();
+    if (!DEPT.id) return `<div class="card"><div class="empty">
+      اختر قسمًا من الشريط أعلاه لعرض ${DEPT_TABS.find(t => t[0] === tab)[1]}</div></div>`;
+    if (tab === 'team') return await deptTeamHTML(DEPT.id);
+    if (tab === 'rooms') return await deptRoomsHTML(DEPT.id);
+    if (tab === 'services') return await deptServicesHTML(DEPT.id);
+    if (tab === 'schedule') return await deptScheduleHTML(DEPT.id);
+    if (tab === 'analytics') return await deptAnalyticsHTML();
+    return '<div class="empty">تبويب غير معروف</div>';
+  } catch (e) {
+    return `<div class="card"><div class="empty">تعذّر التحميل: ${esc(e.message || 'خطأ')}</div></div>`;
+  }
+}
+
+/* ---------- 1) دليل الأقسام والهيكل ---------- */
+function deptNodeHTML(n, depth) {
+  const pad = 14 + depth * 22;
+  return `<tr>
+    <td style="padding-right:${pad}px">
+      <strong>${esc(n.name)}</strong>
+      ${n.children.length ? `<span class="pill partial">${n.children.length} وحدة فرعية</span>` : ''}
+    </td>
+    <td>${esc(n.dept_type_ar)}</td>
+    <td>${esc(n.floor || '—')}</td>
+    <td>${n.doctors_count}</td>
+    <td>${n.beds_occupied}/${n.beds_count}</td>
+    <td>${n.rooms_count}</td>
+    <td>${n.services_count}</td>
+    <td>${Number(n.monthly_operating_cost || 0).toLocaleString()} ر.س</td>
+    <td><span class="pill ${n.is_active ? 'confirmed' : 'cancelled'}">${n.is_active ? 'فعّال' : 'معطّل'}</span></td>
+    <td class="actions">${isAdmin() ? `<button class="btn sm ghost" onclick="deptStructure(${n.id})">⚙️ هيكل</button>` : ''}</td>
+  </tr>` + n.children.map(c => deptNodeHTML(c, depth + 1)).join('');
+}
+
+async function deptDirectoryHTML() {
+  const tree = await api('/department-hub/directory?include_inactive=true');
+  return `<div class="card">
+    <div class="toolbar"><h3 style="margin:0">📂 دليل الأقسام والهيكل (${tree.length} قسم رئيسي)</h3>
+      <span class="pill confirmed">${tree.reduce((s, n) => s + 1 + n.children.length, 0)} قسم ووحدة</span>
+      ${isAdmin() ? '<button class="btn success" onclick="addDeptBox()">➕ إضافة قسم/وحدة</button>' : ''}
+    </div>
+    <p style="margin:0 0 10px;color:#64748b">الأقسام الرئيسية ووحداتها الفرعية تحتها؛ و«⚙️ هيكل» لتغيير النوع أو ربط القسم الأب أو التعطيل.</p>
+    <div id="dept-addbox"></div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>القسم / الوحدة</th><th>النوع</th><th>الدور</th><th>أطباء</th>
+        <th>أسرّة مشغولة/إجمالي</th><th>غرف</th><th>خدمات</th><th>تكلفة تشغيل/شهر</th><th>الحالة</th><th></th></tr></thead>
+      <tbody>${tree.map(n => deptNodeHTML(n, 0)).join('') || '<tr><td colspan="10" class="empty">لا أقسام</td></tr>'}</tbody>
+    </table></div></div>`;
+}
+
+function addDeptBox(parentId) {
+  const box = document.getElementById('dept-addbox');
+  if (!box) return;
+  const parents = DEPT_ALL.map(d => `<option value="${d.id}" ${d.id === parentId ? 'selected' : ''}>${esc(d.name)}</option>`).join('');
+  box.innerHTML = `<div class="card" style="background:#f8fafc;margin-bottom:12px">
+    <h3 style="margin:0 0 8px">➕ ${parentId ? 'وحدة فرعية' : 'قسم جديد'}</h3>
+    <div class="form-grid">
+      <div class="field"><label>الاسم *</label><input id="d-name"></div>
+      <div class="field"><label>الدور</label><input id="d-floor" placeholder="الأرضي"></div>
+      <div class="field"><label>النوع</label><select id="d-type">
+        <option value="clinical">طبي/عيادي</option><option value="diagnostic">تشخيصي</option>
+        <option value="administrative">إداري</option><option value="supportive">خدمي/مساند</option></select></div>
+      <div class="field"><label>القسم الأب</label><select id="d-parent">
+        <option value="">— قسم رئيسي —</option>${parents}</select></div>
+      <div class="field"><label>مصروف تشغيل شهري</label><input id="d-cost" type="number" min="0" step="0.01" value="0"></div>
+    </div>
+    <button class="btn success" style="margin-top:10px" onclick="saveDept()">حفظ</button>
+  </div>`;
+}
+
+async function saveDept() {
+  const body = {
+    name: (V('d-name') || '').trim(), floor: V('d-floor') || null,
+    dept_type: V('d-type') || 'clinical',
+    parent_id: V('d-parent') ? Number(V('d-parent')) : null,
+    monthly_operating_cost: Number(V('d-cost') || 0),
+  };
+  if (body.name.length < 2) return toast('اسم القسم مطلوب', true);
+  try {
+    await api('/departments/', { method: 'POST', body: JSON.stringify(body) });
+    DEPT_ALL = [];
+    toast('أُضيف القسم ✅');
+    await navigate('departments');
+  } catch (e) { toast(e.message, true); }
+}
+
+function deptStructure(id) {
+  const d = DEPT_ALL.find(x => x.id === id) || {};
+  const parents = DEPT_ALL.filter(x => x.id !== id)
+    .map(p => `<option value="${p.id}" ${p.id === d.parent_id ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+  openModal(`⚙️ هيكل القسم — ${d.name || ''}`, `
+    <div class="form-grid">
+      <div class="field"><label>النوع</label><select id="st-type">
+        ${Object.entries(DEPT_TYPE_AR).map(([k, v]) => `<option value="${k}" ${d.dept_type === k ? 'selected' : ''}>${v}</option>`).join('')}
+      </select></div>
+      <div class="field"><label>القسم الأب (وحدة فرعية)</label><select id="st-parent">
+        <option value="">— قسم رئيسي —</option>${parents}</select></div>
+      <div class="field"><label>مصروف تشغيل شهري (ر.س)</label><input id="st-cost" type="number" min="0" step="0.01" value="${Number(d.monthly_operating_cost || 0)}"></div>
+      <div class="field"><label>الحالة</label><select id="st-active">
+        <option value="true" ${d.is_active !== false ? 'selected' : ''}>فعّال</option>
+        <option value="false" ${d.is_active === false ? 'selected' : ''}>معطّل</option></select></div>
+    </div>
+    <div class="row2" style="margin-top:12px">
+      <button class="btn success" onclick="saveStructure(${id})">حفظ الهيكل</button>
+      <button class="btn ghost" onclick="closeModal()">إلغاء</button>
+    </div>`);
+}
+
+async function saveStructure(id) {
+  try {
+    await api('/department-hub/' + id + '/structure', { method: 'PUT', body: JSON.stringify({
+      dept_type: V('st-type'),
+      parent_id: V('st-parent') ? Number(V('st-parent')) : null,
+      monthly_operating_cost: Number(V('st-cost') || 0),
+      is_active: V('st-active') === 'true',
+    }) });
+    closeModal(); DEPT_ALL = []; toast('حُفظ الهيكل ✅'); await navigate('departments');
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ---------- 2) الأطباء والكادر ---------- */
+async function deptTeamHTML(id) {
+  const [team, doctors, staff] = await Promise.all([
+    api(`/department-hub/${id}/team`),
+    api('/doctors/'), api('/staff/').catch(() => []),
+  ]);
+  const docOpts = doctors.map(d => `<option value="${d.id}">${esc(d.full_name)} — ${esc(d.specialty || '')}</option>`).join('');
+  const staffOpts = staff.map(s => `<option value="${s.id}">${esc(s.full_name)} — ${esc(s.position || '')}</option>`).join('');
+  return `<div class="card">
+    <div class="toolbar"><h3 style="margin:0">👨‍⚕️ كادر القسم</h3>${deptPickerHTML()}
+      <span class="pill confirmed">${team.counts.doctors} طبيب</span>
+      <span class="pill in_progress">${team.counts.support} كادر مساند</span></div>
+    <div class="stats" style="margin-bottom:12px">
+      <div class="stat green"><div class="num" style="font-size:15px">${esc(team.head.name || '—')}</div>
+        <div class="lbl">رئيس القسم (HOD)</div></div>
+      <div class="stat"><div class="num">${team.counts.doctors}</div><div class="lbl">أطباء منتسبون</div></div>
+      <div class="stat"><div class="num">${team.counts.support}</div><div class="lbl">كادر مساند</div></div>
+    </div>
+    <h4>الأطباء المنتسبون</h4>
+    <div style="overflow-x:auto;margin-bottom:12px"><table>
+      <thead><tr><th>#</th><th>الطبيب</th><th>التخصص</th><th>الدرجة</th><th>متاح</th><th>سعر الكشفية</th><th>رئيس القسم</th></tr></thead>
+      <tbody>${team.doctors.map(d => `<tr>
+        <td>${d.id}</td><td>${esc(d.name)}</td><td>${esc(d.specialty || '—')}</td>
+        <td>${esc(d.rank || '—')}</td>
+        <td><span class="pill ${d.available ? 'confirmed' : 'partial'}">${d.available ? 'متاح' : 'مشغول'}</span></td>
+        <td>${Number(d.consultation_fee || 0).toLocaleString()} ر.س</td>
+        <td>${isAdmin() ? `<button class="btn sm ghost" onclick="deptSetHead(${id},${d.id})">${team.head.doctor_id === d.id ? '✔️ رئيس القسم' : 'تعيينه رئيسًا'}</button>` : ''}</td>
+      </tr>`).join('') || '<tr><td colspan="7" class="empty">لا أطباء في هذا القسم</td></tr>'}</tbody>
+    </table></div>
+    <h4>التمريض والكادر المساعد</h4>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>#</th><th>الموظف</th><th>المنصب</th><th>الدور في القسم</th><th>رئيس إداري</th><th></th></tr></thead>
+      <tbody>${team.support.map(s => `<tr>
+        <td>${s.id}</td><td>${esc(s.name)}</td><td>${esc(s.position || '—')}</td>
+        <td>${esc(s.role_in_dept)}</td>
+        <td>${s.is_head ? '<span class="pill confirmed">رئيس إداري</span>' : '—'}</td>
+        <td>${isAdmin() ? `<button class="btn sm danger" onclick="deptDelSupport(${id},${s.id})">إزالة</button>` : ''}</td>
+      </tr>`).join('') || '<tr><td colspan="6" class="empty">لا كادر مساند موزّع</td></tr>'}</tbody>
+    </table></div>
+    ${isAdmin() ? `<div class="form-grid" style="margin-top:12px">
+      <div class="field"><label>توزيع موظف</label><select id="tf-staff">${staffOpts || '<option>— أضف موظفين من شاشة الموارد البشرية —</option>'}</select></div>
+      <div class="field"><label>الدور في القسم</label><input id="tf-role" value="ممرض"></div>
+      <div class="field"><label>رئيس إداري</label><select id="tf-head">
+        <option value="false">لا</option><option value="true">نعم</option></select></div>
+    </div>
+    <button class="btn success" style="margin-top:10px" onclick="deptAddSupport(${id})">➕ توزيع على القسم</button>` : ''}
+  </div>`;
+}
+
+async function deptSetHead(id, doctorId) {
+  try {
+    await api(`/department-hub/${id}/head`, { method: 'PUT', body: JSON.stringify({ head_doctor_id: doctorId }) });
+    toast('عُيّن رئيس القسم ✅'); await renderDeptHub();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function deptAddSupport(id) {
+  const sid = Number(V('tf-staff') || 0);
+  if (!sid) return toast('اختر موظفًا', true);
+  try {
+    await api(`/department-hub/${id}/support`, { method: 'POST', body: JSON.stringify({
+      staff_id: sid, role_in_dept: (V('tf-role') || 'ممرض').trim(),
+      is_head: V('tf-head') === 'true' }) });
+    toast('وُزّع الموظف على القسم ✅'); await renderDeptHub();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function deptDelSupport(id, rowId) {
+  if (!confirm('إلغاء توزيع الموظف من القسم؟')) return;
+  try {
+    await api(`/department-hub/${id}/support/${rowId}`, { method: 'DELETE' });
+    toast('أُلغي التوزيع ✅'); await renderDeptHub();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ---------- 3) الغرف والأسرّة (الأسرّة مدمجة هنا) ---------- */
+async function deptRoomsHTML(id) {
+  const [rooms, beds, bookings] = await Promise.all([
+    api(`/department-hub/${id}/rooms`), api(`/department-hub/${id}/beds`),
+    api(`/department-hub/${id}/bookings`),
+  ]);
+  return `<div class="card">
+    <div class="toolbar"><h3 style="margin:0">🛏️ غرف القسم وأسرّته</h3>${deptPickerHTML()}
+      <span class="pill confirmed">${rooms.length} غرفة</span>
+      <span class="pill lowstock">${beds.filter(b => b.status === 'occupied').length}/${beds.length} سرير مشغول</span></div>
+    <h4>الغرف وفئاتها</h4>
+    <div style="overflow-x:auto;margin-bottom:12px"><table>
+      <thead><tr><th>#</th><th>الغرفة</th><th>الرقم</th><th>الفئة</th><th>السعة</th>
+        <th>أسرّة مشغولة</th><th>حجوزات قادمة</th><th>الحجز</th><th></th></tr></thead>
+      <tbody>${rooms.map(r => `<tr>
+        <td>${r.id}</td><td><strong>${esc(r.name)}</strong></td><td>${esc(r.room_number || '—')}</td>
+        <td><span class="pill partial">${esc(ROOM_CAT_AR[r.category] || r.category)}</span></td>
+        <td>${r.capacity}</td>
+        <td>${r.beds_occupied}/${r.beds_count}</td><td>${r.upcoming_bookings}</td>
+        <td>${isAdmin() ? `<button class="btn sm ghost" onclick="deptBookRoom(${id},${r.id})">🗓️ حجز</button>` : ''}</td>
+        <td>${isAdmin() ? `<button class="btn sm danger" onclick="deptDelRoom(${id},${r.id})">حذف</button>` : ''}</td>
+      </tr>`).join('') || '<tr><td colspan="9" class="empty">لا غرف — أضف جناحًا أو غرفة</td></tr>'}</tbody>
+    </table></div>
+    <h4>الأسرّة وتوزيعها على الغرف</h4>
+    <div style="overflow-x:auto;margin-bottom:12px"><table>
+      <thead><tr><th>#</th><th>السرير</th><th>الغرفة</th><th>الحالة</th><th>المريض</th><th>توزيع</th></tr></thead>
+      <tbody>${beds.map(b => `<tr>
+        <td>${b.id}</td><td><strong>${esc(b.bed_number)}</strong></td>
+        <td>${esc(b.room_name || '—')}</td>
+        <td><span class="pill ${b.status === 'occupied' ? 'completed' : b.status === 'maintenance' ? 'cancelled' : 'confirmed'}">${esc(BED_AR[b.status] || b.status)}</span></td>
+        <td>${b.patient_id ? '#' + b.patient_id : '—'}</td>
+        <td>${isAdmin() && rooms.length ? `<select onchange="deptAssignBed(${id},${b.id},this.value)" style="padding:4px;border-radius:6px;border:1px solid #ddd">
+          <option value="">— بلا غرفة —</option>${rooms.map(r => `<option value="${r.id}" ${r.id === b.room_id ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}
+        </select>` : ''}</td>
+      </tr>`).join('') || '<tr><td colspan="6" class="empty">لا أسرّة في هذا القسم</td></tr>'}</tbody>
+    </table></div>
+    ${bookings.length ? `<h4>حجوزات الغرف القادمة</h4>
+    <div style="overflow-x:auto;margin-bottom:12px"><table>
+      <thead><tr><th>الغرفة</th><th>من</th><th>إلى</th><th>الغرض</th><th>المريض</th></tr></thead>
+      <tbody>${bookings.map(b => `<tr>
+        <td>${esc(b.room_name || '')}</td><td>${fmtDate(b.starts_at)}</td><td>${fmtDate(b.ends_at)}</td>
+        <td>${esc(b.purpose || '—')}</td><td>${b.patient_id ? '#' + b.patient_id : '—'}</td>
+      </tr>`).join('')}</tbody></table></div>` : ''}
+    ${isAdmin() ? `<div class="form-grid">
+      <div class="field"><label>اسم الغرفة *</label><input id="rm-name" placeholder="جناح الشمال"></div>
+      <div class="field"><label>رقم الغرفة</label><input id="rm-no"></div>
+      <div class="field"><label>الفئة</label><select id="rm-cat">
+        ${Object.entries(ROOM_CAT_AR).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
+      <div class="field"><label>السعة</label><input id="rm-cap" type="number" min="1" value="1"></div>
+    </div>
+    <button class="btn success" style="margin-top:10px" onclick="deptAddRoom(${id})">➕ إضافة غرفة</button>` : ''}
+  </div>`;
+}
+
+async function deptAddRoom(id) {
+  const name = (V('rm-name') || '').trim();
+  if (name.length < 2) return toast('اسم الغرفة مطلوب', true);
+  try {
+    await api(`/department-hub/${id}/rooms`, { method: 'POST', body: JSON.stringify({
+      name, room_number: V('rm-no') || null, category: V('rm-cat') || 'shared',
+      capacity: Number(V('rm-cap') || 1) }) });
+    toast('أُضيفت الغرفة ✅'); await renderDeptHub();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function deptDelRoom(id, roomId) {
+  if (!confirm('حذف الغرفة؟ ستبقى الأسرّة بلا غرفة.')) return;
+  try {
+    await api(`/department-hub/${id}/rooms/${roomId}`, { method: 'DELETE' });
+    toast('حُذفت الغرفة ✅'); await renderDeptHub();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function deptAssignBed(id, bedId, roomId) {
+  try {
+    await api(`/department-hub/${id}/beds/${bedId}/room`, { method: 'PUT',
+      body: JSON.stringify({ room_id: roomId ? Number(roomId) : null }) });
+    toast('حُدّث توزيع السرير ✅'); await renderDeptHub();
+  } catch (e) { toast(e.message, true); }
+}
+
+function deptBookRoom(id, roomId) {
+  openModal('🗓️ حجز غرفة', `
+    <div class="form-grid">
+      <div class="field"><label>من *</label><input id="bk-start" type="datetime-local"></div>
+      <div class="field"><label>إلى *</label><input id="bk-end" type="datetime-local"></div>
+      <div class="field"><label>الغرض</label><input id="bk-purpose" placeholder="منظار / عملية"></div>
+      <div class="field"><label>رقم المريض</label><input id="bk-patient" type="number" min="1"></div>
+    </div>
+    <div class="row2" style="margin-top:12px">
+      <button class="btn success" onclick="deptSaveBooking(${id},${roomId})">تأكيد الحجز</button>
+      <button class="btn ghost" onclick="closeModal()">إلغاء</button>
+    </div>`);
+}
+
+async function deptSaveBooking(id, roomId) {
+  const body = {
+    starts_at: V('bk-start'), ends_at: V('bk-end'),
+    purpose: V('bk-purpose') || null,
+    patient_id: V('bk-patient') ? Number(V('bk-patient')) : null,
+  };
+  if (!body.starts_at || !body.ends_at) return toast('حدد وقت البداية والنهاية', true);
+  try {
+    await api(`/department-hub/${id}/rooms/${roomId}/bookings`, { method: 'POST',
+      body: JSON.stringify(body) });
+    closeModal(); toast('سُجّل الحجز ✅'); await renderDeptHub();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ---------- 4) الخدمات والأسعار ---------- */
+async function deptServicesHTML(id) {
+  const rows = await api(`/department-hub/${id}/services`);
+  const total = rows.reduce((s, r) => s + r.price, 0);
+  return `<div class="card">
+    <div class="toolbar"><h3 style="margin:0">💲 كتالوج خدمات القسم</h3>${deptPickerHTML()}
+      <span class="pill confirmed">${rows.length} خدمة</span>
+      <span class="pill in_progress">${total.toLocaleString()} ر.س متوسط القائمة</span></div>
+    <div style="overflow-x:auto;margin-bottom:12px"><table>
+      <thead><tr><th>#</th><th>الرمز</th><th>الخدمة/الإجراء</th><th>السعر</th>
+        <th>حصة الطبيب</th><th>تأمين</th><th>على المريض</th><th>خطوات الإجراء</th><th></th></tr></thead>
+      <tbody>${rows.map(r => `<tr>
+        <td>${r.id}</td><td>${esc(r.code || '—')}</td><td><strong>${esc(r.name)}</strong></td>
+        <td>${Number(r.price).toLocaleString()} ر.س</td>
+        <td>${r.doctor_share_pct}% <small>(${Number(r.doctor_amount).toLocaleString()})</small></td>
+        <td>${r.insurance_pct}% <small>(${Number(r.insurance_amount).toLocaleString()})</small></td>
+        <td>${Number(r.patient_amount).toLocaleString()} ر.س</td>
+        <td>${esc((r.procedure_note || '—').slice(0, 40))}</td>
+        <td>${isAdmin() ? `<button class="btn sm danger" onclick="deptDelService(${id},${r.id})">حذف</button>` : ''}</td>
+      </tr>`).join('') || '<tr><td colspan="9" class="empty">لا خدمات مسجّلة لهذا القسم</td></tr>'}</tbody>
+    </table></div>
+    ${isAdmin() ? `<div class="form-grid">
+      <div class="field"><label>اسم الخدمة *</label><input id="sv-name" placeholder="منظار هضمي"></div>
+      <div class="field"><label>الرمز</label><input id="sv-code" placeholder="SRV-1"></div>
+      <div class="field"><label>السعر (ر.س)</label><input id="sv-price" type="number" min="0" step="0.01" value="0"></div>
+      <div class="field"><label>نسبة الطبيب %</label><input id="sv-doc" type="number" min="0" max="100" value="0"></div>
+      <div class="field"><label>نسبة التأمين %</label><input id="sv-ins" type="number" min="0" max="100" value="0"></div>
+      <div class="field"><label>خطوات الإجراء</label><input id="sv-note" placeholder="صيام 8 ساعات"></div>
+    </div>
+    <button class="btn success" style="margin-top:10px" onclick="deptAddService(${id})">➕ إضافة خدمة</button>` : ''}
+  </div>`;
+}
+
+async function deptAddService(id) {
+  const name = (V('sv-name') || '').trim();
+  if (name.length < 2) return toast('اسم الخدمة مطلوب', true);
+  try {
+    await api(`/department-hub/${id}/services`, { method: 'POST', body: JSON.stringify({
+      name, code: V('sv-code') || null, price: Number(V('sv-price') || 0),
+      doctor_share_pct: Number(V('sv-doc') || 0),
+      insurance_pct: Number(V('sv-ins') || 0),
+      procedure_note: V('sv-note') || null }) });
+    toast('أُضيفت الخدمة ✅'); await renderDeptHub();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function deptDelService(id, sid) {
+  if (!confirm('حذف الخدمة من كتالوج القسم؟')) return;
+  try {
+    await api(`/department-hub/${id}/services/${sid}`, { method: 'DELETE' });
+    toast('حُذفت الخدمة ✅'); await renderDeptHub();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ---------- 5) الجداول والمواعيد ---------- */
+async function deptScheduleHTML(id) {
+  const rows = await api(`/department-hub/${id}/schedule`);
+  return `<div class="card">
+    <div class="toolbar"><h3 style="margin:0">🗓️ جدول تشغيل العيادات</h3>${deptPickerHTML()}
+      <span class="pill confirmed">${rows.length} وردية</span></div>
+    <div style="overflow-x:auto;margin-bottom:12px"><table>
+      <thead><tr><th>#</th><th>اليوم</th><th>الفترة</th><th>من</th><th>إلى</th><th>العيادة/الغرفة</th><th></th></tr></thead>
+      <tbody>${rows.map(r => `<tr>
+        <td>${r.id}</td><td>${esc(DEPT_DAYS[r.day_of_week] || '')}</td>
+        <td><span class="pill ${r.session === 'morning' ? 'confirmed' : 'in_progress'}">${r.session === 'morning' ? 'صباحية' : 'مسائية'}</span></td>
+        <td>${esc(r.open_time)}</td><td>${esc(r.close_time)}</td>
+        <td>${esc(r.room_name || '—')}</td>
+        <td>${isAdmin() ? `<button class="btn sm danger" onclick="deptDelSlot(${id},${r.id})">حذف</button>` : ''}</td>
+      </tr>`).join('') || '<tr><td colspan="7" class="empty">لم يُحدَّد جدول تشغيل بعد</td></tr>'}</tbody>
+    </table></div>
+    ${isAdmin() ? `<div class="form-grid">
+      <div class="field"><label>اليوم</label><select id="sl-day">
+        ${DEPT_DAYS.map((d, i) => `<option value="${i}">${d}</option>`).join('')}</select></div>
+      <div class="field"><label>الفترة</label><select id="sl-session">
+        <option value="morning">صباحية</option><option value="evening">مسائية</option></select></div>
+      <div class="field"><label>من</label><input id="sl-open" value="08:00"></div>
+      <div class="field"><label>إلى</label><input id="sl-close" value="14:00"></div>
+      <div class="field"><label>العيادة/الغرفة</label><input id="sl-room" placeholder="عيادة 1"></div>
+    </div>
+    <button class="btn success" style="margin-top:10px" onclick="deptAddSlot(${id})">➕ إضافة وردية</button>` : ''}
+  </div>`;
+}
+
+async function deptAddSlot(id) {
+  try {
+    await api(`/department-hub/${id}/schedule`, { method: 'POST', body: JSON.stringify({
+      day_of_week: Number(V('sl-day') || 0), session: V('sl-session') || 'morning',
+      open_time: V('sl-open') || '08:00', close_time: V('sl-close') || '14:00',
+      room_name: V('sl-room') || null }) });
+    toast('أُضيفت الوردية ✅'); await renderDeptHub();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function deptDelSlot(id, rowId) {
+  if (!confirm('حذف الوردية من جدول القسم؟')) return;
+  try {
+    await api(`/department-hub/${id}/schedule/${rowId}`, { method: 'DELETE' });
+    toast('حُذفت الوردية ✅'); await renderDeptHub();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ---------- 6) التقارير وإحصائيات القسم ---------- */
+async function deptAnalyticsHTML() {
+  const rows = await api('/department-hub/analytics', { params: { days: DEPT.days } });
+  const totRev = rows.reduce((s, r) => s + r.financials.revenue, 0);
+  const totBeds = rows.reduce((s, r) => s + r.occupancy.beds_total, 0);
+  const totOcc = rows.reduce((s, r) => s + r.occupancy.beds_occupied, 0);
+  const focus = DEPT.id ? rows.find(r => r.department_id === DEPT.id) : null;
+  return `<div class="card">
+    <div class="toolbar"><h3 style="margin:0">📊 مؤشرات الأقسام (آخر ${DEPT.days} يومًا)</h3>
+      ${deptPickerHTML()}
+      <select id="an-days" onchange="DEPT.days=Number(this.value);renderDeptHub()">
+        ${[7, 30, 90, 180, 365].map(d => `<option value="${d}" ${DEPT.days === d ? 'selected' : ''}>${d} يومًا</option>`).join('')}</select>
+    </div>
+    <div class="stats" style="margin-bottom:12px">
+      <div class="stat"><div class="num">${rows.length}</div><div class="lbl">قسم</div></div>
+      <div class="stat ${totBeds && totOcc / totBeds > 0.8 ? 'red' : 'green'}">
+        <div class="num">${totBeds ? ((totOcc / totBeds) * 100).toFixed(1) : 0}%</div>
+        <div class="lbl">إشغال (${totOcc} من ${totBeds})</div></div>
+      <div class="stat green"><div class="num">${totRev.toLocaleString()}</div><div class="lbl">إجمالي الإيراد (ر.س)</div></div>
+      <div class="stat"><div class="num">${rows.reduce((s, r) => s + r.productivity.appointments, 0)}</div><div class="lbl">مواعيد</div></div>
+      <div class="stat amber"><div class="num">${rows.reduce((s, r) => s + r.productivity.patients, 0)}</div><div class="lbl">مرضى مُخدمون</div></div>
+    </div>
+    ${focus ? `<h4>إنتاجية الأطباء — ${esc(focus.name)}</h4>
+    <div style="overflow-x:auto;margin-bottom:12px"><table>
+      <thead><tr><th>الطبيب</th><th>مواعيد</th><th>مرضى</th><th>إيراده (ر.س)</th></tr></thead>
+      <tbody>${focus.productivity.per_doctor.map(d => `<tr>
+        <td>${esc(d.name || '—')}</td><td>${d.appointments}</td><td>${d.patients}</td>
+        <td>${Number(d.revenue).toLocaleString()}</td></tr>`).join('')
+        || '<tr><td colspan="4" class="empty">لا أطباء في القسم</td></tr>'}</tbody></table></div>` : ''}
+    <h4>مقارنة الأقسام</h4>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>القسم</th><th>أسرة مشغولة/إجمالي</th><th>نسبة الإشغال</th>
+        <th>الإيراد</th><th>المحصّل</th><th>التأمين</th><th>المصروف</th><th>الصافي</th>
+        <th>مواعيد</th><th>مرضى</th><th>لكل مريض</th></tr></thead>
+      <tbody>${rows.map(r => `<tr>
+        <td><strong>${esc(r.name)}</strong></td>
+        <td>${r.occupancy.beds_occupied}/${r.occupancy.beds_total}</td>
+        <td><span class="pill ${r.occupancy.rate >= 80 ? 'cancelled' : r.occupancy.rate >= 50 ? 'lowstock' : 'confirmed'}">${r.occupancy.rate}%</span></td>
+        <td>${Number(r.financials.revenue).toLocaleString()}</td>
+        <td>${Number(r.financials.collected).toLocaleString()}</td>
+        <td>${Number(r.financials.insurance_share).toLocaleString()}</td>
+        <td>${Number(r.financials.cost).toLocaleString()}</td>
+        <td style="font-weight:700;color:${r.financials.net >= 0 ? '#155724' : '#721c24'}">${Number(r.financials.net).toLocaleString()}</td>
+        <td>${r.productivity.appointments}</td><td>${r.productivity.patients}</td>
+        <td>${Number(r.productivity.revenue_per_patient).toLocaleString()}</td>
+      </tr>`).join('') || '<tr><td colspan="11" class="empty">لا أقسام</td></tr>'}</tbody>
+    </table></div></div>`;
+}
+
+
+
+
+
+
 function stkDocFormHTML(type, items, whs, deps, vendors) {
   const meta = DOC_META[type] || [type, '📄', ''];
   const defId = (whs.find(w => w.is_default) || whs[0] || {}).id;
@@ -4610,31 +5118,12 @@ async function deleteStaffDoc(id) {
       </div>`;
   },
 
-  /* --- الأقسام --- */
+  /* --- الأقسام: مركز الأقسام بستة تبويبات (والأسرّة داخل تبويب الغرف) --- */
   async departments(main) {
-    const rows = await api('/departments/');
-    const form = isAdmin() ? `
-      <details class="addbox"><summary>➕ إضافة قسم</summary>
-      <div class="form-grid">
-        <div class="field"><label>اسم القسم *</label><input id="f-name"></div>
-        <div class="field"><label>الدور</label><input id="f-floor"></div>
-        <div class="field"><label>الوصف</label><input id="f-desc"></div>
-      </div>
-      <button class="btn success" style="margin-top:12px" onclick="addDept()">حفظ القسم</button>
-      </details>` : '';
-    main.innerHTML = `
-      <div class="card">
-        <h3>الأقسام (${rows.length})</h3>
-        ${form}
-        <div style="overflow-x:auto"><table>
-          <thead><tr><th>#</th><th>الاسم</th><th>الدور</th><th>الوصف</th><th>الأسرّة</th>${isAdmin() ? '<th></th>' : ''}</tr></thead>
-          <tbody>${rows.map(d => `<tr>
-            <td>${d.id}</td><td><strong>${esc(d.name)}</strong></td><td>${esc(d.floor || '-')}</td>
-            <td>${esc(d.description || '-')}</td><td>${d.beds.length}</td>
-            ${isAdmin() ? `<td><button class="btn sm danger" onclick="del('departments',${d.id},'departments')">حذف</button></td>` : ''}
-          </tr>`).join('') || '<tr><td colspan="6" class="empty">لا توجد أقسام</td></tr>'}</tbody>
-        </table></div>
-      </div>`;
+    DEPT_ALL = [];
+    main.innerHTML = `${deptBarsHTML()}
+      <div id="dept-hub"><div class="card"><div class="empty">جارٍ التحميل…</div></div></div>`;
+    await renderDeptHub();
   },
 
   /* --- الأسرّة --- */

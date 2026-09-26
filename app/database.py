@@ -159,6 +159,18 @@ PENDING_COLUMNS = {
         "supplier_name": "VARCHAR",
         "is_active": "BOOLEAN NOT NULL DEFAULT 1",
     },
+    "departments": {
+        # مركز الأقسام: الهيكل (أقسام فرعية) + النوع + رئيس القسم + التكلفة
+        "parent_id": "INTEGER",
+        "dept_type": "VARCHAR NOT NULL DEFAULT 'clinical'",
+        "head_doctor_id": "INTEGER",
+        "is_active": "BOOLEAN NOT NULL DEFAULT 1",
+        "monthly_operating_cost": "FLOAT NOT NULL DEFAULT 0",
+    },
+    "beds": {
+        # مركز الأقسام: السرير داخل غرفة/جناح
+        "room_id": "INTEGER",
+    },
     "attachments": {
         # DICOM/PACS metadata
         "dicom_study_uid": "VARCHAR",
@@ -313,6 +325,11 @@ INDEXES = {
     "stock_docs": ["doc_type", "status", "created_at"],
     "stock_doc_lines": ["doc_id", "item_id"],
     "general_stock_movements": ["item_id", "warehouse_id", "type", "created_at"],
+    "department_rooms": ["department_id", "category"],
+    "department_room_bookings": ["room_id", "starts_at"],
+    "department_services": ["department_id"],
+    "department_schedules": ["department_id", "day_of_week"],
+    "department_staff": ["department_id", "staff_id"],
 }
 
 

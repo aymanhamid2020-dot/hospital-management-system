@@ -57,13 +57,24 @@ class DepartmentBase(BaseModel):
 
 
 class DepartmentCreate(DepartmentBase):
-    pass
+    """حقول مركز الأقسام تُقبل عند الإنشاء: الأب والنوع ورأس القسم والتكلفة."""
+    parent_id: Optional[int] = Field(None, gt=0, description="القسم الأب (وحدة فرعية)")
+    dept_type: str = Field("clinical", description="clinical|diagnostic|administrative|supportive")
+    head_doctor_id: Optional[int] = Field(None, gt=0)
+    is_active: bool = True
+    monthly_operating_cost: float = Field(0, ge=0)
 
 
 class DepartmentUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     floor: Optional[str] = None
+    # حقول مركز الأقسام (تُعدَّل أيضًا عبر /department-hub/{id}/structure)
+    parent_id: Optional[int] = Field(None, gt=0)
+    dept_type: Optional[str] = None
+    head_doctor_id: Optional[int] = Field(None, gt=0)
+    is_active: Optional[bool] = None
+    monthly_operating_cost: Optional[float] = Field(None, ge=0)
 
 
 class BedInDB(ORMModel):
@@ -71,6 +82,7 @@ class BedInDB(ORMModel):
     bed_number: str
     status: BedStatus
     patient_id: Optional[int] = None
+    room_id: Optional[int] = None
 
 
 class DepartmentInDB(ORMModel):
@@ -80,6 +92,134 @@ class DepartmentInDB(ORMModel):
     floor: Optional[str] = None
     created_at: datetime
     beds: List[BedInDB] = []
+    # مركز الأقسام: الهيكل والكادر
+    parent_id: Optional[int] = None
+    dept_type: str = "clinical"
+    head_doctor_id: Optional[int] = None
+    is_active: bool = True
+    monthly_operating_cost: float = 0.0
+
+
+# ===== مركز الأقسام: الغرف والخدمات والجداول والكادر =====
+class DepartmentRoomCreate(BaseModel):
+    name: str = Field(..., min_length=2, max_length=80)
+    room_number: Optional[str] = None
+    category: str = Field("shared", description="royal|private|shared|icu|er|operating")
+    capacity: int = Field(1, ge=1, le=200)
+
+
+class DepartmentRoomOut(ORMModel):
+    id: int
+    department_id: int
+    name: str
+    room_number: Optional[str] = None
+    category: str
+    capacity: int
+    is_active: bool
+    beds_count: int = 0
+    beds_occupied: int = 0
+    upcoming_bookings: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DepartmentRoomBookingIn(BaseModel):
+    starts_at: datetime
+    ends_at: datetime
+    purpose: Optional[str] = Field(None, max_length=200)
+    patient_id: Optional[int] = Field(None, gt=0)
+
+
+class DepartmentRoomBookingOut(ORMModel):
+    id: int
+    room_id: int
+    room_name: Optional[str] = None
+    starts_at: datetime
+    ends_at: datetime
+    purpose: Optional[str] = None
+    patient_id: Optional[int] = None
+    created_by: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DepartmentServiceIn(BaseModel):
+    name: str = Field(..., min_length=2, max_length=150)
+    code: Optional[str] = Field(None, max_length=40)
+    price: float = Field(0, ge=0)
+    doctor_share_pct: float = Field(0, ge=0, le=100)
+    insurance_pct: float = Field(0, ge=0, le=100)
+    procedure_note: Optional[str] = None
+
+
+class DepartmentServiceOut(ORMModel):
+    id: int
+    department_id: int
+    code: Optional[str] = None
+    name: str
+    price: float
+    doctor_share_pct: float
+    insurance_pct: float
+    procedure_note: Optional[str] = None
+    is_active: bool
+    doctor_amount: float = 0.0
+    insurance_amount: float = 0.0
+    patient_amount: float = 0.0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DepartmentScheduleIn(BaseModel):
+    day_of_week: int = Field(..., ge=0, le=6, description="0=الأحد … 6=السبت")
+    session: str = Field("morning", description="morning|evening")
+    open_time: str = Field("08:00", max_length=5)
+    close_time: str = Field("14:00", max_length=5)
+    room_name: Optional[str] = Field(None, max_length=80)
+
+
+class DepartmentScheduleOut(ORMModel):
+    id: int
+    department_id: int
+    day_of_week: int
+    session: str
+    open_time: str
+    close_time: str
+    room_name: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DepartmentStaffIn(BaseModel):
+    staff_id: int = Field(..., gt=0)
+    role_in_dept: str = Field("ممرض", max_length=60)
+    is_head: bool = False
+
+
+class DepartmentStaffOut(ORMModel):
+    id: int
+    department_id: int
+    staff_id: int
+    staff_name: Optional[str] = None
+    position: Optional[str] = None
+    role_in_dept: str
+    is_head: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DepartmentHodIn(BaseModel):
+    """تعيين رئيس القسم (طبيب) — أو إلغاؤه بـ null."""
+    head_doctor_id: Optional[int] = Field(None, gt=0)
+
+
+class DepartmentUpdateExtra(BaseModel):
+    """حقول مركز الأقسام المضافة على حقول القسم الأساسية."""
+    parent_id: Optional[int] = Field(None, gt=0)
+    dept_type: Optional[str] = None
+    head_doctor_id: Optional[int] = Field(None, gt=0)
+    is_active: Optional[bool] = None
+    monthly_operating_cost: Optional[float] = Field(None, ge=0)
+
 
 
 # ===== الأسرّة =====
