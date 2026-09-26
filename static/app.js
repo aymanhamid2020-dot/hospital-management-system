@@ -926,27 +926,131 @@ function invBarsHTML() {
        onclick="setInvSub('${k}')">${i} ${l}</button>`).join('')}</div>`;
 }
 
+/* ---------- 0) مخزون الأدوية: القسم الافتراضي للشاشة ---------- */
+async function invMedsHTML() {
+  const qs = new URLSearchParams();
+  if (INV.q) qs.set('search', INV.q);
+  if (INV.status) qs.set('status', INV.status);
+  qs.set('expiring_days', INV.days);
+  const [items, sum, moves] = await Promise.all([
+    api('/inventory/?' + qs.toString()),
+    api('/inventory/summary?expiring_days=' + INV.days),
+    api('/inventory/movements?limit=50')]);
+  const stPill = { ok: 'confirmed', low: 'lowstock', out: 'unpaid',
+                   expiring: 'pending', expired: 'cancelled' };
+  const stLbl = { ok: 'سليم', low: 'منخفض', out: 'نافد',
+                  expiring: 'قارب على الانتهاء', expired: 'منتهي الصلاحية' };
+  const mvPill = { in: 'confirmed', out: 'cancelled', adjust: 'in_progress' };
+  const mvLbl = { in: 'وارد', out: 'صادر', adjust: 'جرد' };
+  const opts = [['', 'كل الحالات'], ['ok', 'سليم'], ['low', 'منخفض'], ['out', 'نافد'],
+                ['expiring', 'قارب على الانتهاء'], ['expired', 'منتهي الصلاحية']]
+    .map(([v, l]) => `<option value="${v}" ${INV.status === v ? 'selected' : ''}>${l}</option>`)
+    .join('');
+  const medForm = isAdmin() ? `
+    <details class="addbox"><summary>➕ إضافة دواء للمخزون</summary>
+    <div class="form-grid">
+      <div class="field"><label>رمز الدواء *</label><input id="f-code" placeholder="PAR500"></div>
+      <div class="field"><label>اسم الدواء *</label><input id="f-mname"></div>
+      <div class="field"><label>الكمية</label><input id="f-qty" type="number" min="0" value="0"></div>
+      <div class="field"><label>الوحدة</label><input id="f-unit" value="علبة"></div>
+      <div class="field"><label>السعر (ر.س)</label><input id="f-mprice" type="number" step="0.01" min="0"></div>
+      <div class="field"><label>حد التنبيه</label><input id="f-minq" type="number" min="0" value="10"></div>
+    </div>
+    <button class="btn success" style="margin-top:12px" onclick="addMedication('inventory')">حفظ الدواء</button>
+    </details>` : '';
+  const legacyHTML = `
+    <div class="stats">
+      <div class="stat"><div class="num">${sum.total_value.toLocaleString()} ر.س</div><div class="lbl">قيمة المخزون (ر.س)</div></div>
+      <div class="stat green"><div class="num">${sum.items}</div><div class="lbl">عدد الأصناف</div></div>
+      <div class="stat"><div class="num">${sum.units}</div><div class="lbl">إجمالي القطع</div></div>
+      <div class="stat amber"><div class="num">${sum.low}</div><div class="lbl">مخزون منخفض</div></div>
+      <div class="stat red"><div class="num">${sum.out}</div><div class="lbl">أصناف نافدة</div></div>
+      <div class="stat amber"><div class="num">${sum.expiring}</div><div class="lbl">أصناف تنتهي قريبًا</div></div>
+      <div class="stat red"><div class="num">${sum.expired}</div><div class="lbl">أصناف منتهية</div></div>
+    </div>
+    <div class="card">
+      <div class="toolbar">
+        <input id="f-inv-q" placeholder="ابحث بالاسم أو الرمز" value="${esc(INV.q)}" style="min-width:200px">
+        <select id="f-inv-status">${opts}</select>
+        <input id="f-inv-days" type="number" min="0" max="365" value="${INV.days}"
+               placeholder="أيام قرب الانتهاء (0–365)" style="width:140px">
+        <button class="btn" onclick="loadInventory()">تطبيق</button>
+        <button class="btn ghost" onclick="clearInv()">مسح</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/pdf','inventory_report.pdf')">📄 تقرير المخزون PDF</button>` : ''}
+        ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/csv?section=inventory','inventory_items.csv')">⬇️ مخزون CSV</button>` : ''}
+        ${isAdmin() ? `<button class="btn ghost" onclick="download('/inventory/labels','med_labels.pdf')">🏷️ ملصقات الكل</button>` : ''}
+        </div>
+      </div>
+      ${medForm}
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>#</th><th>الرمز</th><th>الاسم</th><th>الكمية</th><th>الحالة</th><th>السعر</th><th>القيمة</th><th>حد التنبيه</th><th>الانتهاء</th><th></th></tr></thead>
+        <tbody>${items.map(m => `<tr>
+          <td>${m.id}</td><td>${esc(m.code)}</td><td><strong>${esc(m.name)}</strong></td>
+          <td>${m.quantity} ${esc(m.unit)}</td>
+          <td><span class="pill ${stPill[m.status] || 'partial'}">${stLbl[m.status] || m.status}</span></td>
+          <td>${m.price.toLocaleString()} ر.س</td>
+          <td>${m.value.toLocaleString()} ر.س</td>
+          <td>${m.min_quantity}</td>
+          <td>${m.expiry_date ? fmtDate(m.expiry_date) : '—'}${(m.status === 'expiring' || m.status === 'expired') && m.days_to_expiry !== null ? ` <small title="أيام متبقية للانتهاء">⏱ ${m.days_to_expiry}</small>` : ''}</td>
+          <td class="actions">
+            ${isAdmin() ? `<button class="btn sm ghost" onclick="restock(${m.id})">📦 توريد</button>` : ''}
+            ${isAdmin() ? `<button class="btn sm ghost" onclick="download('/inventory/labels?ids=${m.id}','label_${m.code}.pdf')">🏷️ ملصق</button>` : ''}
+            ${isAdmin() ? `<button class="btn sm ghost" onclick="adjustStock(${m.id})">🧮 جرد</button>` : ''}
+            ${isAdmin() ? `<button class="btn sm danger" onclick="del('medications',${m.id},'inventory')">حذف</button>` : ''}
+          </td>
+        </tr>`).join('') || '<tr><td colspan="10" class="empty">لا توجد أصناف مطابقة</td></tr>'}</tbody>
+      </table></div>
+    </div>
+    <div class="card">
+      <h3>حركات المخزون (${moves.length})</h3>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>#</th><th>التاريخ</th><th>الدواء</th><th>نوع الحركة</th><th>التغير</th><th>الرصيد بعد الحركة</th><th>ملاحظة</th><th>المستخدم</th></tr></thead>
+        <tbody>${moves.map(mv => `<tr>
+          <td>${mv.id}</td><td>${fmtDate(mv.created_at)}</td>
+          <td>${esc(mv.medication_name)}</td>
+          <td><span class="pill ${mvPill[mv.type] || 'partial'}">${mvLbl[mv.type] || mv.type}</span></td>
+          <td style="color:${mv.change > 0 ? '#155724' : '#721c24'};font-weight:700">${mv.change > 0 ? '+' : ''}${mv.change}</td>
+          <td>${mv.quantity_after}</td>
+          <td>${esc(mv.note || '-')}</td>
+          <td>${esc(mv.made_by || '-')}</td>
+        </tr>`).join('') || '<tr><td colspan="8" class="empty">لا حركات مخزون بعد</td></tr>'}</tbody>
+      </table></div>
+    </div>
+      </div>
+    </div>`;
+  return legacyHTML;
+}
+
+/* جدول توزيع أقسام شاشة المخزون: مفتاح «التبويب/القسم» ← المعالج الذي يرسمه.
+   يُغني عن سلسلة if الطويلة، ويضمن أن كل قسم مُسجَّل ولم ينسَ أحد. */
+const INV_SUB_VIEWS = {
+  'item-master/medications': invMedsHTML,
+  'item-master/catalog': invCatalogHTML,
+  'item-master/reorder': invReorderHTML,
+  'stock-movements/warehouses': invWarehousesHTML,
+  'stock-movements/grn': () => invDocsHTML('grn'),
+  'stock-movements/transfers': () => invDocsHTML('transfer'),
+  'stock-movements/issues': () => invDocsHTML('issue'),
+  'stock-movements/returns': () => invDocsHTML('return'),
+  'stocktake/physical': () => invDocsHTML('stocktake'),
+  'stocktake/adjustments': invAdjustmentsHTML,
+  'expiry/tracking': invExpiryHTML,
+  'expiry/disposal': invDisposalHTML,
+  'reports/expiry-alerts': invExpiryHTML,
+  'reports/item-card': invItemCardHTML,
+  'reports/valuation': invValuationHTML,
+  'reports/slow-moving': invSlowHTML,
+  'procurement/vendors': invVendorsHTML,
+  'procurement/purchase-requests': () => invDocsHTML('pr'),
+  'procurement/purchase-orders': () => invDocsHTML('po'),
+};
+
 async function invOpsHTML() {
-  const key = INV_TAB + '/' + INV_SUB;
+  const render = INV_SUB_VIEWS[INV_TAB + '/' + INV_SUB];
+  if (!render) return '<div class="empty">قسم غير معروف</div>';
   try {
-    if (key === 'item-master/catalog') return await invCatalogHTML();
-    if (key === 'item-master/reorder') return invReorderHTML();
-    if (key === 'stock-movements/warehouses') return await invWarehousesHTML();
-    if (key === 'stocktake/adjustments') return await invAdjustmentsHTML();
-    if (key === 'expiry/tracking' || key === 'reports/expiry-alerts') return await invExpiryHTML();
-    if (key === 'expiry/disposal') return await invDisposalHTML();
-    if (key === 'procurement/vendors') return await invVendorsHTML();
-    if (key === 'reports/item-card') return await invItemCardHTML();
-    if (key === 'reports/valuation') return await invValuationHTML();
-    if (key === 'reports/slow-moving') return await invSlowHTML();
-    if (key === 'stock-movements/grn') return await invDocsHTML('grn');
-    if (key === 'stock-movements/transfers') return await invDocsHTML('transfer');
-    if (key === 'stock-movements/issues') return await invDocsHTML('issue');
-    if (key === 'stock-movements/returns') return await invDocsHTML('return');
-    if (key === 'stocktake/physical') return await invDocsHTML('stocktake');
-    if (key === 'procurement/purchase-requests') return await invDocsHTML('pr');
-    if (key === 'procurement/purchase-orders') return await invDocsHTML('po');
-    return '<div class="empty">قسم غير معروف</div>';
+    return await render();
   } catch (e) {
     return `<div class="empty">تعذّر التحميل: ${esc(e.message || 'خطأ')}</div>`;
   }
@@ -4897,14 +5001,6 @@ const VIEWS = {
 
   /* --- المخزون: ملخص + أصناف بحالة + دفتر الحركات --- */
   async inventory(main) {
-    const qs = new URLSearchParams();
-    if (INV.q) qs.set('search', INV.q);
-    if (INV.status) qs.set('status', INV.status);
-    qs.set('expiring_days', INV.days);
-    const [items, sum, moves] = await Promise.all([
-      api('/inventory/?' + qs.toString()),
-      api('/inventory/summary?expiring_days=' + INV.days),
-      api('/inventory/movements?limit=50')]);
 function saveHR() {
   const s = currentHR(); if (!s) return;
   const profile = hrProfile();
@@ -4940,96 +5036,8 @@ async function deleteStaffDoc(id) {
   try { await api('/staff-documents/' + id, { method: 'DELETE' }); toast('تم حذف المستند'); navigate('hr'); } catch(e) { toast(e.message, true); }
 }
 
-    const stPill = { ok: 'confirmed', low: 'lowstock', out: 'unpaid',
-                     expiring: 'pending', expired: 'cancelled' };
-    const stLbl = { ok: 'سليم', low: 'منخفض', out: 'نافد',
-                    expiring: 'قارب على الانتهاء', expired: 'منتهي الصلاحية' };
-    const mvPill = { in: 'confirmed', out: 'cancelled', adjust: 'in_progress' };
-    const mvLbl = { in: 'وارد', out: 'صادر', adjust: 'جرد' };
-    const opts = [['', 'كل الحالات'], ['ok', 'سليم'], ['low', 'منخفض'], ['out', 'نافد'],
-                  ['expiring', 'قارب على الانتهاء'], ['expired', 'منتهي الصلاحية']]
-      .map(([v, l]) => `<option value="${v}" ${INV.status === v ? 'selected' : ''}>${l}</option>`)
-      .join('');
-    const medForm = isAdmin() ? `
-      <details class="addbox"><summary>➕ إضافة دواء للمخزون</summary>
-      <div class="form-grid">
-        <div class="field"><label>رمز الدواء *</label><input id="f-code" placeholder="PAR500"></div>
-        <div class="field"><label>اسم الدواء *</label><input id="f-mname"></div>
-        <div class="field"><label>الكمية</label><input id="f-qty" type="number" min="0" value="0"></div>
-        <div class="field"><label>الوحدة</label><input id="f-unit" value="علبة"></div>
-        <div class="field"><label>السعر (ر.س)</label><input id="f-mprice" type="number" step="0.01" min="0"></div>
-        <div class="field"><label>حد التنبيه</label><input id="f-minq" type="number" min="0" value="10"></div>
-      </div>
-      <button class="btn success" style="margin-top:12px" onclick="addMedication('inventory')">حفظ الدواء</button>
-      </details>` : '';
-    const legacyHTML = `
-      <div class="stats">
-        <div class="stat"><div class="num">${sum.total_value.toLocaleString()} ر.س</div><div class="lbl">قيمة المخزون (ر.س)</div></div>
-        <div class="stat green"><div class="num">${sum.items}</div><div class="lbl">عدد الأصناف</div></div>
-        <div class="stat"><div class="num">${sum.units}</div><div class="lbl">إجمالي القطع</div></div>
-        <div class="stat amber"><div class="num">${sum.low}</div><div class="lbl">مخزون منخفض</div></div>
-        <div class="stat red"><div class="num">${sum.out}</div><div class="lbl">أصناف نافدة</div></div>
-        <div class="stat amber"><div class="num">${sum.expiring}</div><div class="lbl">أصناف تنتهي قريبًا</div></div>
-        <div class="stat red"><div class="num">${sum.expired}</div><div class="lbl">أصناف منتهية</div></div>
-      </div>
-      <div class="card">
-        <div class="toolbar">
-          <input id="f-inv-q" placeholder="ابحث بالاسم أو الرمز" value="${esc(INV.q)}" style="min-width:200px">
-          <select id="f-inv-status">${opts}</select>
-          <input id="f-inv-days" type="number" min="0" max="365" value="${INV.days}"
-                 placeholder="أيام قرب الانتهاء (0–365)" style="width:140px">
-          <button class="btn" onclick="loadInventory()">تطبيق</button>
-          <button class="btn ghost" onclick="clearInv()">مسح</button>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-          ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/pdf','inventory_report.pdf')">📄 تقرير المخزون PDF</button>` : ''}
-          ${isAdmin() ? `<button class="btn ghost" onclick="download('/reports/pharmacy/csv?section=inventory','inventory_items.csv')">⬇️ مخزون CSV</button>` : ''}
-          ${isAdmin() ? `<button class="btn ghost" onclick="download('/inventory/labels','med_labels.pdf')">🏷️ ملصقات الكل</button>` : ''}
-          </div>
-        </div>
-        ${medForm}
-        <div style="overflow-x:auto"><table>
-          <thead><tr><th>#</th><th>الرمز</th><th>الاسم</th><th>الكمية</th><th>الحالة</th><th>السعر</th><th>القيمة</th><th>حد التنبيه</th><th>الانتهاء</th><th></th></tr></thead>
-          <tbody>${items.map(m => `<tr>
-            <td>${m.id}</td><td>${esc(m.code)}</td><td><strong>${esc(m.name)}</strong></td>
-            <td>${m.quantity} ${esc(m.unit)}</td>
-            <td><span class="pill ${stPill[m.status] || 'partial'}">${stLbl[m.status] || m.status}</span></td>
-            <td>${m.price.toLocaleString()} ر.س</td>
-            <td>${m.value.toLocaleString()} ر.س</td>
-            <td>${m.min_quantity}</td>
-            <td>${m.expiry_date ? fmtDate(m.expiry_date) : '—'}${(m.status === 'expiring' || m.status === 'expired') && m.days_to_expiry !== null ? ` <small title="أيام متبقية للانتهاء">⏱ ${m.days_to_expiry}</small>` : ''}</td>
-            <td class="actions">
-              ${isAdmin() ? `<button class="btn sm ghost" onclick="restock(${m.id})">📦 توريد</button>` : ''}
-              ${isAdmin() ? `<button class="btn sm ghost" onclick="download('/inventory/labels?ids=${m.id}','label_${m.code}.pdf')">🏷️ ملصق</button>` : ''}
-              ${isAdmin() ? `<button class="btn sm ghost" onclick="adjustStock(${m.id})">🧮 جرد</button>` : ''}
-              ${isAdmin() ? `<button class="btn sm danger" onclick="del('medications',${m.id},'inventory')">حذف</button>` : ''}
-            </td>
-          </tr>`).join('') || '<tr><td colspan="10" class="empty">لا توجد أصناف مطابقة</td></tr>'}</tbody>
-        </table></div>
-      </div>
-      <div class="card">
-        <h3>حركات المخزون (${moves.length})</h3>
-        <div style="overflow-x:auto"><table>
-          <thead><tr><th>#</th><th>التاريخ</th><th>الدواء</th><th>نوع الحركة</th><th>التغير</th><th>الرصيد بعد الحركة</th><th>ملاحظة</th><th>المستخدم</th></tr></thead>
-          <tbody>${moves.map(mv => `<tr>
-            <td>${mv.id}</td><td>${fmtDate(mv.created_at)}</td>
-            <td>${esc(mv.medication_name)}</td>
-            <td><span class="pill ${mvPill[mv.type] || 'partial'}">${mvLbl[mv.type] || mv.type}</span></td>
-            <td style="color:${mv.change > 0 ? '#155724' : '#721c24'};font-weight:700">${mv.change > 0 ? '+' : ''}${mv.change}</td>
-            <td>${mv.quantity_after}</td>
-            <td>${esc(mv.note || '-')}</td>
-            <td>${esc(mv.made_by || '-')}</td>
-          </tr>`).join('') || '<tr><td colspan="8" class="empty">لا حركات مخزون بعد</td></tr>'}</tbody>
-        </table></div>
-      </div>
-        </div>
-      </div>`;
-    // كل قسم له مكانه: مخزون الأدوية في تبويبه وحده، والباقي في موزّع الأقسام
     main.innerHTML = `${invBarsHTML()}<div id="inv-ops"><div class="empty">جارٍ التحميل…</div></div>`;
-    if (INV_TAB === 'item-master' && INV_SUB === 'medications') {
-      document.getElementById('inv-ops').innerHTML = legacyHTML;
-    } else {
-      await renderInvOps();
-    }
+    await renderInvOps();
   },
 
   /* --- المبيعات: شاشة مستقلة في القائمة (ليست تبويبًا في المحاسبة) --- */
