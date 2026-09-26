@@ -141,6 +141,13 @@ const AR2EN = {
   'موظف:': 'Staff:',
   /* القائمة والترويسة */
   '🏥 المستشفى': '🏥 Hospital',
+  'الأقسام الرئيسية': 'Main Sections',
+  'الرئيسية': 'Home',
+  'الرعاية السريرية': 'Clinical Care',
+  'المرافق والمخزون': 'Facilities & Inventory',
+  'المالية والفوترة': 'Finance & Billing',
+  'الموارد البشرية والإدارة': 'HR & Administration',
+  'النظام والحوكمة': 'System & Governance',
   'لوحة التحكم': 'Dashboard',
   'المرضى': 'Patients',
   'قائمة المرضى': 'Patient List',

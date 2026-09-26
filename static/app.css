@@ -33,6 +33,10 @@
     top: 0; bottom: 0; inset-inline-start: 0; overflow-y: auto; }
   .sidebar .brand { color: #fff; font-size: 17px; font-weight: bold; padding: 0 20px 18px;
     border-bottom: 1px solid #34455c; margin-bottom: 12px; }
+  .sidebar .nav-title { font-size: 11px; font-weight: bold; color: #7f93a8; letter-spacing: .4px;
+    padding: 16px 20px 6px; text-transform: uppercase; border-top: 1px solid #34455c;
+    margin-top: 8px; }
+  .sidebar .brand + .nav-title { border-top: 0; margin-top: 0; padding-top: 4px; }
   .sidebar a { display: flex; align-items: center; gap: 10px; color: #cfd8e3; text-decoration: none;
     padding: 11px 20px; font-size: 14px; border-inline-start: 3px solid transparent; transition: .15s; }
   .sidebar a:hover { background: #283a4f; color: #fff; }
@@ -238,7 +242,8 @@
   .cal-more { font-size: 11px; color: #2c7be5; font-weight: bold; }
 
   @media (max-width: 800px) {
-    .sidebar { width: 62px; } .sidebar .brand, .sidebar a span { display: none; }
+    .sidebar { width: 62px; }
+    .sidebar .brand, .sidebar .nav-title, .sidebar a span { display: none; }
     .content { margin-inline-start: 62px; }
   }
 
