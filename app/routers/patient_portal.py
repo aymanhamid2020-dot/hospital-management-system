@@ -5,7 +5,7 @@
 فقط، فلا يستطيع المريض التسجيل بنفسه ولا انتحال سجل غيره.
 """
 from datetime import datetime, timedelta, timezone
-from typing import List
+from typing import List, Optional
 
 import jwt
 from fastapi import APIRouter, Depends, HTTPException
@@ -46,7 +46,7 @@ class PortalAccountOut(BaseModel):
     patient_name: str
     username: str
     is_active: bool
-    last_login_at: datetime = None
+    last_login_at: Optional[datetime] = None
     created_at: datetime
 
 
@@ -145,17 +145,17 @@ async def update_portal_account(
 
 
 @router.delete("/accounts/{account_id}", status_code=204,
-               summary="حذف/تعطيل حساب بوابة (مدير فقط)")
+               summary="حذف حساب بوابة (مدير فقط)")
 async def delete_portal_account(
     account_id: int,
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    """حذف حساب بوابة (مدير فقط) — تعطيل ناعم."""
+    """حذف حساب بوابة (مدير فقط) — حذف نهائي."""
     account = db.query(PatientPortalAccount).filter(PatientPortalAccount.id == account_id).first()
     if not account:
         raise HTTPException(404, "الحساب غير موجود")
-    account.is_active = False
+    db.delete(account)
     db.commit()
     return None
 
