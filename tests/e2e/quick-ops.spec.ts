@@ -8,9 +8,18 @@ const TAG = Date.now().toString(36).slice(-5).toUpperCase();
 /** بيانات التهيئة: مورد + مستودع + صنف + دواء (عبر API) — تُنشأ مرة واحدة فقط */
 async function seed(request: import('@playwright/test').APIRequestContext) {
   const h = await authHeader(request);
-  const wh = await (await request.get('/stock/warehouses', { headers: h })).json();
+  let wh = await (await request.get('/stock/warehouses', { headers: h })).json();
+  // قاعدة CI نظيفة لا يكون فيها سوى «المستودع الرئيسي» الافتراضي (seed_demo لا
+  // ينشئ مستودعات)، والترحيل إلى نفس المستودع يُرفض 400 ⇒ ننشئ فرعًا أولًا
+  if (wh.length < 2) {
+    const wRes = await request.post('/stock/warehouses', {
+      headers: h, data: { name: `فرع التحويل ${TAG}`, kind: 'dept' } });
+    expect(wRes.ok(), 'تعذّر إنشاء مستودع التحويل').toBeTruthy();
+    wh = await (await request.get('/stock/warehouses', { headers: h })).json();
+  }
   const main = wh.find((w: any) => w.is_default) || wh[0];
   const second = wh.find((w: any) => w.id !== main.id) || main;
+  expect(second.id, 'يلزم مستودعان مختلفان لاختبار الترحيل').not.toBe(main.id);
 
   // المورد: يُنشأ مرة واحدة ويُعاد استخدامه
   const vCode = `QV${TAG}`;
