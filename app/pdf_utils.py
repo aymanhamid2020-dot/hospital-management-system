@@ -30,12 +30,16 @@ def _resolve_font(env_name: str, candidates: list) -> str:
 FONT_REGULAR = _resolve_font("HMS_FONT_REGULAR", _REGULAR_CANDIDATES)
 FONT_BOLD = _resolve_font("HMS_FONT_BOLD", _BOLD_CANDIDATES) or FONT_REGULAR
 
-PRIMARY = (44, 123, 229)    # أزرق
-DARK = (51, 51, 51)
-GRAY = (136, 136, 136)
-LIGHT_BG = (240, 246, 255)
-GREEN = (40, 167, 69)
-RED = (220, 53, 69)
+# اللوحة اللونية — مصدر الحقيقية لكل المستندات.
+# يستوردها `print_kit` تأكيداً، فتصل الهوية واحدة
+# بلا ازدواج للألوان (كانت الأزرق القديم بانتراء).
+PRIMARY = (15, 76, 92)      # أزرق بترولي — اللون المعتمد
+ACCENT = (18, 164, 184)     # تركوازي
+DARK = (27, 42, 51)         # نص أساسي
+GRAY = (107, 124, 135)      # نص ثانوي
+LIGHT_BG = (241, 246, 248)  # خلفية ناعمة
+GREEN = (27, 138, 90)
+RED = (192, 57, 43)
 
 
 def ar(text: str) -> str:
@@ -50,17 +54,26 @@ def ar(text: str) -> str:
 
 
 class ArabicPDF(FPDF):
-    """PDF بخط عربي جاهز مع ترويسة وتذييل."""
+    """PDF بخط عربي جاهز مع ترويسة وتذييل.
 
-    def __init__(self, title: str, lang: str = "ar"):
+    **يستعمل هوية `print_kit`** — نفس الألوان
+    والخطوط والترويسة والتذييل المستعملة في
+    مستندات `Doc` — فيخرج كل المستندات المستحصلة
+    بالمظهر الموحّد دون إعادة كتابة منطق العرض.
+
+    الاستوراد كسول (داخل الدالة) لأن `print_kit`
+    يستورد بدوره `ar` و `FONT_*` من هذه الوحدة
+    ⇒ استوراد من مستوى الوحدة لن الوافية.
+    """
+
+    def __init__(self, title: str, lang: str = "ar", kind: str = "",
+                 number: str = "", subtitle: str = ""):
         super().__init__(orientation="P", unit="mm", format="A4")
+        from app.print_kit import PAGE as _PAGE
+        from app.print_kit import draw_pdf_footer, draw_pdf_header
+
         self.doc_title = title
         self.lang = lang if lang in ("ar", "en") else "ar"
-        self.footer_text = (
-            "Hospital & Clinics Management System — computer-generated document"
-            if self.lang == "en"
-            else "نظام إدارة المستشفيات والعيادات — مستند مولّد إلكترونيًا"
-        )
         if not FONT_REGULAR:
             raise RuntimeError(
                 "لم يُعثر على خط عربي: ثبّت Arial (ويندوز) أو fonts-dejavu-core "
@@ -68,47 +81,16 @@ class ArabicPDF(FPDF):
             )
         self.add_font("ar", "", FONT_REGULAR)
         self.add_font("ar", "B", FONT_BOLD or FONT_REGULAR)
-        self.set_auto_page_break(auto=True, margin=20)
+        self.alias_nb_pages()
+        self.set_margins(_PAGE["mx"], _PAGE["top"], _PAGE["mx"])
+        self.set_auto_page_break(True, margin=_PAGE["bottom"])
         self.add_page()
-        # ترويسة
-        self.set_fill_color(*PRIMARY)
-        self.rect(0, 0, 210, 28, "F")
-        self.set_xy(10, 7)
-        self.set_text_color(255, 255, 255)
-        self.set_font("ar", "B", 16)
-        self.cell(0, 8, ar(title), align="C")
-        self.set_y(34)
+        # ترويسة موحّدة: شعار + جهة + عنوان + سطر ميتا
+        self.set_y(draw_pdf_header(self, title, self.lang, kind, number,
+                                   subtitle, font="ar"))
         self.set_text_color(*DARK)
-
-    def footer(self):
-        self.set_y(-15)
-        self.set_font("ar", "", 8)
-        self.set_text_color(*GRAY)
-        self.cell(0, 10, ar(self.footer_text), align="C")
-
-    def kv_row(self, label: str, value, bold_label: bool = True):
-        """سطر (تسمية: قيمة) — من اليمين لليسار بالعربية ومن اليسار بالإنجليزية."""
-        self.set_font("ar", "B" if bold_label else "", 11)
-        if self.lang == "en":
-            self.set_text_color(*PRIMARY)
-            self.set_xy(10, self.get_y())
-            self.cell(45, 9, ar(f"{label}:"), align="L")
-            self.set_font("ar", "", 11)
-            self.set_text_color(*DARK)
-            self.set_xy(55, self.get_y() - 9)
-            self.cell(145, 9, ar(str(value)), align="L")
-            self.ln(9)
-            return
-        self.set_text_color(*PRIMARY)
-        label_w = 45
-        x_label = 200 - label_w
-        self.set_xy(x_label, self.get_y())
-        self.cell(label_w, 9, ar(f"{label}:"), align="R")
-        self.set_font("ar", "", 11)
-        self.set_text_color(*DARK)
-        self.set_xy(10, self.get_y() - 9)
-        self.cell(145, 9, ar(str(value)), align="R")
-        self.ln(9)
+        # تذييل عن المصفحة FPDF → على كل صفحة تقابًا
+        self.footer = lambda: draw_pdf_footer(self, self.lang, "ar", title=title)
 
     def section(self, text: str):
         """عنوان قسم بخلفية فاتحة."""
@@ -122,6 +104,70 @@ class ArabicPDF(FPDF):
                   new_x="LMARGIN", new_y="NEXT")
         self.set_text_color(*DARK)
         self.ln(2)
+
+    def kv_row(self, label: str, value, bold_label: bool = True):
+        """سطر (تسمية: قيمة) — من اليمين لليسار بالعربية ومن اليسار بالإنجليزية.
+
+        **يستخدم إحداثيات مطلقة**: `cell` يُقدّم مؤشر `x` بعد كل نداء، فالاعتماد
+        على `get_y()` بعد الرسم يجعل القيمة تُرسم على السطر نفسه فيتراكب
+        مع التسمية (وهو ما كان يحدث قبل هذا الإصلاح).
+        """
+        from app.print_kit import PAGE as _PAGE
+
+        row_h = 7.2
+        y = self.get_y()
+        if y + row_h > self.h - self.b_margin:
+            self.add_page()
+            y = self.get_y()
+        rtl = self.lang != "en"
+        x = _PAGE["mx"]
+        w = _PAGE["w"] - 2 * x
+        label_w = 46.0
+        # القيمة تشغل العمود المجاور للتسمية مباشرةً (حافة встречاء واحدة)
+        value_w = w - label_w - 2.0
+        if rtl:
+            self.set_xy(x + w - label_w, y)          # التسمية على اليمين
+            self.set_font("ar", "B" if bold_label else "", 10)
+            self.set_text_color(*PRIMARY)
+            self.cell(label_w, row_h, ar(f"{label}:"), align="R")
+            self.set_xy(x, y)                       # القيمة على اليسار
+            self.set_font("ar", "", 10)
+            self.set_text_color(*DARK)
+            self.cell(value_w, row_h, ar(str(value)), align="R")
+        else:
+            self.set_xy(x, y)
+            self.set_font("ar", "B" if bold_label else "", 10)
+            self.set_text_color(*PRIMARY)
+            self.cell(label_w, row_h, ar(f"{label}:"), align="L")
+            self.set_xy(x + label_w + 2, y)
+            self.set_font("ar", "", 10)
+            self.set_text_color(*DARK)
+            self.cell(value_w, row_h, ar(str(value)), align="L")
+        self.set_y(y + row_h)
+
+    def section(self, text: str):
+        """عنوان قسم بنفس هوية `print_kit`: شريط فاتح + علامة لون على الطرف."""
+        from app.print_kit import BAND as _BAND
+        from app.print_kit import PAGE as _PAGE
+        from app.print_kit import R as _R
+
+        h = 8.4
+        y = self.get_y()
+        if y + h + 4 > self.h - self.b_margin:
+            self.add_page()
+            y = self.get_y()
+        x = _PAGE["mx"]
+        w = _PAGE["w"] - 2 * x
+        self.set_fill_color(*_BAND)
+        self.rect(x, y, w, h, "F")
+        self.set_fill_color(*PRIMARY)
+        self.rect(x + w - 1.6, y, 1.6, h, "F")      # علامة لون على حافة.Start
+        self.set_xy(x + 3, y)
+        self.set_font("ar", "B", 11)
+        self.set_text_color(*PRIMARY)
+        self.cell(w - 8, h, ar(text), align="R" if self.lang != "en" else "L")
+        self.set_text_color(*DARK)
+        self.set_y(y + h + _R["sm"])
 
 
 def invoice_pdf(invoice, patient_name: str) -> bytes:

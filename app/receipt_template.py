@@ -1,49 +1,15 @@
-"""قوالب HTML للطباعة: إيصال دفعة بيع وكشف حساب مريض (عربي/إنجليزي)."""
+"""قوالب HTML للطباعة: إيصال دفعة بيع وكشف حساب مريض (عربي/إنجليزي).
+
+الشكل يأتي من `app/print_kit.py` — **نفس نظام التصميم** الذي يُولّد ملفات
+PDF، فتبقى الهوية واحدة بين المستند المطبوع وملف الـ PDF. لا CSS خاص هنا.
+"""
 import html as _html
 from datetime import datetime
 from typing import Iterable, Optional
 
-_CSS = """
-  * { box-sizing: border-box; }
-  body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; margin: 0;
-         padding: 24px; background: #f4f6fb; color: #222; }
-  .sheet { background: #fff; max-width: 820px; margin: auto; padding: 28px;
-           border-radius: 14px; box-shadow: 0 8px 30px rgba(0,0,0,.10); }
-  h1 { margin: 0 0 4px; font-size: 22px; color: #2c7be5; text-align: center; }
-  .sub { text-align: center; color: #777; font-size: 13px; margin-bottom: 18px; }
-  .kv { display: flex; justify-content: space-between; padding: 7px 10px;
-        border-bottom: 1px dashed #e3e7ef; font-size: 14px; }
-  .kv b { color: #2c7be5; }
-  h2 { font-size: 15px; margin: 22px 0 8px; color: #2c7be5;
-       background: #eef4ff; border: 1px solid #d7e4ff; padding: 7px 10px;
-       border-radius: 8px; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { padding: 7px 8px; border-bottom: 1px solid #eceff5; text-align: right; }
-  th { background: #f7f9ff; color: #444; font-weight: 700; }
-  tfoot td { font-weight: 700; background: #fbfcff; }
-  .total { display: flex; justify-content: space-between; font-size: 15px;
-           padding: 9px 10px; margin-top: 8px; border-radius: 8px;
-           background: #eef4ff; font-weight: 700; }
-  .ok { color: #28a745; } .bad { color: #dc3545; }
-  .badge { display: inline-block; padding: 3px 10px; border-radius: 999px;
-           font-size: 12px; font-weight: 700; }
-  .badge.paid { background: #e6f7ec; color: #1e7e34; }
-  .badge.partial { background: #fff4d6; color: #a06a00; }
-  .badge.unpaid { background: #ffe8e8; color: #b02a37; }
-  .sign { display: flex; justify-content: space-between; margin-top: 34px;
-          font-size: 13px; color: #555; }
-  .sign div { width: 45%; border-top: 1px solid #999; padding-top: 6px;
-              text-align: center; }
-  .foot { text-align: center; font-size: 11px; color: #999; margin-top: 22px; }
-  .actions { text-align: center; margin-top: 18px; }
-  .actions button { background: #2c7be5; color: #fff; border: 0; padding: 10px 26px;
-                    border-radius: 8px; font-size: 14px; cursor: pointer; }
-  @media print {
-    body { background: #fff; padding: 0; }
-    .sheet { box-shadow: none; border-radius: 0; padding: 0; max-width: 100%; }
-    .actions { display: none; }
-  }
-"""
+from app.print_kit import (
+    foot_html, grid_html, head_html, ltr_html, page_html, sign_html, tiles_html,
+)
 
 _ST = {"PAID": ("مدفوع", "paid"), "PARTIAL": ("مدفوع جزئيًا", "partial"),
        "UNPAID": ("غير مدفوع", "unpaid")}
@@ -51,6 +17,15 @@ _ST_EN = {"PAID": ("Paid", "paid"), "PARTIAL": ("Partially paid", "partial"),
           "UNPAID": ("Unpaid", "unpaid")}
 _PM = {"cash": "نقدًا", "card": "بطاقة", "insurance": "تأمين"}
 _PM_EN = {"cash": "Cash", "card": "Card", "insurance": "Insurance"}
+
+
+def L(en: bool, ar: str, en_lb: str) -> str:
+    """اختيار تسمية حسب اللغة: `en=True` → الإنجليزية، `en=False` → العربية.
+
+    preferable لما كان يُكتب `("البيان", "Item")[en]` مباشرةً: الأول جزءً من
+    شرط يُنتج نصًا (لا tuple) فيقصّ تُقصّ إلى حرف واحد عند الفهرسة.
+    """
+    return en_lb if en else ar
 
 
 def _e(v) -> str:
@@ -61,104 +36,91 @@ def _money(v) -> str:
     return f"{float(v or 0):,.2f}"
 
 
-def _page(title: str, body: str, lang: str = "ar") -> str:
-    """غلاف HTML كامل + زر الطباعة."""
-    rtl = "rtl" if lang == "ar" else "ltr"
-    btn = "🖨️ طباعة" if lang == "ar" else "🖨️ Print"
-    return f"""<!DOCTYPE html>
-<html lang="{lang}" dir="{rtl}">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{_e(title)}</title>
-<style>{_CSS}</style>
-</head>
-<body>
-<div class="sheet">
-{body}
-<div class="actions"><button onclick="window.print()">{btn}</button></div>
-</div>
-</body>
-</html>"""
-
-
-def _head(title: str, sub: str) -> str:
-    return f"<h1>{_e(title)}</h1><div class=\"sub\">{_e(sub)}</div>"
-
-
 def _badge(status: str, lang: str) -> str:
     table = _ST_EN if lang == "en" else _ST
     label, cls = table.get(status, (status, "unpaid"))
     return f'<span class="badge {cls}">{_e(label)}</span>'
 
 
-def _kv(label: str, value, lang: str = "ar") -> str:
-    return (f'<div class="kv"><span>{_e(label)}</span>'
-            f"<b>{value if isinstance(value, str) and value.startswith(('<',)) else _e(value)}</b></div>")
+def _sec(title: str) -> str:
+    return f'<div class="pk-section">{_e(title)}</div>'
+
+
+def _rows_table(headers, rows, empty_text: str) -> str:
+    """جدول نظيف مع صف فارغ بديل — بنمط `pk-` الموحّد."""
+    head = "".join(f"<th>{_e(h)}</th>" for h in headers)
+    body = rows or (f'<tr><td colspan="{len(headers)}" style="text-align:center;'
+                    f'color:var(--muted);padding:14px">{_e(empty_text)}</td></tr>')
+    return (f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>")
+
 
 
 # ==================== إيصال دفعة ====================
 def sale_receipt_html(d, lang: str = "ar") -> str:
-    """إيصال طباعة لعملية صرف/بيع واحدة."""
+    """إيصال طباعة لعملية صرف/بيع واحدة — بنظام التصميم الموحّد."""
     en = lang == "en"
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    sar = "SAR" if en else "ر.س"
     patient = d.patient.full_name if d.patient else f"#{d.patient_id}"
     med = d.medication.name if d.medication else f"#{d.medication_id}"
     rest = round(float(d.total_price or 0) - float(d.paid_amount or 0), 2)
-    title = "إيصال دفعة" if not en else "Payment receipt"
-    sub = ("نظام إدارة المستشفيات والعيادات"
-           if not en else "Hospital & Clinics Management System")
+    title = "Payment receipt" if en else "إيصال دفعة"
+    kind = "Sales receipt" if en else "إيصال بيع"
     pm = (_PM_EN if en else _PM).get(d.payment_method, d.payment_method)
-    # حقول توجيه الاستخدام (إن وُجدت) + تنبيه الإرجاع
-    usage = []
-    for attr, ar, en_lb in (("dosage", "الجرعة", "Dosage"),
-                            ("frequency", "التكرار", "Frequency"),
-                            ("duration", "المدة", "Duration"),
-                            ("instructions", "تعليمات", "Instructions")):
+
+    fields = [
+        (("المريض", "Patient")[en], patient),
+        (("الدواء", "Medicine")[en], med),
+        (("الكمية", "Quantity")[en], d.quantity),
+        (("سعر الوحدة", "Unit price")[en], f"{_money(d.unit_price)} {sar}"),
+        (("طريقة الدفع", "Payment method")[en], pm),
+        (("صرفه", "Dispensed by")[en], d.dispensed_by or "-"),
+    ]
+    for attr, ar_lb, en_lb in (("dosage", "الجرعة", "Dosage"),
+                               ("frequency", "التكرار", "Frequency"),
+                               ("duration", "المدة", "Duration"),
+                               ("instructions", "تعليمات", "Instructions")):
         val = getattr(d, attr, None)
         if val:
-            usage.append(_kv(ar if not en else en_lb, val, lang))
-    returned_row = ""
+            fields.append((ar_lb if not en else en_lb, val))
     if getattr(d, "returned_at", None) is not None:
         reason = getattr(d, "return_reason", None) or "-"
-        returned_row = _kv(
-            "مرتجع" if not en else "Returned",
-            f'<span class="badge unpaid">{"نعم — " if not en else "Yes — "}{_e(reason)}</span>',
-            lang,
-        )
-    rows = "".join([
-        _kv("رقم الإيصال" if not en else "Receipt #", f"#{d.id}", lang),
-        _kv("التاريخ" if not en else "Date",
-            d.created_at.strftime("%Y-%m-%d %H:%M") if d.created_at else "-", lang),
-        _kv("المريض" if not en else "Patient", patient, lang),
-        _kv("الدواء" if not en else "Medicine", med, lang),
-        _kv("الكمية" if not en else "Quantity", d.quantity, lang),
-        _kv("سعر الوحدة" if not en else "Unit price",
-            f"{_money(d.unit_price)} SAR" if en else f"{_money(d.unit_price)} ر.س", lang),
-        *usage,
-        _kv("طريقة الدفع" if not en else "Payment method", pm, lang),
-        _kv("صرفه" if not en else "Dispensed by", d.dispensed_by or "-", lang),
-        _kv("الحالة" if not en else "Status", _badge(d.status, lang), lang),
-        returned_row,
-    ])
+        fields.append((("مرتجع", "Returned")[en],
+                       ("نعم — " if not en else "Yes — ") + str(reason)))
+
+    date = d.created_at.strftime("%Y-%m-%d %H:%M") if d.created_at else "-"
+    l_total = ("الإجمالي", "Total")[en]
+    l_paid = ("المدفوع", "Paid")[en]
+    l_rest = ("المتبقي", "Outstanding")[en]
+    totals_rows = (
+        f'<tr><td>{_e(l_total)}</td>'
+        f'<td style="text-align:end">{_money(d.total_price)} {sar}</td></tr>'
+        f'<tr><td>{_e(l_paid)}</td>'
+        f'<td style="text-align:end;color:var(--ok)">'
+        f'{_money(d.paid_amount)} {sar}</td></tr>'
+        f'<tr><td><b>{_e(l_rest)}</b></td>'
+        f'<td style="text-align:end"><b>{_money(rest)} {sar}</b></td></tr>')
+
     body = f"""
-{_head(title, sub)}
-{rows}
-<div class="total"><span>{'الإجمالي' if not en else 'Total'}</span>
-  <span>{_money(d.total_price)} {'SAR' if en else 'ر.س'}</span></div>
-<div class="total"><span>{'المدفوع' if not en else 'Paid'}</span>
-  <span class="ok">{_money(d.paid_amount)} {'SAR' if en else 'ر.س'}</span></div>
-<div class="total"><span>{'المتبقي' if not en else 'Outstanding'}</span>
-  <span class="{'ok' if rest <= 0 else 'bad'}">{_money(rest)} {'SAR' if en else 'ر.س'}</span></div>
-{('<div class="kv"><span>' + ('تاريخ التسديد' if not en else 'Paid at') + '</span><b>' +
-  (d.paid_at.strftime('%Y-%m-%d %H:%M') if d.paid_at else '-') + '</b></div>') if d.paid_at else ''}
-<div class="sign">
-  <div>{'توقيع المستلم' if not en else 'Received by'}</div>
-  <div>{'توقيع المحاسب' if not en else 'Cashier signature'}</div>
+{head_html(title, lang, kind=kind, number=f"#{d.id}",
+           subtitle_html=f'{ltr_html(date)} &nbsp;·&nbsp; {_badge(d.status, lang)}')}
+<div class="pk-body">
+  {_sec("بيانات العملية" if not en else "Transaction")}
+  {grid_html(fields, cols=2)}
+  {_sec("الملخص المالي" if not en else "Financial summary")}
+  {tiles_html([(l_total, f"{_money(d.total_price)} {sar}"),
+               (l_paid, f"{_money(d.paid_amount)} {sar}",
+                "ok" if rest <= 0 else ""),
+               (l_rest, f"{_money(rest)} {sar}", "" if rest <= 0 else "warn")])}
+  {_rows_table([L(en, "البيان", "Item"), l_total], totals_rows, "")}
 </div>
-<div class="foot">{_e(sub)} — {_e(now)}</div>
+{sign_html("توقيع المستلم" if not en else "Received by",
+           "توقيع المحاسب" if not en else "Cashier")}
+{foot_html(("حالة السداد: " + ("مسدَّد بالكامل" if rest <= 0 else "يوجد متبقٍ"))
+            if not en else ("Settlement: " + ("Settled" if rest <= 0
+                                              else "Outstanding")), lang)}
 """
-    return _page(f"{title} #{d.id}", body, lang)
+    return page_html(f"{title} #{d.id}", body, lang)
+
 
 
 # ==================== كشف حساب مريض ====================
@@ -166,87 +128,106 @@ def patient_statement_html(patient, sales: Iterable, invoices: Iterable,
                            totals: dict, lang: str = "ar") -> str:
     """كشف حساب مريض: مبيعات الصيدلية + الفواتير + الأرصدة."""
     en = lang == "en"
-    title = "كشف حساب مريض" if not en else "Patient statement"
-    sub = ("نظام إدارة المستشفيات والعيادات"
-           if not en else "Hospital & Clinics Management System")
-    head = "".join([
-        _kv("المريض" if not en else "Patient", patient.full_name, lang),
-        _kv("رقم الملف" if not en else "File #", f"#{patient.id}", lang),
-        _kv("الجوال" if not en else "Phone", patient.phone or "-", lang),
-        _kv("تاريخ الميلاد" if not en else "Date of birth",
-            patient.date_of_birth.strftime("%Y-%m-%d") if patient.date_of_birth else "-", lang),
-        _kv("تاريخ الإصدار" if not en else "Issued",
-            datetime.now().strftime("%Y-%m-%d %H:%M"), lang),
-    ])
-
-    sales = list(sales)
+    sar = "SAR" if en else "ر.س"
+    title = "Patient statement" if en else "كشف حساب مريض"
+    kind = "Statement" if en else "كشف حساب"
     pm = _PM_EN if en else _PM
     st = _ST_EN if en else _ST
+
+    fields = [
+        (("المريض", "Patient")[en], patient.full_name),
+        (("رقم الملف", "File #")[en], f"#{patient.id}"),
+        (("الجوال", "Phone")[en], patient.phone or "-"),
+        (("تاريخ الميلاد", "Date of birth")[en],
+         patient.date_of_birth.strftime("%Y-%m-%d") if patient.date_of_birth else "-"),
+    ]
+    if getattr(patient, "national_id", None):
+        fields.append((("الرقم الوطني", "National ID")[en], patient.national_id))
+    if getattr(patient, "insurer", None):
+        fields.append((("شركة التأمين", "Insurer")[en], patient.insurer))
+
+    sales = list(sales)
     sales_rows = "".join(
         f"<tr><td>#{s.id}</td>"
         f"<td>{_e(s.created_at.strftime('%Y-%m-%d') if s.created_at else '-')}</td>"
         f"<td>{_e(s.medication.name if s.medication else '#' + str(s.medication_id))}</td>"
         f"<td>{s.quantity}</td>"
-        f"<td>{_money(s.total_price)}</td>"
-        f"<td class='ok'>{_money(s.paid_amount)}</td>"
-        f"<td class='{'ok' if s.status == 'PAID' else 'bad'}'>"
-        f"{_money(round(float(s.total_price or 0) - float(s.paid_amount or 0), 2))}</td>"
+        f"<td style='text-align:end'>{_money(s.total_price)}</td>"
+        f"<td style='text-align:end;color:var(--ok)'>{_money(s.paid_amount)}</td>"
+        f"<td style='text-align:end'>{_money(round(float(s.total_price or 0) - float(s.paid_amount or 0), 2))}</td>"
         f"<td>{_e(pm.get(s.payment_method, s.payment_method))}</td>"
-        f"<td>{_e(st.get(s.status, (s.status,))[0])}</td></tr>"
+        f"<td>{_badge(s.status, lang)}</td></tr>"
         for s in sales)
-    sales_block = f"""
-<h2>{'أدوية الصيدلية' if not en else 'Pharmacy sales'} ({len(sales)})</h2>
-<table>
-<thead><tr><th>{'#' if not en else '#'}</th><th>{'التاريخ' if not en else 'Date'}</th>
-<th>{'الدواء' if not en else 'Medicine'}</th><th>{'الكمية' if not en else 'Qty'}</th>
-<th>{'الإجمالي' if not en else 'Total'}</th><th>{'المدفوع' if not en else 'Paid'}</th>
-<th>{'المتبقي' if not en else 'Rest'}</th><th>{'الطريقة' if not en else 'Method'}</th>
-<th>{'الحالة' if not en else 'Status'}</th></tr></thead>
-<tbody>{sales_rows or '<tr><td colspan="9" style="text-align:center;color:#999">'
-        + ('لا توجد حركات' if not en else 'No transactions') + '</td></tr>'}</tbody>
-</table>"""
+    sales_block = (_sec(f"أدوية الصيدلية ({len(sales)})" if not en
+                         else f"Pharmacy sales ({len(sales)})")
+                   + _rows_table(["#", "التاريخ" if not en else "Date",
+                                  "الدواء" if not en else "Medicine",
+                                  "الكمية" if not en else "Qty",
+                                  "الإجمالي" if not en else "Total",
+                                  "المدفوع" if not en else "Paid",
+                                  "المتبقي" if not en else "Rest",
+                                  "الطريقة" if not en else "Method",
+                                  "الحالة" if not en else "Status"],
+                                 sales_rows, "لا توجد حركات" if not en
+                                 else "No transactions"))
 
     invoices = list(invoices)
     inv_rows = "".join(
         f"<tr><td>#{i.id}</td>"
         f"<td>{_e(i.created_at.strftime('%Y-%m-%d') if i.created_at else '-')}</td>"
         f"<td>{_e(i.description or '-')}</td>"
-        f"<td>{_money(i.total)}</td>"
-        f"<td class='ok'>{_money(i.paid_amount)}</td>"
+        f"<td style='text-align:end'>{_money(i.total)}</td>"
+        f"<td style='text-align:end;color:var(--ok)'>{_money(i.paid_amount)}</td>"
         f"<td>{_e(pm.get(i.payment_method or '', i.payment_method or '-'))}</td>"
         f"<td>{_e(str(i.status.value if hasattr(i.status, 'value') else i.status)).upper()}</td></tr>"
         for i in invoices)
-    inv_block = f"""
-<h2>{'الفواتير الطبية' if not en else 'Medical invoices'} ({len(invoices)})</h2>
-<table>
-<thead><tr><th>{'#' if not en else '#'}</th><th>{'التاريخ' if not en else 'Date'}</th>
-<th>{'البيان' if not en else 'Description'}</th><th>{'الإجمالي' if not en else 'Total'}</th>
-<th>{'المدفوع' if not en else 'Paid'}</th><th>{'الطريقة' if not en else 'Method'}</th>
-<th>{'الحالة' if not en else 'Status'}</th></tr></thead>
-<tbody>{inv_rows or '<tr><td colspan="7" style="text-align:center;color:#999">'
-        + ('لا توجد فواتير' if not en else 'No invoices') + '</td></tr>'}</tbody>
-</table>"""
+    inv_block = (_sec(f"الفواتير الطبية ({len(invoices)})" if not en
+                      else f"Medical invoices ({len(invoices)})")
+                 + _rows_table(["#", "التاريخ" if not en else "Date",
+                                "البيان" if not en else "Description",
+                                "الإجمالي" if not en else "Total",
+                                "المدفوع" if not en else "Paid",
+                                "الطريقة" if not en else "Method",
+                                "الحالة" if not en else "Status"],
+                               inv_rows, "لا توجد فواتير" if not en
+                               else "No invoices"))
 
-    sar = "SAR" if en else "ر.س"
+    outstanding = float(totals.get("outstanding", 0) or 0)
+    tiles = [
+        (("إجمالي المستحقات", "Total dues")[en], f"{_money(totals.get('dues'))} {sar}"),
+        (("المحصَّل", "Collected")[en],
+         f"{_money(float(totals.get('sales_paid') or 0) + float(totals.get('inv_paid') or 0))} {sar}",
+         "ok"),
+        (("الرصيد المستحق", "Outstanding")[en], f"{_money(outstanding)} {sar}",
+         "ok" if outstanding <= 0 else "danger"),
+    ]
+    summary_rows = "".join(
+        f"<tr><td>{_e(lbl)}</td><td style='text-align:end'>{_money(val)} {sar}</td></tr>"
+        for lbl, val in ((("مبيعات الصيدلية", "Pharmacy sales")[en],
+                          totals.get("sales_total")),
+                         (("مدفوع من المبيعات", "Sales paid")[en],
+                          totals.get("sales_paid")),
+                         (("إجمالي الفواتير", "Invoices total")[en],
+                          totals.get("inv_total")),
+                         (("مدفوع من الفواتير", "Invoices paid")[en],
+                          totals.get("inv_paid"))))
+
     body = f"""
-{_head(title, sub)}
-{head}
-<h2>{'الملخص المالي' if not en else 'Financial summary'}</h2>
-{_kv('مبيعات الصيدلية' if not en else 'Pharmacy sales', f"{_money(totals['sales_total'])} {sar}", lang)}
-{_kv('مدفوع من المبيعات' if not en else 'Sales paid', f"{_money(totals['sales_paid'])} {sar}", lang)}
-{_kv('إجمالي الفواتير' if not en else 'Invoices total', f"{_money(totals['inv_total'])} {sar}", lang)}
-{_kv('مدفوع من الفواتير' if not en else 'Invoices paid', f"{_money(totals['inv_paid'])} {sar}", lang)}
-<div class="total"><span>{'إجمالي المستحقات' if not en else 'Total dues'}</span>
-  <span>{_money(totals['dues'])} {sar}</span></div>
-<div class="total"><span>{'الرصيد المستحق' if not en else 'Outstanding balance'}</span>
-  <span class="{'ok' if totals['outstanding'] <= 0 else 'bad'}">
-    {_money(totals['outstanding'])} {sar}</span></div>
-{sales_block}
-{inv_block}
-<div class="sign">
-  <div>{'توقيع المريض' if not en else 'Patient signature'}</div>
-  <div>{'المحاسب' if not en else 'Accountant'}</div>
+{head_html(title, lang, kind=kind, number=f"#{patient.id}",
+           subtitle=patient.full_name)}
+<div class="pk-body">
+  {_sec("بيانات المريض" if not en else "Patient")}
+  {grid_html(fields, cols=2)}
+  {_sec("الملخص المالي" if not en else "Financial summary")}
+  {tiles_html(tiles)}
+  {_rows_table([L(en, "البيان", "Item"),
+                L(en, "المبلغ", "Amount")], summary_rows, "")}
+  {sales_block}
+  {inv_block}
 </div>
-<div class="foot">{_e(sub)}</div>
+{sign_html("توقيع المريض" if not en else "Patient signature",
+           "المحاسب" if not en else "Accountant")}
+{foot_html(("الرصيد المستحق: " + _money(outstanding) + " " + sar) if not en
+            else ("Outstanding: " + _money(outstanding) + " " + sar), lang)}
 """
-    return _page(f"{title} — {patient.full_name}", body, lang)
+    return page_html(f"{title} — {patient.full_name}", body, lang)

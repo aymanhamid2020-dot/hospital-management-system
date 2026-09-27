@@ -195,6 +195,57 @@ from app.permissions import require_perm, require_perm_all
 - 🔁 **CI** — `.github/workflows/ci.yml`: pytest + الفحص الموحد الحيّ (93) + فحص PWA (26) + حمل خفيف + **مصفوفة E2E (3 متصفحات × بايثون 3.12/3.13 = 6 وظائف)** + **بوابة انسداد توليد `docs/user-guide.pdf`** + بناء صورة Docker عند كل push/PR
 - 📘 **دليل المستخدم النهائي** — `docs/user-guide.pdf` (وأصله `docs/user-guide.html`) — دليل عربي شامل بكل الشاشات والأدوار واستكشاف الأخطاء
 
+## 🎨 نظام التصميم الموحّد للطباعة (`app/print_kit.py`)
+
+مصدر بصري **واحد** لكل ما يُطبع: ملفات PDF وصفحات HTML المطبوعة من المتصفح.
+قبل هذا النظام كانت كل وثيقة تحمل أنماطها (38 باني PDF + CSS منفصل في
+`accounts.py` و`receipt_template.py`) ⇒ اختلاف في الألوان والخطوط والمسافات
+بين المستندات.
+
+| الطبقة | المحتوى |
+| --- | --- |
+| **الألوان** | `PRIMARY` · `ACCENT` · `INK` · `MUTED` · `LINE` · `SUCCESS` · `WARNING` · `DANGER` — **معرَّفة في `pdf_utils`** ويستوردها `print_kit` (مصدر واحد للألوان، بلا ازدواج) |
+| **الطباعة** | سلّم `TYPE` (doc/h1/h2/body/small/micro) — لا أحجام متفرّقة |
+| **المسافات** | إيقاع `R` (xs/sm/md/lg/xl) بالمليمتر — كل الفجوات مضاعفات له |
+| **الهندسة** | `PAGE` (A4 + هوامش) و`CONTENT_W` — RTL/LTR من مركز واحد |
+| **الهوية** | `BRAND` (الاسم، الوصف، الاتصال، نسبة المستند) قابلة للتجاوز من البيئة |
+
+**مكوّنات PDF** (`Doc`): `section` · `kv_grid` · `stat_tiles` · `table`
+(رأس متكرّر + تظليل صفوف + صف إجمالي + `tone_col` لألوان الحالة) · `bars` ·
+`note` · `paragraph` · `signatures` · `footer`. الواجهة الدالية
+`draw_pdf_header` / `draw_pdf_footer` مشتركة مع `ArabicPDF`، فيخرج **كل**
+المستندات الـ 38 بالمظهر الموحّد دون إعادة كتابة منطق العرض.
+
+**مكوّنات HTML** بنفس القيم عبر متغيّرات CSS: `page_html` · `head_html` ·
+`foot_html` · `grid_html` · `tiles_html` · `bars_html` · `sign_html`، مع
+`print-color-adjust: exact` للحفاظ على ألوان الطباعة و`@page` لهوامش A4.
+
+```python
+from app.print_kit import Doc
+
+d = Doc("تقرير المبيعات", kind="تقرير", number="RPT-2026-042",
+        subtitle="يناير 2026")
+d.kv_grid([("المريض", "أحمد الشمسان"), ("رقم الملف", "77")])
+d.stat_tiles([("إجمالي", "148,500.00 ر.س"),
+              ("محصَّل", "142,000.00 ر.س", "ok"),
+              ("متبقٍّ", "6,500.00 ر.س", "warn")])
+d.table(["الحالة", "العدد"], [["مكتملة", 142], ["معلقة", 26]],
+        totals=["الإجمالي", 194])
+d.bars([("طبيب", 512), ("ممرض", 431)])
+d.footer()
+return d.output()          # بايتات PDF
+```
+
+> **ملاحظات تقنية**
+> - `ar()` تُشكّل النص العربي وت-reverse ترتيبه (باستخدام `arabic_reshaper` +
+>   `python-bidi`)، و`ltr_html()` تعزل التواريخ والأرقام داخل سياق RTL حتى لا
+>   تظهر معكوسة.
+> - `output()` **idempotent**: استدعاؤه مرتين لا يضيف ترويسة/تذييلًا مكررًا.
+> - `ArabicPDF` يستورد `print_kit` **كسولًا** (داخل الدوال) لأن `print_kit`
+>   يستورد `ar` و`FONT_*` منه — استيراد من مستوى الوحدة يكنّ دورة.
+> - كل رسم داخل مستند يثبّت إحداثي `y` قبل حلقة الخلايا: `cell()` يُقدّم
+>   مؤشر `x`، والاعتماد على `get_y()` بعد الرسم يجعل الخلايا تتراكم رأسيًا.
+
 ## المتطلبات
 
 - Python 3.10+
@@ -458,9 +509,10 @@ hosptal/
     ├── auth.py              # 🔐 PBKDF2 + JWT + الصلاحيات
     ├── email_utils.py       # ✉️ SMTP + outbox + قوالب الرسائل
     ├── tasks.py             # ⏰ مهمة التذكير الخلفية
-    ├── pdf_utils.py         # 📄 توليد PDF عربي (invoices/records/reports)
+    ├── pdf_utils.py         # 📄 توليد PDF عربي (invoices/records/reports) + ArabicPDF
+    ├── print_kit.py         # 🎨 نظام التصميم الموحّد للطباعة (PDF + HTML/CSS)
     ├── invoice_template.py  # 🖨️ قالب طباعة الفاتورة HTML
-    ├── receipt_template.py  # 🖨️ قالب إيصال الدفعة + كشف حساب المريض HTML
+    ├── receipt_template.py  # 🧾 إيصال الدفعة + كشف حساب المريض (عربي/إنجليزي)
     ├── models.py            # نماذج SQLAlchemy (علاقات FK + جدول stock_movements لدفتر المخزون + InvoiceLine و EmergencyCase)
     ├── schemas.py           # مخططات Pydantic للتحقق (تشمل DispenseInDB و RevenuePoint و Debtor و InventoryItem و سطور الفاتورة)
     ├── clinical_schemas.py  # 🚑 مخططات الوحدات السريرية + ملخّص الطوارئ (بنود/فواتير/طلبات المختبر)
