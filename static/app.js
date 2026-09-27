@@ -3641,7 +3641,9 @@ const OP_UNIT_PATHS = ['physiotherapy','nutrition','emergency','home-health','we
 const OP_STATUS = {
   'service-requests':['in_progress','completed','cancelled'], 'nursing-tasks':['in_progress','completed','cancelled'], surgeries:['in_progress','completed','cancelled'], admissions:['discharged','transferred'],
   'blood-bank':['reserved','issued','quarantined','discarded'], maintenance:['in_progress','completed','cancelled'], sterilization:['passed','failed'], 'safety-events':['investigating','resolved','closed'], assets:['maintenance','retired'],
-  physiotherapy:['in_treatment','suspended','completed','cancelled'], nutrition:['active','suspended','completed','cancelled'], emergency:['under_treatment','discharged','closed','cancelled'],
+  physiotherapy:['in_treatment','suspended','completed','cancelled'], nutrition:['active','suspended','completed','cancelled'],
+  /* الطوارئ: نفس الخمس قيم التي يقبلها الخادم حرفيًّا — أي قيمة أخرى ترده 422 */
+  emergency:['arrived','triaged','under_treatment','discharged','closed'],
   'home-health':['active','on_hold','completed','cancelled'], wellness:['active','paused','completed','cancelled'], housekeeping:['in_progress','completed','cancelled']
 };
 // الوحدات التشغيلية تعمل تحت /service-units، وبقية الموارد تحت /clinical.

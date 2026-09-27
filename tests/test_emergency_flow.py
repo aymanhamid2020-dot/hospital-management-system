@@ -193,6 +193,28 @@ def test_emergency_workflow_end_to_end(client, admin):
     r = client.post(f"/service-units/emergency/{case['id']}/orders",
                     headers=doc_h, json={"lines": [{"test_name": "تحليل إضافي"}]})
     assert r.status_code == 409, r.text
+
+
+def test_emergency_status_gate(client, admin):
+    """الحالات الخمس المقبولة فقط — والواجهة تعرضهنّ لا ما يرده الخادم."""
+    pid = _patient(client, admin)
+    case = _open_case(client, admin, pid)
+
+    for bad in ("cancelled", "unknown", "CLOSED"):
+        r = client.post(f"/service-units/emergency/{case['id']}/status",
+                        headers=admin, json={"status": bad})
+        assert r.status_code == 422, (bad, r.status_code, r.text)
+
+    r = client.post(f"/service-units/emergency/{case['id']}/status",
+                    headers=admin, json={"status": "triaged"})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "triaged"
+
+    js = client.get("/app.js").text
+    # قائمة أزرار الشاشة العامة للطوارئ مطابقة حرفيًّا لما يقبله الخادم
+    assert "emergency:['arrived','triaged','under_treatment','discharged','closed']" in js
+
+
 def test_er_ui_markers(client):
     """علامات الواجهة: شاشة الطوارئ ومنتقي الفحوصات المصنَّف في app.js/CSS."""
     js = client.get("/app.js").text
