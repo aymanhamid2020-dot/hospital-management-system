@@ -256,7 +256,31 @@ async def change_user_role(
 
 
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT,
-               summary="حذف مستخدم")
+               summary="حذف مستخدم",
+               description=(
+                   "حذف حساب نهائيًا من شاشة «المستخدمون» (admin فقط). تستأصل "
+                   "استثناءات صلاحيات المستخدم معه وتؤمّر مراجع التدقيق بـ`SET NULL` "
+                   "فلا يبقى مرجع مكسور. ردود موثّقة بالأسفل مع أمثلة مضمّنة."),
+               responses={
+                   204: {"description": "حُذف الحساب — استجابة ناجحة بلا محتوى"},
+                   400: {"description": "الذات، أو حذف آخر مدير نشط",
+                         "content": {"application/json": {
+                             "examples": {
+                                 "self": {"summary": "الذات",
+                                          "value": {"detail": "لا يمكنك حذف حسابك"}},
+                                 "last-admin": {"summary": "آخر مدير نشط",
+                                                "value": {"detail": "لا يمكن حذف آخر مدير نشط في النظام"}},
+                             }}}},
+                   401: {"description": "بلا توكن أو توكن منتهٍ",
+                         "content": {"application/json": {
+                             "example": {"detail": "يجب تسجيل الدخول للوصول لهذا المورد"}}}},
+                   403: {"description": "لست المدير العام (is_super)",
+                         "content": {"application/json": {
+                             "example": {"detail": "هذه العملية تتطلب صلاحية المدير العام"}}}},
+                   404: {"description": "المستخدم غير موجود",
+                         "content": {"application/json": {
+                             "example": {"detail": "المستخدم غير موجود"}}}},
+               })
 async def delete_user(
     user_id: int,
     db: Session = Depends(get_db),

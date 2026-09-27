@@ -122,3 +122,92 @@ def test_delete_user_drops_permission_overrides(client, admin):
         assert db.query(UserPermission).filter_by(user_id=user_id).count() == 0
     finally:
         db.close()
+
+
+# ================= توثيق OpenAPI للحذف =================
+def test_delete_user_documented_in_openapi(client):
+    """مخطط الوثائق يشرح كل ردود الحذف بأمثلة عربية — لا زر بلا توثيق."""
+    spec = client.get("/api/openapi.json").json()
+    op = spec["paths"]["/auth/users/{user_id}"]["delete"]
+    assert set(op["responses"]) >= {"204", "400", "401", "403", "404"}
+
+    ex400 = op["responses"]["400"]["content"]["application/json"]["examples"]
+    assert ex400["self"]["value"]["detail"] == "لا يمكنك حذف حسابك"
+    assert ex400["last-admin"]["value"]["detail"] == "لا يمكن حذف آخر مدير نشط في النظام"
+    ex403 = op["responses"]["403"]["content"]["application/json"]["example"]
+    assert ex403["detail"] == "هذه العملية تتطلب صلاحية المدير العام"
+    ex404 = op["responses"]["404"]["content"]["application/json"]["example"]
+    assert ex404["detail"] == "المستخدم غير موجود"
+    ex401 = op["responses"]["401"]["content"]["application/json"]["example"]
+    assert "تسجيل الدخول" in ex401["detail"]
+    # 204 استجابة بلا محتوى: لا يُختلق لها JSON
+    assert "content" not in op["responses"]["204"]
+    assert op["responses"]["204"]["description"].strip()
+    assert op["summary"] == "حذف مستخدم"
+    # والوصف يشرح ضمان المراجع
+    assert "SET NULL" in (op.get("description") or "")
+
+
+# ================= الأدوار المعطّلة (is_active) =================
+def test_inactive_role_is_server_tracked_and_ui_filtered(client, admin):
+    """الخادم يُرجع `is_active` ويقبل تعطيل دور، والواجهة لا تعرضه في قوائم الإسناد."""
+    js = client.get("/app.js").text
+    assert "is_active !== false" in js, "شاشة المستخدمين لا تفرز الأدوار المعطّلة"
+    assert "⛔" in js, "لا وسم لدور معطّل في القائمة"
+
+    created = client.post("/permissions/roles", headers=admin,
+                          json={"name_ar": "دور مؤقت للتعطيل"}).json()
+    assert created["is_active"] is True
+
+    off = client.put(f"/permissions/roles/{created['id']}", headers=admin,
+                     json={"is_active": False})
+    assert off.status_code == 200, off.text
+    assert off.json()["is_active"] is False
+
+    row = next(r for r in client.get("/permissions/roles", headers=admin).json()
+               if r["id"] == created["id"])
+    assert row["is_active"] is False
+    assert row["users_count"] == 0 and row["can_delete"] is True
+
+    # تنظيف: حذف الدور المؤقت بعد تعطيله (بلا مستخدمين فيُقبل)
+    assert client.delete(f"/permissions/roles/{created['id']}",
+                         headers=admin).status_code == 204
+
+
+# ================= ربط شاشتي الأدوار والمستخدمين =================
+def test_roles_and_users_screens_are_cross_linked(client):
+    """زر «مستخدموه» في جدول الأدوار يفتح شاشة المستخدمين مُصفّاة على الدور نفسه."""
+    js = client.get("/app.js").text
+    assert "function rbRoleUsers(key)" in js
+    assert "USR.filter = key" in js
+    assert 'onclick="rbRoleUsers(this.dataset.key)"' in js, "زر الصف غير موجود"
+    assert "function clearRoleFilter()" in js and "USR.filter = ''" in js
+    assert "shown = USR.filter ?" in js, "الفلتر لا يُطبَّق على الصفوف"
+    assert "navigate('permissions')" in js, "لا زر العودة من شاشة المستخدمين للأدوار"
+
+
+# ================= أداة تنظيف حسابات الاختبار =================
+def test_cleanup_tool_collects_only_test_accounts():
+    """الأداة تلتقط بصمات الاختبار وحدها ولا تمسّ النظام أو الحسابات الحقيقية."""
+    from cleanup_temp_users import collect_temp_users
+
+    rows = [
+        {"id": 1, "username": "admin"},
+        {"id": 2, "username": "demo_doc1"},
+        {"id": 3, "username": "dr_ahmed"},
+        {"id": 4, "username": "uadmABC"},
+        {"id": 5, "username": "recph_P123"},
+        {"id": 6, "username": "livedel2_9"},
+        {"id": 7, "username": "cash_fff"},
+        {"id": 8, "username": "delA_77"},
+    ]
+    got = {v["username"] for v in collect_temp_users(rows)}
+    assert got == {"uadmABC", "recph_P123", "livedel2_9", "cash_fff", "delA_77"}
+    assert all(v["id"] for v in collect_temp_users(rows)), "المعرّف مطلوب للحذف"
+
+    # محميّ حتى لو طابقت بصمة صريحة
+    assert collect_temp_users([{"id": 1, "username": "admin"}],
+                              patterns=(r"^adm",)) == []
+    # بصم مخصّصة بديلة
+    only = collect_temp_users(rows, patterns=(r"^dr_",))
+    assert {v["username"] for v in only} == {"dr_ahmed"}

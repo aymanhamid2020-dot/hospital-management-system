@@ -30,6 +30,17 @@ test.describe('معرض لقطات الشاشات 🖼️', () => {
     });
   }
 
+  /* شاشة المستخدمين: تُلتقط بعد نقر رابطها فالقائمة ممرَّرة إلى مجموعتها
+     الجديدة «إدارة المستخدمين» فتظهر مع الجدول وأزرار الحذف */
+  test('11 — إدارة المستخدمين: الشاشة ومجموعتها في القائمة', async ({ page }) => {
+    await login(page);
+    await openView(page, 'users');
+    await expect(page.locator('.sidebar a[data-view="users"]')).toBeVisible();
+    await expect(page.locator('#main table tbody tr').first()).toBeVisible();
+    await expectNoUiError(page);
+    await page.screenshot({ path: `${OUT}/11-users.png` });
+  });
+
   /* شاشة الطوارئ: تُصوَّر على حالة مفتوحة إن وُجدت حتى تظهر مساحة العمل
      والمنتقي المصنَّف والفاتورة، وإلا كافية بقائمة الحالات */
   test('10-emergency — حالة مفتوحة بالمنتقي والفاتورة', async ({ page }) => {

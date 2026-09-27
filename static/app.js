@@ -3,8 +3,9 @@ const API = '';
 // "تذكرني" وحده ينقل الجلسة إلى localStorage لتُستأنف بعد إعادة التشغيل.
 let TOKEN = '';
 let USER = null;
-/* آخر قائمة جُلبت لشاشة إدارة المستخدمين — يقرأها زر الحذف اسم من يحذف */
-const USR = { list: [] };
+/* حالة شاشة إدارة المستخدمين: آخر قائمة جُلبت (يقرأها زر الحذف اسم من يحذف)
+   + فلتر الدور المفعّل حين تُفتح الشاشة من شاشة الأدوار */
+const USR = { list: [], filter: '' };
 try {
   if (localStorage.getItem('hms_remember') === '1') {
     TOKEN = localStorage.getItem('hms_token') || '';
@@ -5847,9 +5848,13 @@ function rbRolesTab() {
   const canEdit = can('roles.manage');
   return `
   <div class="card">
-    <h3>🎭 الأدوار (${rbRoles().length})</h3>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+      <h3 style="margin:0">🎭 الأدوار (${rbRoles().length})</h3>
+      <button class="btn sm ghost" onclick="clearRoleFilter()">👥 شاشة المستخدمين</button>
+    </div>
     <p style="margin:0 0 10px;color:#64748b">أدوار النظام جاهزة، ويمكن إنشاء أدوار مخصّصة
-      تُنشأ فورًا وتظهر في قائمة أدوار المستخدمين بلا إعادة تشغيل.</p>
+      تُنشأ فورًا وتظهر في قائمة أدوار المستخدمين بلا إعادة تشغيل — وزر «مستخدموه» يفتح
+      شاشة المستخدمين مُصفّاة على الدور نفسه.</p>
     <div class="toolbar">
       <input id="rb-name" placeholder="اسم الدور الجديد…"
         style="min-width:180px" ${canEdit ? '' : 'disabled'}>
@@ -5872,6 +5877,8 @@ function rbRolesTab() {
       <td><small>${esc(r.description || '—')}</small></td>
       <td>
         <button class="btn sm ghost" onclick="rbGoMatrix(${r.id})">🧮 صلاحياته</button>
+        <button class="btn sm ghost" data-key="${esc(r.key)}"
+          onclick="rbRoleUsers(this.dataset.key)">👥 مستخدموه</button>
         <button class="btn sm ghost" onclick="rbCopyRole(${r.id},'${esc(r.name_ar)}')"
           ${canEdit ? '' : 'disabled'}>📄 نسخ</button>
         ${r.can_delete ? `<button class="btn sm danger" onclick="rbDeleteRole(${r.id},'${esc(r.name_ar)}')">حذف</button>` : ''}
@@ -5909,6 +5916,12 @@ async function rbDeleteRole(id, name) {
     toast('تم حذف الدور ✅');
     await rbLoad(); rbRender();
   } catch (e) { toast(e.message, true); }
+}
+
+/** ربط الشاشتين: فتح شاشة المستخدمين مُصفّاة على دور محدّد من جدول الأدوار */
+function rbRoleUsers(key) {
+  USR.filter = key || '';
+  navigate('users');
 }
 
 function rbGoMatrix(roleId) {
@@ -6734,27 +6747,44 @@ const VIEWS = {
       api('/auth/users'),
       api('/permissions/roles').catch(() => []),
     ]);
-    const roles = (roleRows || []).filter(r => r && r.key).map(r => ({
+    const all = (roleRows || []).filter(r => r && r.key).map(r => ({
       key: r.key, name: r.name_ar, perms: (r.permissions || []).length,
+      active: r.is_active !== false,
     }));
-    if (!roles.length) roles.push({ key: 'receptionist', name: 'موظف استقبال', perms: 0 });
-    /* دور يحمله مستخدم لكن شرحه غاب من الكتالوج ⇒ نعرضه باسمه الخام ولا نُسقطه */
-    users.forEach(u => {
-      if (u.role && !roles.some(r => r.key === u.role)) roles.push({ key: u.role, name: u.role, perms: 0 });
-    });
+    /* الأدوار المعطّلة لا تُسند: لا في نموذج الإنشاء ولا في جداول من ليس حاملًا لها */
+    const roles = all.filter(r => r.active);
+    if (!roles.length) roles.push({ key: 'receptionist', name: 'موظف استقبال', perms: 0, active: true });
+    const find = k => all.find(r => r.key === k) || null;
+    /* من يحمل دورًا معطّلًا أو مجهولًا يبقى ظاهرًا بدوره موسومًا — لا نُسقطه من صفّه */
+    const own = u => (u.role && !roles.some(r => r.key === u.role))
+      ? { key: u.role, name: (find(u.role) || {}).name || u.role,
+          perms: ((find(u.role) || {}).perms) || 0,
+          active: (find(u.role) || {}).active !== false }
+      : null;
     USR.list = users;
-    const roleName = k => (roles.find(r => r.key === k) || {}).name || k;
+    const roleName = k => (find(k) || {}).name || k;
     /* دور المدير لا يُمنح عند الإنشاء (تسجيل عام مفتوح) — يُرفع لاحقًا من صف المستخدم */
-    const opts = (sel, withAdmin) => roles.filter(r => withAdmin || r.key !== 'admin')
-      .map(r => `<option value="${esc(r.key)}" ${sel === r.key ? 'selected' : ''}>${
-        esc(r.name)}${r.perms ? ` · ${r.perms} صلاحية` : ''}</option>`).join('');
+    const opts = (sel, withAdmin, extra) => {
+      const list = roles.filter(r => withAdmin || r.key !== 'admin');
+      if (extra && !list.some(r => r.key === extra.key)) list.push(extra);
+      return list.map(r => `<option value="${esc(r.key)}" ${sel === r.key ? 'selected' : ''}>${
+        esc(r.name)}${r.perms ? ` · ${r.perms} صلاحية` : ''}${
+        r.active === false ? ' ⛔ معطّل' : ''}</option>`).join('');
+    };
     const me = (USER || {}).id;
+    const shown = USR.filter ? users.filter(u => u.role === USR.filter) : users;
     main.innerHTML = `
       <div class="card">
-        <h3>المستخدمون (${users.length})</h3>
+        <h3>المستخدمون (${shown.length}${
+          shown.length !== users.length ? ` من ${users.length}` : ''})</h3>
         <p style="margin:0 0 10px;color:#64748b">قائمة الصلاحيات هنا مربوطة بـ
-          <b>مصفوفة الأدوار والصلاحيات</b> (${roles.length} دورًا) — أي دور جديد
-          يُنشأ هناك يظهر فورًا في الشاشتين دون إعادة تشغيل.</p>
+          <b>مصفوفة الأدوار والصلاحيات</b> (${roles.length} دورًا متاحًا${
+            all.length !== roles.length ? ` · ⛔ ${all.length - roles.length} معطّل` : ''}) —
+          أي دور جديد يُنشأ هناك يظهر فورًا في الشاشتين دون إعادة تشغيل.
+          <button class="btn sm ghost" onclick="navigate('permissions')">🧮 إدارة الأدوار</button></p>
+        ${USR.filter ? `<p style="margin:0 0 10px">🔍 مُصفّى على دور
+          <b>${esc(roleName(USR.filter))}</b> —
+          <button class="btn sm ghost" onclick="clearRoleFilter()">✕ إزالة الفلتر</button></p>` : ''}
         <details class="addbox"><summary>➕ إضافة مستخدم جديد</summary>
         <div class="form-grid">
           <div class="field"><label>اسم المستخدم</label><input id="u-username"></div>
@@ -6770,12 +6800,12 @@ const VIEWS = {
         <div style="overflow-x:auto; margin-top:18px"><table>
           <thead><tr><th>#</th><th>اسم المستخدم</th><th>الاسم الكامل</th><th>البريد الإلكتروني</th>
             <th>الصلاحية</th><th>الحالة</th><th></th></tr></thead>
-          <tbody>${users.map(u => `<tr>
+          <tbody>${shown.map(u => `<tr>
             <td>${u.id}</td><td>${esc(u.username)}</td><td>${esc(u.full_name)}</td>
             <td style="direction:ltr;text-align:left">${esc(u.email)}</td>
             <td>
               <select onchange="setRole(${u.id}, this.value)" ${u.id === me ? 'disabled' : ''}
-                title="دور حالي: ${esc(roleName(u.role))}">${opts(u.role, true)}</select>
+                title="دور حالي: ${esc(roleName(u.role))}">${opts(u.role, true, own(u))}</select>
             </td>
             <td>${u.is_active ? '<span class="pill completed">نشط</span>' : '<span class="pill cancelled">معطّل</span>'}</td>
             <td class="actions">
@@ -7727,6 +7757,12 @@ async function deleteUser(id) {
     toast('تم حذف المستخدم ✅');
     await navigate('users');
   } catch (e) { toast(e.message, true); }
+}
+
+/** إزالة فلتر الدور وعرض كل المستخدمين من جديد */
+function clearRoleFilter() {
+  USR.filter = '';
+  navigate('users');
 }
 
 async function setRole(id, role) {
