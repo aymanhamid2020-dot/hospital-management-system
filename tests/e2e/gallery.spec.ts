@@ -29,4 +29,18 @@ test.describe('معرض لقطات الشاشات 🖼️', () => {
       await page.screenshot({ path: `${OUT}/${file}.png`, fullPage: true });
     });
   }
+
+  /* شاشة الطوارئ: تُصوَّر على حالة مفتوحة إن وُجدت حتى تظهر مساحة العمل
+     والمنتقي المصنَّف والفاتورة، وإلا كافية بقائمة الحالات */
+  test('10-emergency — حالة مفتوحة بالمنتقي والفاتورة', async ({ page }) => {
+    await login(page);
+    await openView(page, 'er');
+    await expectNoUiError(page);
+    if (await page.locator('.er-item').count()) {
+      await page.locator('.er-item').first().click();
+      await expect(page.locator('#er-work h3').first()).toContainText('حالة #');
+      await expectNoUiError(page);
+    }
+    await page.screenshot({ path: `${OUT}/10-emergency.png`, fullPage: true });
+  });
 });
