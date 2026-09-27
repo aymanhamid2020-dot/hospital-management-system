@@ -92,6 +92,28 @@ def _posted_entry(db: Session, ref_type: str, ref_id: int):
     ).first()
 
 
+def purge_invoice_entries(db: Session, invoice_ids) -> int:
+    """يحذف قيود فواتير لم تعد موجودة — يعيد عدد ما حُذف.
+
+    حذف فاتورة يترك قيدها معلّقة بمصدر مفقود، وخطرها أكبر من التشويه
+    البصري: عند إعادة استخدام المعرّف (حذف آخر صف في SQLite ثم إنشاء
+    فاتورة) يرى ``_posted_entry`` القيد البائد «كمرحّل سابق» للفاتورة
+    الجديدة فيُخمَدها فلا تُرحَّل أبدًا — فيضيع إيراد بصمت. لذلك يُستدعى
+    من مساري سقوط الفاتورة: حذفها مباشرة، أو حذف مريضها بالـcascade.
+    """
+    ids = [i for i in invoice_ids if i is not None]
+    if not ids:
+        return 0
+    stale = (db.query(JournalEntry)
+             .filter(JournalEntry.reference_type.in_(
+                 ("patient_invoice", "patient_invoice_payment")),
+                 JournalEntry.reference_id.in_(ids))
+             .all())
+    for entry in stale:
+        db.delete(entry)
+    return len(stale)
+
+
 def _entry_out(row: JournalEntry) -> JournalEntryOut:
     return JournalEntryOut(
         id=row.id, entry_no=row.entry_no, entry_date=row.entry_date,

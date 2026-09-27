@@ -5,9 +5,12 @@ from typing import List, Optional
 
 from app.database import get_db
 from app.models import (
-    Invoice, Patient, User, Appointment, MedicalRecord, InvoiceStatus,
+    Invoice, InvoiceLine, Patient, User, Appointment, MedicalRecord, InvoiceStatus,
 )
-from app.schemas import InvoiceCreate, InvoiceUpdate, InvoiceInDB, InvoicePayment
+from app.schemas import (
+    InvoiceCreate, InvoiceUpdate, InvoiceInDB, InvoicePayment,
+    InvoiceLineBase, InvoiceLineInDB,
+)
 from app.auth import get_current_user, require_admin
 
 router = APIRouter(prefix="/invoices", tags=["Invoices"])
@@ -47,6 +50,38 @@ def _validate_links(db: Session, patient_id: int, appointment_id, record_id):
             raise HTTPException(status_code=404, detail="السجل الطبي غير موجود")
         if rec.patient_id != patient_id:
             raise HTTPException(status_code=400, detail="السجل الطبي لا ينتمي لهذا المريض")
+
+
+def _attach_lines(db: Session, inv: Invoice, lines) -> None:
+    """يضيف بنود الفاتورة ويضبط المبلغ = مجموعها (إن وُجدت بنود)."""
+    if not lines:
+        return
+    total = 0.0
+    for line in lines:
+        inv.lines.append(InvoiceLine(
+            kind=line.kind, description=line.description,
+            quantity=line.quantity, unit_price=line.unit_price,
+            amount=line.amount, ref_type=line.ref_type, ref_id=line.ref_id,
+        ))
+        total += line.amount or 0
+    inv.amount = round(total, 2)
+
+
+def _refresh_total(inv: Invoice) -> None:
+    """يعيد حساب المبلغ من السطور بعد إضافة/حذف سطر."""
+    if inv.lines:
+        inv.amount = round(sum(float(x.amount or 0) for x in inv.lines), 2)
+    _validate_totals(inv)
+
+
+def _locked_invoice(db: Session, invoice_id: int) -> Invoice:
+    """فاتورة لا يجوز تعديل بنودها بعد سدادها (الإيصال نهائي)."""
+    inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    if not inv:
+        raise HTTPException(status_code=404, detail="الفاتورة غير موجودة")
+    if inv.status == InvoiceStatus.PAID or (inv.paid_amount or 0) > 0:
+        raise HTTPException(status_code=409, detail="لا يمكن تعديل بنود فاتورة مدفوعة")
+    return inv
 
 
 @router.get("/", response_model=List[InvoiceInDB], summary="عرض قائمة الفواتير")
@@ -149,6 +184,8 @@ async def create_invoice(invoice: InvoiceCreate, db = Depends(get_db),
         insurer=invoice.insurer,
         policy_number=invoice.policy_number,
     )
+    # البنود أولًا: المبلغ يُشتقّ منها فلا يتخلّف الإجمالي عن سطر واحد
+    _attach_lines(db, db_invoice, invoice.lines)
     _validate_totals(db_invoice)
     _validate_links(db, invoice.patient_id, invoice.appointment_id, invoice.record_id)
     # فاتورة تُنشأ كمدفوعة ⇒ المدفوع = الإجمالي
@@ -165,6 +202,46 @@ async def create_invoice(invoice: InvoiceCreate, db = Depends(get_db),
     auto_post_invoice(db, db_invoice, user.username)
     db.refresh(db_invoice)
     return db_invoice
+
+
+@router.post("/{invoice_id}/lines", response_model=InvoiceInDB,
+             summary="إضافة بند إلى فاتورة غير مدفوعة")
+async def add_invoice_line(
+    invoice_id: int, line: InvoiceLineBase,
+    db = Depends(get_db), _ = Depends(get_current_user),
+):
+    """يضيف سطرًا (كشفية، فحص، أشعة، دواء…) ويُعيد حساب المبلغ.
+
+    الفواتير المدفوعة مُقفلة: الإيصال نهائيّ ولا يجوز سحب بند منه.
+    """
+    inv = _locked_invoice(db, invoice_id)
+    inv.lines.append(InvoiceLine(
+        kind=line.kind, description=line.description,
+        quantity=line.quantity, unit_price=line.unit_price,
+        amount=line.amount, ref_type=line.ref_type, ref_id=line.ref_id,
+    ))
+    _refresh_total(inv)
+    db.commit()
+    db.refresh(inv)
+    return inv
+
+
+@router.delete("/{invoice_id}/lines/{line_id}", response_model=InvoiceInDB,
+               summary="حذف بند من فاتورة غير مدفوعة")
+async def delete_invoice_line(
+    invoice_id: int, line_id: int,
+    db = Depends(get_db), _ = Depends(get_current_user),
+):
+    """يحذف سطرًا ويُعيد حساب المبلغ — ممنوع على فاتورة مدفوعة."""
+    inv = _locked_invoice(db, invoice_id)
+    row = next((x for x in inv.lines if x.id == line_id), None)
+    if row is None:
+        raise HTTPException(status_code=404, detail="البند غير موجود في هذه الفاتورة")
+    inv.lines.remove(row)
+    _refresh_total(inv)
+    db.commit()
+    db.refresh(inv)
+    return inv
 
 
 @router.post("/{invoice_id}/pay", response_model=InvoiceInDB, summary="تسوية/دفع الفاتورة")
@@ -302,7 +379,13 @@ async def delete_invoice(invoice_id: int, db = Depends(get_db), _: User = Depend
             status_code=status.HTTP_404_NOT_FOUND,
             detail="لا يوجد فاتورة بالمعرف المحدد"
         )
-    
+
+    # القيود المرحّلة على هذا المرجع تصبح معلّقة بمصدر مفقود بعد الحذف،
+    # وخطرها أعمق من التشويه: قد يُعاد استخدام المعرّف فيُخمَد قيد الفاتورة
+    # الجديدة «كمرحّل سابقًا» فلا يُرحَّل أبدًا — فيضيع الإيراد بصمت.
+    from app.routers.accounting import purge_invoice_entries
+    purge_invoice_entries(db, [invoice_id])
+
     db.delete(db_invoice)
     db.commit()
     return None

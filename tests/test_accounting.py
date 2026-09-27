@@ -328,3 +328,24 @@ def test_payroll_update_posts_balancing_adjustment(client, admin):
     trial = client.get("/accounts/ledger/trial-balance", headers=admin)
     assert trial.status_code == 200, trial.text
     assert trial.json()["difference"] == 0
+def test_deleting_invoice_or_patient_purges_their_journal_entries(client, admin):
+    """حذف الفاتورة/المريض يزيل قيودهما المرتبطة — لا بقاء لمصدر مفقود.
+
+    إن بقي القيد بعد حذف المصدر، فعند إعادة استخدام المعرّف (حذف آخر صف
+    في SQLite ثم إنشاء فاتورة) يجده _posted_entry ويعدّ الفاتورة الجديدة
+    مرحّلة سابقًا فلا تُرحَّل أبدًا — فيضيع إيراد بصمت. وهذا ما كان يسقط
+    test_quotation_lifecycle_and_convert حين يسبقه حذف فواتير.
+    """
+    # 1) حذف الفاتورة مباشرة
+    pid = _patient(client, admin)
+    iid = _invoice(client, admin, pid, _uid())
+    assert len(_ledger_for(client, admin, "patient_invoice", iid)) == 1
+    assert client.delete(f"/invoices/{iid}", headers=admin).status_code == 204
+    assert _ledger_for(client, admin, "patient_invoice", iid) == []
+
+    # 2) حذف المريض يسقط فواتيره بالـcascade دون المرور بحذف الفاتورة
+    pid2 = _patient(client, admin)
+    iid2 = _invoice(client, admin, pid2, _uid())
+    assert len(_ledger_for(client, admin, "patient_invoice", iid2)) == 1
+    assert client.delete(f"/patients/{pid2}", headers=admin).status_code == 204
+    assert _ledger_for(client, admin, "patient_invoice", iid2) == []

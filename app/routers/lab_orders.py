@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user, get_user_role, require_admin
 from app.database import get_db
 from app.models import (
-    LabOrder, LabStatus, LabTest, Notification, Patient, Doctor, TestType, User,
-    RadiologyRoom,
+    EmergencyCase, LabOrder, LabStatus, LabTest, Notification, Patient, Doctor,
+    TestType, User, RadiologyRoom,
 )
 from app.schemas import (
     LabOrderCreate, LabOrderInDB, LabOrderUpdate,
@@ -100,6 +100,53 @@ def _load(db: Session, current_user: User, order_id: int) -> LabOrder:
     return order
 
 
+def _payment_gate(db: Session, order: LabOrder) -> None:
+    """يكبح تنفيذ طلب طوارئ لم يُحصَّل بعد — 402 مع تنبيه لصاحب التحصيل.
+
+    الشاشة مرنة كما اختار النظام: الطلب يظهر للمختبر فورًا وعليه شارة
+    «بانتظار التحصيل»، لكن سحب العيّنة والإدخال ممنوعان حتى تُدفع
+    الكشفية مع الفحوصات. والإشعار يبقى غير مقروء حتى يسدده الكاشير.
+    """
+    if order.emergency_case_id is None:
+        return
+    case = (db.query(EmergencyCase)
+            .filter(EmergencyCase.id == order.emergency_case_id).first())
+    if case is None:
+        return
+    from app.routers.service_units import _case_settled, _notify_once
+    if _case_settled(db, case):
+        return
+    _notify_once(db, "payment_pending", f"تحصيل طوارئ #{case.id}",
+                 f"طلب «{order.test_name}» معلّق التنفيذ حتى تحصيل فاتورة الحالة",
+                 case.patient_id)
+    db.commit()
+    raise HTTPException(
+        status_code=402,
+        detail="بانتظار التحصيل: الكشفية وفحوصات هذه الحالة غير مدفوعة — "
+               "وجّه المريض لصاحب التحصيل ثم أعد المحاولة")
+
+
+def _annotate_payment(db: Session, orders) -> None:
+    """يوسم الطلبات المعلّقة التحصيل لعرضها بوضوح أمام صاحب المختبر.
+
+    الحالة الواحدة تُفحص مرّة واحدة لا طلبًا طلبًا — الصفحة قد تحمل
+    مئات الطلبات لبضع حالات فقط.
+    """
+    cases = {o.emergency_case_id for o in orders if o.emergency_case_id}
+    if not cases:
+        for o in orders:
+            o.payment_pending = False
+        return
+    from app.routers.service_units import _case_settled
+    unsettled = set()
+    for cid in cases:
+        case = db.query(EmergencyCase).filter(EmergencyCase.id == cid).first()
+        if case is not None and not _case_settled(db, case):
+            unsettled.add(cid)
+    for o in orders:
+        o.payment_pending = o.emergency_case_id in unsettled
+
+
 @router.get("/", response_model=List[LabOrderInDB], summary="عرض طلبات المختبر والأشعة")
 async def list_lab_orders(
     patient_id: Optional[int] = Query(None, description="فلترة حسب المريض"),
@@ -141,7 +188,9 @@ async def list_lab_orders(
     if abnormal is not None:
         q = q.filter(LabOrder.abnormal.is_(bool(abnormal)))
 
-    return q.order_by(LabOrder.ordered_at.desc()).all()
+    rows = q.order_by(LabOrder.ordered_at.desc()).all()
+    _annotate_payment(db, rows)
+    return rows
 
 
 @router.get("/worklist", response_model=List[LabOrderInDB], summary="قائمة عملية الأجهزة (Modality Worklist)")
@@ -178,12 +227,16 @@ async def modality_worklist(
     if doctor_id:
         q = q.filter(LabOrder.doctor_id == doctor_id)
 
-    return q.order_by(LabOrder.scheduled_at.asc()).all()
+    rows = q.order_by(LabOrder.scheduled_at.asc()).all()
+    _annotate_payment(db, rows)
+    return rows
 
 
 @router.get("/{order_id}", response_model=LabOrderInDB, summary="عرض طلب معين")
 async def get_lab_order(order_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return _load(db, current_user, order_id)
+    order = _load(db, current_user, order_id)
+    _annotate_payment(db, [order])
+    return order
 
 
 @router.get("/{order_id}/pdf", summary="طباعة ورقة نتيجة الطلب PDF")
@@ -285,6 +338,7 @@ async def collect_lab_sample(
 ):
     """تسجيل سحب العيّنة (دم/بول/مسحة) وتوليد باركود فريد للطباعة."""
     order = _load(db, current_user, order_id)
+    _payment_gate(db, order)
     if order.sample_status in ("collected", "received"):
         raise HTTPException(status_code=409, detail="سُحبت عيّنة هذا الطلب مسبقًا")
 
@@ -309,6 +363,7 @@ async def receive_lab_sample(
 ):
     """تأكيد استلام العيّنة في المختبر (تنتقل للحالة «قيد التنفيذ») أو رفضها بذكر السبب."""
     order = _load(db, current_user, order_id)
+    _payment_gate(db, order)
     if order.sample_status not in ("collected", "received"):
         raise HTTPException(status_code=400, detail="لا توجد عيّنة مسحوبة لهذا الطلب")
 
@@ -338,6 +393,7 @@ async def enter_lab_result(
 ):
     """إدخال قيمة الفحص ومقارنتها بالنطاق الطبيعي: تمييز تلقائي للقيم غير الطبيعية والحرجة."""
     order = _load(db, current_user, order_id)
+    _payment_gate(db, order)
     if order.status == LabStatus.CANCELLED:
         raise HTTPException(status_code=400, detail="لا يمكن إدخال نتيجة لطلب ملغى")
     if order.status == LabStatus.REVIEWED:
@@ -393,6 +449,7 @@ async def verify_lab_order(
         raise HTTPException(status_code=403,
                             detail="الاعتماد متاح للمدير أو الطبيب فقط")
     order = _load(db, current_user, order_id)
+    _payment_gate(db, order)
     if not (order.result or "").strip() and not (order.report or "").strip():
         raise HTTPException(status_code=400, detail="لا توجد نتيجة أو تقرير لاعتماده")
     if order.status == LabStatus.CANCELLED:
@@ -451,6 +508,10 @@ async def update_lab_order(
     order = _load(db, current_user, order_id)
 
     data = update.model_dump(exclude_unset=True)
+
+    if any(k in data for k in ("result", "report", "status")):
+        # بوابة التحصيل: أي إدخال سريري لطلب طوارئ غير مُحصَّل ممنوع
+        _payment_gate(db, order)
 
     # النتيجة مطلوبة لحين وصول الطلب إلى "جاهزة"
     new_status = data.get("status")

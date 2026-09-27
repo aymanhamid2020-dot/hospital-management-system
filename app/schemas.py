@@ -1,5 +1,5 @@
 from typing import Optional, List, Literal
-from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
+from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator, model_validator
 from typing import Optional, List
 from datetime import datetime, time
 
@@ -836,6 +836,49 @@ class StaffBrief(ORMModel):
 
 
 # ===== الفواتير =====
+# أنواع بنود الفاتورة: الكشفية والفحوصات والأشعة والأدوية والخدمات
+INVOICE_LINE_KINDS = ("visit", "lab", "radiology", "pharmacy", "service", "other")
+
+
+class InvoiceLineBase(BaseModel):
+    """سطر واحد ضمن فاتورة — كشفية، فحص، أشعة، دواء…"""
+    kind: str = Field("service", max_length=20,
+                      description="النوع: visit/lab/radiology/pharmacy/service/other")
+    description: str = Field(..., min_length=1, max_length=300, description="بيان البند")
+    quantity: float = Field(1, gt=0, description="الكمية")
+    unit_price: float = Field(0, ge=0, description="سعر الوحدة")
+    amount: Optional[float] = Field(
+        None, ge=0,
+        description="قيمة السطر — إن حُذفت تُحسب من الكمية × السعر")
+    ref_type: Optional[str] = Field(
+        None, max_length=30, description="مصدر البند: lab_order / prescription / emergency_case")
+    ref_id: Optional[int] = Field(None, description="معرّف المصدر داخل ref_type")
+
+    @field_validator("kind")
+    @classmethod
+    def _kind_known(cls, v: str) -> str:
+        if v not in INVOICE_LINE_KINDS:
+            raise ValueError("نوع بند غير معروف: " + v)
+        return v
+
+    @model_validator(mode="after")
+    def _amount_matches(self):
+        calc = round((self.quantity or 0) * (self.unit_price or 0), 2)
+        if self.amount is None:
+            self.amount = calc
+        elif abs(self.amount - calc) > 0.01:
+            raise ValueError("قيمة السطر لا تساوي الكمية × السعر")
+        return self
+
+
+class InvoiceLineInDB(InvoiceLineBase):
+    id: int
+    invoice_id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class InvoiceBase(BaseModel):
     patient_id: int = Field(..., description="معرّف المريض")
     appointment_id: Optional[int] = Field(None, description="الموعد المرتبط (اختياري)")
@@ -850,7 +893,28 @@ class InvoiceBase(BaseModel):
 
 
 class InvoiceCreate(InvoiceBase):
-    pass
+    """إنشاء فاتورة — مع بنود اختيارية.
+
+    إن أُرسلت البنود فالمبلغ يُشتقّ منها (وإن جاء ``amount`` مختلفًا ⇒
+    رفض برسالة صريحة بدل تصحيح صامت)، وإن حُذفت البنود وجب ``amount``.
+    """
+    amount: Optional[float] = Field(None, gt=0, description="المبلغ الأساسي")
+    lines: List[InvoiceLineBase] = Field(
+        default_factory=list, description="بنود الفاتورة (اختياري)")
+
+    @model_validator(mode="after")
+    def _amount_from_lines(self):
+        if self.lines:
+            total = round(sum(x.amount or 0 for x in self.lines), 2)
+            if self.amount is None:
+                self.amount = total
+            elif abs(self.amount - total) > 0.01:
+                raise ValueError("المبلغ لا يساوي مجموع البنود")
+        if self.amount is None:
+            raise ValueError("المبلغ إلزامي حين لا تُرسل بنود")
+        if self.amount <= 0:
+            raise ValueError("المبلغ يجب أن يكون أكبر من صفر")
+        return self
 
 
 class InvoiceUpdate(BaseModel):
@@ -879,6 +943,8 @@ class InvoiceInDB(InvoiceBase):
     subtotal: float = 0
     tax: float = 0
     total: float = 0
+    lines_total: float = 0
+    lines: List[InvoiceLineInDB] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
     patient: PatientBrief
@@ -1017,6 +1083,10 @@ class LabTestBase(BaseModel):
     unit: Optional[str] = Field(None, description="وحدة القياس")
     ref_min: Optional[float] = Field(None, description="النطاق الطبيعي: الحد الأدنى")
     ref_max: Optional[float] = Field(None, description="النطاق الطبيعي: الحد الأعلى")
+    # التجميع داخل شاشة الطبيب: blood/serum/urine/stool… | xray/ct/mri/ultrasound
+    specimen_group: Optional[str] = Field(
+        None, max_length=30,
+        description="المجموعة الفرعية (دم، بول، براز، هرمونات، أشعة…)")
     active: bool = Field(True, description="مفعّل في نموذج الطلب")
 
 
@@ -1036,6 +1106,7 @@ class LabTestUpdate(BaseModel):
     unit: Optional[str] = None
     ref_min: Optional[float] = None
     ref_max: Optional[float] = None
+    specimen_group: Optional[str] = Field(None, max_length=30)
     active: Optional[bool] = None
 
 
@@ -1132,6 +1203,11 @@ class LabOrderInDB(LabOrderBase):
     delivered_at: Optional[datetime] = None
     delivered_by: Optional[str] = None
     delivery_channel: Optional[str] = None
+    # سير الطوارئ: الطلب المفتوح من نوبة الطوارئ وحالة تحصيله
+    emergency_case_id: Optional[int] = None
+    payment_pending: bool = Field(
+        False,
+        description="طلب طوارئ لم تُدفع كشفيته بعد — معروض للمختبر ويُمنع تنفيذه")
     patient: PatientBrief
     doctor: Optional[DoctorBrief] = None
 

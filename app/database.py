@@ -117,6 +117,7 @@ PENDING_COLUMNS = {
         "hr_profile": "TEXT NOT NULL DEFAULT '{}'",
     },
     "lab_orders": {
+        "emergency_case_id": "INTEGER",
         # LIS/RIS: أولوية الطلب وارتباطه بدليل الفحوصات
         "priority": "VARCHAR NOT NULL DEFAULT 'routine'",
         "lab_test_id": "INTEGER",
@@ -147,6 +148,20 @@ PENDING_COLUMNS = {
         "delivered_at": "TIMESTAMP",
         "delivered_by": "VARCHAR",
         "delivery_channel": "VARCHAR",
+    },
+    "lab_tests": {
+        # التجميع داخل شاشة الطبيب: دم/بول/براز… أو نوع الأشعة
+        "specimen_group": "VARCHAR",
+    },
+    "emergency_cases": {
+        # سير عمل الطوارئ: الطبيب المناوب ثم الفاتورة ثم العلاج
+        "doctor_id": "INTEGER",
+        "invoice_id": "INTEGER",
+        "record_id": "INTEGER",
+        "prescription_id": "INTEGER",
+        "consult_fee": "FLOAT NOT NULL DEFAULT 0",
+        "diagnosis": "VARCHAR",
+        "treatment": "TEXT",
     },
     "general_stock_items": {
         # دليل المواد: بيانات تفصيلية + مستويات إعادة الطلب + شروط التخزين
@@ -290,8 +305,10 @@ INDEXES = {
     "medical_records": ["patient_id", "doctor_id"],
     "attachments": ["patient_id", "record_id"],
     "notifications": ["is_read", "appointment_id", "patient_id", "prescription_id"],
-    "lab_orders": ["patient_id", "status", "barcode", "sample_status", "priority"],
-    "lab_tests": ["category", "active"],
+    "lab_orders": ["patient_id", "status", "barcode", "sample_status", "priority",
+                   "emergency_case_id"],
+    "lab_tests": ["category", "active", "specimen_group"],
+    "invoice_lines": ["invoice_id", "kind", "ref_type"],
     "radiology_rooms": ["modality", "is_active"],
     "dispenses": ["patient_id", "medication_id", "created_at", "prescription_id"],
     "stock_movements": ["medication_id", "created_at"],

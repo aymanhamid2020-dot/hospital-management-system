@@ -732,7 +732,12 @@ async def delete_patient(patient_id: int, db = Depends(get_db), _: User = Depend
             status_code=status.HTTP_404_NOT_FOUND,
             detail="لا يوجد مريض بالمعرف المحدد"
         )
-    
+
+    # فواتيره تسقط بالـcascade دون المرور بحذف الفاتورة، فتبقى قيودها
+    # معلّقة وتُسمّي قيد فاتورة تالية يُعاد لها المعرّف — تنظيفها أولًا.
+    from app.routers.accounting import purge_invoice_entries
+    purge_invoice_entries(db, [i.id for i in db_patient.invoices])
+
     db.delete(db_patient)
     db.commit()
     return None

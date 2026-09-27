@@ -1,6 +1,6 @@
 """مخططات المحاور التشغيلية الجديدة: تمريض، عمليات، وحدات، دعم، جودة وموارد."""
 from datetime import datetime
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -390,6 +390,9 @@ class EmergencyCaseCreate(StrictModel):
     arrival_at: datetime
     disposition: Optional[str] = Field(None, max_length=160)
     notes: Optional[str] = Field(None, max_length=2000)
+    # صاحب النوبة الذي يفتح الملف + قيمة الكشف المتفق عليها
+    doctor_id: Optional[int] = Field(None, gt=0)
+    consult_fee: float = Field(0, ge=0)
 
 class EmergencyCaseUpdate(StrictModel):
     complaint: Optional[str] = Field(None, min_length=2, max_length=1000)
@@ -397,10 +400,15 @@ class EmergencyCaseUpdate(StrictModel):
     arrival_at: Optional[datetime] = None
     disposition: Optional[str] = Field(None, max_length=160)
     notes: Optional[str] = Field(None, max_length=2000)
+    doctor_id: Optional[int] = Field(None, gt=0)
+    consult_fee: Optional[float] = Field(None, ge=0)
+    diagnosis: Optional[str] = Field(None, max_length=500)
+    treatment: Optional[str] = Field(None, max_length=2000)
 
 class EmergencyCaseOut(StrictModel):
     id: int
     patient_id: int
+    patient_name: Optional[str] = None
     complaint: str
     triage_level: str
     arrival_at: datetime
@@ -410,7 +418,106 @@ class EmergencyCaseOut(StrictModel):
     created_by: str
     created_at: Optional[datetime] = None
     closed_at: Optional[datetime] = None
+    # — سير العمل: الطبيب المناوب ثم الفاتورة ثم العلاج —
+    doctor_id: Optional[int] = None
+    invoice_id: Optional[int] = None
+    record_id: Optional[int] = None
+    prescription_id: Optional[int] = None
+    consult_fee: float = 0
+    diagnosis: Optional[str] = None
+    treatment: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
+
+
+# ===== سير عمل الطوارئ: طلب الفحوصات ← التحصيل ← العلاج =====
+class EmergencyOrderLine(StrictModel):
+    """فحص واحد يطلبه طبيب الطوارئ من الدليل أو باسم حر."""
+    lab_test_id: Optional[int] = Field(None, gt=0)
+    test_name: Optional[str] = Field(None, min_length=2, max_length=200)
+    priority: Literal["routine", "stat"] = "routine"
+    notes: Optional[str] = Field(None, max_length=500)
+
+    @model_validator(mode="after")
+    def _one_source(self):
+        if not self.lab_test_id and not self.test_name:
+            raise ValueError("حدّد فحصًا من الدليل (lab_test_id) أو اكتب اسمه")
+        return self
+
+
+class EmergencyOrderIn(StrictModel):
+    lines: List[EmergencyOrderLine] = Field(min_length=1, max_length=50)
+
+
+class EmergencyCheckoutIn(StrictModel):
+    """فتح فاتورة تحصيل: الكشفية + كل فحوصات الحالة غير المفوترة."""
+    consult_fee: Optional[float] = Field(
+        None, ge=0, description="قيمة الكشف — تُهمل إن كانت محفوظة على الحالة")
+    note: Optional[str] = Field(None, max_length=300)
+
+
+class EmergencyRxItem(StrictModel):
+    """بند وصفة يظهر فورًا لصاحب الصيدلية."""
+    medication_id: int = Field(gt=0)
+    quantity: int = Field(1, gt=0)
+    dosage: Optional[str] = Field(None, max_length=200)
+    frequency: Optional[str] = Field(None, max_length=200)
+    duration: Optional[str] = Field(None, max_length=120)
+    instructions: Optional[str] = Field(None, max_length=500)
+
+
+class EmergencyTreatmentIn(StrictModel):
+    """العلاج الذي يسجّله طبيب الطوارئ بعد رؤية نتائج المختبر."""
+    diagnosis: str = Field(min_length=2, max_length=500)
+    treatment: str = Field(min_length=2, max_length=2000)
+    chief_complaint: Optional[str] = Field(None, max_length=1000)
+    notes: Optional[str] = Field(None, max_length=2000)
+    prescription: List[EmergencyRxItem] = Field(default_factory=list, max_length=50)
+    discharge: bool = Field(False, description="إنهاء الحالة وخروج المريض")
+
+
+class EmergencyLabOrderBrief(StrictModel):
+    id: int
+    test_name: str
+    test_type: str
+    status: str
+    price: float = 0
+    priority: str = "routine"
+    result: Optional[str] = None
+    billed: bool = False
+    executed: bool = False
+
+
+class EmergencyLineBrief(StrictModel):
+    id: int
+    kind: str
+    description: str
+    amount: float
+
+
+class EmergencyInvoiceBrief(StrictModel):
+    """فاتورة مرتبطة بالحالة — قد تستفي أكثر من فاتورة عبر دورتها."""
+    id: int
+    total: float = 0
+    paid_amount: float = 0
+    status: str = "unpaid"
+    due: float = 0
+
+
+class EmergencySummaryOut(StrictModel):
+    """لوحة حالة الطوارئ: ما فُوتر وما بقي وما نفّذه المختبر."""
+    case: EmergencyCaseOut
+    patient_name: str
+    invoice_id: Optional[int] = None
+    invoices: List[EmergencyInvoiceBrief] = []
+    lines: List[EmergencyLineBrief] = []
+    billed_total: float = 0
+    paid_amount: float = 0
+    due: float = 0
+    payment_status: Literal["unbilled", "unpaid", "partial", "paid"] = "unbilled"
+    lab_orders: List[EmergencyLabOrderBrief] = []
+    tests_ready: int = 0
+    has_record: bool = False
+    has_prescription: bool = False
 
 
 

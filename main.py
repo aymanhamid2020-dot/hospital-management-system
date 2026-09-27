@@ -111,6 +111,21 @@ def seed_admin():
         db.close()
 
 
+def seed_lab_catalog_data():
+    """يزرع كتالوج الفحوصات المخبرية والأشعة المصنَّف عند أول تشغيل.
+
+    الدليل غير مزروع أصلًا — فيبقى شاشة الطبيب بلا خيارات مهما بلغ النظام.
+    البذر idempotent: لا يمسّ ما أضافه المدير، ولا يُكرّر صفًّا قائمًا.
+    يجب أن يلي ``ensure_columns()`` لأن العمود ``specimen_group`` يُضاف فيه.
+    """
+    from app.lab_catalog import seed_lab_catalog
+    db = SessionLocal()
+    try:
+        return seed_lab_catalog(db)
+    finally:
+        db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # إنشاء الجداول + ترحيل الأعمدة الجديدة عند بدء التشغيل
@@ -125,6 +140,7 @@ async def lifespan(app: FastAPI):
         ensure_indexes()
         seed_rbac_data()
         seed_admin()
+        seed_lab_catalog_data()
 
     # مهمة التذكير والنسخ التلقائي — لعامل واحد فقط (قفل قيادة)
     import asyncio

@@ -3478,7 +3478,7 @@ function enterApp() {
 const VIEW_PERMS = {
   patients: ['patients.view'], appointments: ['appointments.view'],
   clinical: ['records.view'], doctors: ['records.view'],
-  pharmacy: ['pharmacy.view'], lab: ['lab.view'],
+  pharmacy: ['pharmacy.view'], lab: ['lab.view'], er: ['records.view'],
   sales: ['sales.view'], quickops: ['sales.view'],
   invoices: ['sales.view'], accounts: ['accounting.view'],
   accounting: ['accounting.view'], governance: ['reports.view'],
@@ -3561,6 +3561,7 @@ const TITLES = {
   departments: 'الأقسام', beds: 'الأسرّة', invoices: 'الفواتير',
   staff: 'الموظفون', hr: 'شؤون الموظفين', users: 'المستخدمون', backup: 'النسخ الاحتياطي', notifications: 'الإشعارات',
   lab: 'المختبر والأشعة', pharmacy: 'الصيدلية', inventory: 'المخزون', payroll: 'الرواتب',
+  er: 'الطوارئ',
   clinical: 'الرعاية والتشغيل', support: 'الصيانة والتعقيم', governance: 'الجودة والموارد',
   audit: 'سجل التدقيق', clinics: 'العيادات', permissions: 'الأدوار والصلاحيات', quickops: 'العمليات السريعة', sales: 'المبيعات', accounts: 'الحسابات', accounting: 'المحاسبة'
 };
@@ -6016,6 +6017,8 @@ async function rbClearOverrides(userId) {
 }
 
 const VIEWS = {
+  /* 🚑 شاشة الطوارئ: سير عمل كامل (ملف ← فحوصات ← تحصيل ← علاج) */
+  er: renderEr,
   /* 🔐 الأدوار والصلاحيات (RBAC) */
   permissions,
   /* 🏥 العيادات (دالة معرّفة أعلها) */
@@ -8196,12 +8199,19 @@ function labSamplePill(s) {
   return `<span class="pill ${cls}">${LAB_SAMPLE_ST[s] || s}</span>`;
 }
 
+/* بوابة التحصيل: طلب طوارئ مفوتر (أو لم يُفوتر) بعد يُمنع تنفيذه حتى يُدفع */
+function labPayPill(o) {
+  return o.payment_pending
+    ? '<br><span class="pill partial" title="بوابة التحصيل: الكشفية وفحوصات الطوارئ يجب أن تُدفع قبل تنفيذ الفحص">⏳ بانتظار التحصيل</span>'
+    : '';
+}
+
 /* التنقل بين أقسام الشاشة نفسها (بلا إعادة جلب للبيانات من السيرفر) */
 function labGo(sub) { return setLabSub(sub); }
 
 /* ---------- نموذج طلب جديد (مشترك بين LIS وRIS) ---------- */
 function labOrderFormHTML(type) {
-  const { tests, patients, doctors } = LAB_DATA;
+  const { patients, doctors } = LAB_DATA;
   const rad = type === 'radiology';
   const radField = rad ? '' : 'style="display:none"';
   return `
@@ -8214,14 +8224,9 @@ function labOrderFormHTML(type) {
       <div class="field"><label>النوع</label><select id="f-type" onchange="labTypeChanged()">
         <option value="lab" ${rad ? '' : 'selected'}>تحليل مختبري</option>
         <option value="radiology" ${rad ? 'selected' : ''}>أشعة</option></select></div>
-      <div class="field"><label>فحص من الدليل</label><select id="f-cat" onchange="labCatChanged()">
-        <option value="">— إدخال يدوي</option>
-        ${tests.map(t => `<option value="${t.id}" data-category="${t.category}" data-name="${esc(t.name)}"
-          data-price="${t.price || 0}" data-spec="${esc(t.specimen_type || '')}"
-          data-unit="${esc(t.unit || '')}" data-refmin="${t.ref_min == null ? '' : t.ref_min}"
-          data-refmax="${t.ref_max == null ? '' : t.ref_max}"
-          ${t.category !== type ? 'disabled' : ''}>${t.category === 'radiology' ? '🩻' : '🧪'} ${esc(t.code)} — ${esc(t.name)}</option>`).join('')}
-      </select></div>
+      <div class="field" style="grid-column:1/-1"><label>فحص من الدليل — مصنَّف (دم · بول · براز · هرمونات · … أو أنواع الأشعة)</label>
+        <input type="hidden" id="f-cat" value="">
+        <div id="lab-pick">${testPickerHTML()}</div></div>
       <div class="field"><label>اسم الفحص *</label><input id="f-test" placeholder="مثال: CBC"></div>
       <div class="field"><label>السعر (ر.س)</label><input id="f-price" type="number" step="0.01" min="0"></div>
       <div class="field"><label>الأولوية</label><select id="f-prio">
@@ -8238,35 +8243,31 @@ function labOrderFormHTML(type) {
   </details>`;
 }
 
-/* تغيير النوع: يُظهر/يخفي حقول الأشعة ويفرغ اختيار الدليل غير المتوافق */
-function labTypeChanged(keepCat) {
+/* تغيير النوع: يُظهر/يخفي حقول الأشعة ويعيد بذر المنتقي على فئته الجديدة */
+function labTypeChanged(keepSel) {
   const type = V('f-type') || 'lab';
   document.querySelectorAll('.lab-rad-field').forEach(el => {
     el.style.display = type === 'radiology' ? '' : 'none';
   });
-  document.querySelectorAll('#f-cat option[data-category]').forEach(op => {
-    op.disabled = op.dataset.category !== type;
-  });
-  if (!keepCat) {
-    const cat = document.getElementById('f-cat');
-    if (cat) cat.value = '';
-  }
+  TP.mode = 'single';
+  TP.type = type;
+  TP.g = '';
+  if (!keepSel) { TP.sel = []; TP.q = ''; tpApplySingle(null); }
+  tpMount();
 }
 
-/* اختيار فحص من الدليل يملأ اسمه وسعره (وينقل النوع إلى فئة الفحص) */
-function labCatChanged() {
-  const sel = document.getElementById('f-cat');
-  if (!sel) return;
-  const op = sel.selectedOptions[0];
-  if (!op || !op.value) return;
-  if (op.dataset.category && op.dataset.category !== V('f-type')) {
-    const type = document.getElementById('f-type');
-    if (type) type.value = op.dataset.category;
+/* الاختيار يأتي الآن من المنتقي المصنَّف — يملأ حقول الطلب ويحذف القائمة */
+function tpApplySingle(t) {
+  const set = (id, v) => { const e = document.getElementById(id); if (e) e.value = v == null ? '' : v; };
+  if (!t) { set('f-cat', ''); return; }
+  set('f-cat', t.id);
+  set('f-test', t.name);
+  set('f-price', t.price || 0);
+  const typeSel = document.getElementById('f-type');
+  if (typeSel && t.category && typeSel.value !== t.category) {
+    typeSel.value = t.category;
     labTypeChanged(true);
   }
-  const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
-  set('f-test', op.dataset.name || '');
-  set('f-price', op.dataset.price || '');
 }
 
 function addLabOrder() {
@@ -8573,14 +8574,16 @@ const LAB_VIEWS = {
           <td>${o.priority === 'stat'
             ? '<span class="pill cancelled">عاجل STAT</span>'
             : '<span class="pill pending">روتيني</span>'}</td>
-          <td>${labPill(o)}<br>${labSamplePill(o.sample_status)}</td>
+          <td>${labPayPill(o)}${labPill(o)}<br>${labSamplePill(o.sample_status)}</td>
           <td>${o.result ? esc(o.result) : '—'} ${labFlagPill(o)}</td>
           <td class="actions">
             <button class="btn sm ghost" onclick="download('/lab-orders/${o.id}/pdf','lab_result_${o.id}.pdf')">🖨️ PDF</button>
-            ${o.sample_status === 'none' || o.sample_status === 'rejected'
-              ? `<button class="btn sm ghost" onclick="collectSample(${o.id})">🧫 سحب العيّنة</button>` : ''}
-            ${o.status === 'in_progress' && o.sample_status === 'received'
-              ? `<button class="btn sm success" onclick="enterLabResult(${o.id})">📥 النتيجة</button>` : ''}
+            ${o.payment_pending
+              ? `<span class="pill partial" title="بوابة التحصيل: لا يبدأ تنفيذ الفحص قبل دفع الكشفية وفحوصات الطوارئ">🔒 الدفع قبل التنفيذ</span>`
+              : `${o.sample_status === 'none' || o.sample_status === 'rejected'
+                  ? `<button class="btn sm ghost" onclick="collectSample(${o.id})">🧫 سحب العيّنة</button>` : ''}
+                ${o.status === 'in_progress' && o.sample_status === 'received'
+                  ? `<button class="btn sm success" onclick="enterLabResult(${o.id})">📥 النتيجة</button>` : ''}`}
             ${o.status !== 'cancelled' && o.status !== 'reviewed'
               ? `<button class="btn sm danger" onclick="setLabStatus(${o.id},'cancelled')">إلغاء</button>` : ''}
             ${isAdmin() ? `<button class="btn sm danger" onclick="del('lab-orders',${o.id},'lab')">حذف</button>` : ''}
@@ -8644,7 +8647,7 @@ const LAB_VIEWS = {
           <td>${labRange(o)}</td>
           <td>${o.result ? esc(o.result) + (o.unit ? ` <small>${esc(o.unit)}</small>` : '') : '—'}</td>
           <td>${labFlagPill(o)}</td>
-          <td>${labPill(o)}</td>
+          <td>${labPayPill(o)}${labPill(o)}</td>
           <td class="actions">
             ${o.sample_status === 'received' && o.status !== 'reviewed' && o.status !== 'cancelled'
               ? `<button class="btn sm success" onclick="enterLabResult(${o.id})">${o.result ? '✏️ تعديل النتيجة' : '📥 إدخال النتيجة'}</button>` : ''}
@@ -8673,7 +8676,7 @@ const LAB_VIEWS = {
           <td>${o.id}</td><td>${esc(o.patient.full_name)}</td>
           <td>${esc(o.test_name)}</td>
           <td>${o.result ? esc(o.result) : esc(o.report || '—')}</td>
-          <td>${labPill(o)}</td>
+          <td>${labPayPill(o)}${labPill(o)}</td>
           <td>${o.verified_by
             ? `<small>✍️ ${esc(o.verified_by)}<br>${fmtDate(o.verified_at)}</small>`
             : '<span class="pill pending">بلا توقيع</span>'}</td>
@@ -8758,7 +8761,7 @@ const LAB_VIEWS = {
             : '<span class="pill pending">روتيني</span>'}</td>
           <td><small>${o.modality ? (LAB_MODALITY[o.modality] || o.modality) : '—'}${o.room ? ' · ' + esc(o.room) : ''}</small></td>
           <td>${fmtDate(o.scheduled_at)}</td>
-          <td>${labPill(o)}</td>
+          <td>${labPayPill(o)}${labPill(o)}</td>
           <td class="actions">
             <button class="btn sm ghost" onclick="scheduleOrder(${o.id})">🗓️ جدولة</button>
             <button class="btn sm ghost" onclick="setLabSub('report')">📝 التقرير</button>
@@ -8793,7 +8796,7 @@ const LAB_VIEWS = {
           <td>${o.priority === 'stat'
             ? '<span class="pill cancelled">عاجل STAT</span>'
             : '<span class="pill pending">روتيني</span>'}</td>
-          <td>${labPill(o)}</td>
+          <td>${labPayPill(o)}${labPill(o)}</td>
           <td class="actions">
             <button class="btn sm success" onclick="scheduleOrder(${o.id})">🗓️ ${o.scheduled_at ? 'تعديل' : 'جدولة'}</button>
           </td></tr>`).join('') || emptyRow(9, 'لا توجد طلبات أشعة للجدولة')}</tbody>
@@ -8893,7 +8896,7 @@ const LAB_VIEWS = {
           <td>${o.id}</td><td>${esc(o.patient.full_name)}</td>
           <td>${esc(o.test_name)}</td>
           <td>${o.test_type === 'radiology' ? '🩻 أشعة' : '🧪 تحليل'}</td>
-          <td>${labPill(o)}${o.verified_by ? `<br><small>✍️ ${esc(o.verified_by)}</small>` : ''}</td>
+          <td>${labPayPill(o)}${labPill(o)}${o.verified_by ? `<br><small>✍️ ${esc(o.verified_by)}</small>` : ''}</td>
           <td class="actions">
             <button class="btn sm ghost" onclick="download('/lab-orders/${o.id}/pdf','lab_result_${o.id}.pdf')">🖨️ ورقة PDF</button>
             <button class="btn sm ghost" onclick="deliveryChannel('واتساب')">📱 واتساب</button>
@@ -9371,6 +9374,596 @@ document.addEventListener('keydown', (e) => {
     gsGo(gsActive);
   }
 });
+
+
+/* =====================================================================
+   🧬 منتقي الفحوصات المصنَّف — يستعمله شاشة الطوارئ ونموذج طلب المختبر
+   يحلّ محل قائمة مسطّحة تتجاوز 290 خيارًا: أقسام + بحث + قائمة قابلة
+   للتمرير. تُظهر فئات الدم والبول والبراز… أو أصناف الأشعة كلها.
+   ===================================================================== */
+const TEST_GROUP = {
+  blood: { ic: '🩸', label: 'الدم' },
+  serum: { ic: '🧪', label: 'الكيمياء والسيرم' },
+  hormones: { ic: '⚖️', label: 'الهرمونات' },
+  coagulation: { ic: '🩹', label: 'التخثر' },
+  urine: { ic: '💧', label: 'البول' },
+  stool: { ic: '💩', label: 'البراز' },
+  culture: { ic: '🦠', label: 'الزرع والحساسية' },
+  swab: { ic: '🥢', label: 'المسوحات' },
+  serology: { ic: '🛡️', label: 'المناعة والسيروولوجيا' },
+  other: { ic: '🧾', label: 'أخرى' },
+  xray: { ic: '🩻', label: 'أشعة سينية' },
+  ct: { ic: '🖥️', label: 'مقطعية CT' },
+  mri: { ic: '🧲', label: 'رنين MRI' },
+  ultrasound: { ic: '📶', label: 'سوبراؤند' },
+};
+const TEST_GROUP_ORDER = ['blood', 'serum', 'hormones', 'coagulation', 'urine', 'stool',
+  'culture', 'swab', 'serology', 'other', 'xray', 'ct', 'mri', 'ultrasound'];
+
+let TP = { mode: 'single', type: 'lab', g: '', q: '', sel: [] };
+
+/* الدليل الذي يغذّي المنتقي: من بيانات الطوارئ في وضع الاختيارات المتعددة،
+   أو من بيانات شاشة المختبر في وضع الطلب الواحد */
+function tpData() {
+  const src = TP.mode === 'multi' ? (ER.tests || []) : (LAB_DATA.tests || []);
+  return src.filter(t => TP.type === 'both' || t.category === TP.type);
+}
+function tpGroups() {
+  const seen = new Set(tpData().map(t => t.specimen_group || 'other'));
+  return TEST_GROUP_ORDER.filter(g => seen.has(g));
+}
+function tpList() {
+  const q = (TP.q || '').trim().toLowerCase();
+  return tpData().filter(t => {
+    if (TP.g && (t.specimen_group || 'other') !== TP.g) return false;
+    if (q && !(String(t.code || '').toLowerCase().includes(q) ||
+               String(t.name || '').toLowerCase().includes(q))) return false;
+    return true;
+  });
+}
+function tpMeta(t) {
+  return [t.specimen_type, t.tube_type,
+    t.fasting_hours ? `صيام ${t.fasting_hours}س` : '',
+    t.unit,
+    (t.ref_min != null || t.ref_max != null)
+      ? `${t.ref_min == null ? '…' : t.ref_min} – ${t.ref_max == null ? '…' : t.ref_max}` : '']
+    .filter(Boolean).join(' · ');
+}
+function tpCountHTML() {
+  const n = tpList().length;
+  return `${n} فحص${TP.sel.length ? ` · <b>${TP.sel.length} محدَّد</b>` : ''}` +
+    (TP.sel.length ? ' <button class="tp-clear" onclick="tpClear()">مسح التحديد</button>' : '');
+}
+function tpListHTML(list) {
+  if (!list.length) return '<div class="tp-empty">لا توجد نتائج مطابقة — جرّب كلمة أخرى</div>';
+  return list.map(t => {
+    const g = t.specimen_group || 'other';
+    const on = TP.sel.includes(t.id);
+    return `<div class="tp-row${on ? ' on' : ''}" onclick="tpToggle(${t.id})" role="button" tabindex="0">
+      <span class="tp-ic">${TEST_GROUP[g] ? TEST_GROUP[g].ic : '🧾'}</span>
+      <span class="tp-nm"><b>${esc(t.code)}</b> ${esc(t.name)}</span>
+      <span class="tp-mt">${esc(tpMeta(t))}</span>
+      <span class="tp-pr">${Number(t.price || 0)} ر.س</span>
+      <span class="tp-ck">${on ? '☑' : '☐'}</span></div>`;
+  }).join('');
+}
+function tpChipsHTML() {
+  const groups = tpGroups();
+  if (!groups.length) return '';
+  return `<button class="tp-chip${TP.g === '' ? ' on' : ''}" data-g="" onclick="tpGroup('')">الكل</button>` +
+    groups.map(g => `<button class="tp-chip${TP.g === g ? ' on' : ''}" data-g="${g}"
+      onclick="tpGroup('${g}')">${TEST_GROUP[g].ic} ${TEST_GROUP[g].label}</button>`).join('');
+}
+function tpSelHTML() {
+  const src = tpData();
+  return TP.sel.map(id => {
+    const t = src.find(x => x.id === id);
+    if (!t) return '';
+    const g = t.specimen_group || 'other';
+    return `<span class="tp-tag">${TEST_GROUP[g] ? TEST_GROUP[g].ic : ''} ${esc(t.name)}
+      <button class="tp-tagx" onclick="event.stopPropagation();tpToggle(${t.id})">×</button></span>`;
+  }).join('');
+}
+function testPickerHTML() {
+  return `<div class="tpick">
+    <div class="tp-top">
+      <input class="tp-q" value="${esc(TP.q)}"
+             placeholder="🔍 ابحث بالاسم أو الرمز (CBC · صورة البول · سونار…)"
+             oninput="tpSearch(this.value)">
+      <span class="tp-count">${tpCountHTML()}</span>
+    </div>
+    <div class="tp-chips" id="tp-chips">${tpChipsHTML()}</div>
+    <div class="tp-list" id="tp-list">${tpListHTML(tpList())}</div>
+    ${TP.mode === 'multi' && TP.sel.length ? `<div class="tp-sel">${tpSelHTML()}</div>` : ''}
+  </div>`;
+}
+function tpMount() {
+  ['lab-pick', 'er-pick'].forEach(id => {
+    const h = document.getElementById(id);
+    if (h) h.innerHTML = testPickerHTML();
+  });
+}
+/* البحث لا يعيد بناء حقله حتى لا يفقد التركيز أثناء الكتابة */
+function tpSearch(v) {
+  TP.q = v;
+  const list = document.getElementById('tp-list');
+  if (list) list.innerHTML = tpListHTML(tpList());
+  const cnt = document.querySelector('.tp-count');
+  if (cnt) cnt.innerHTML = tpCountHTML();
+}
+function tpGroup(g) { TP.g = g; tpMount(); }
+function tpClear() {
+  TP.sel = [];
+  if (TP.mode === 'single') tpApplySingle(null);
+  tpMount();
+}
+function tpToggle(id) {
+  const t = tpData().find(x => x.id === id);
+  if (!t) return;
+  if (TP.mode === 'single') {
+    TP.sel = (TP.sel[0] === id) ? [] : [id];
+    tpApplySingle(TP.sel.length ? t : null);
+  } else {
+    const i = TP.sel.indexOf(id);
+    if (i >= 0) TP.sel.splice(i, 1); else TP.sel.push(id);
+  }
+  tpMount();
+}
+
+
+/* =====================================================================
+   🚑 شاشة الطوارئ — سير عمل كامل:
+   فتح ملف ← طلب فحوصات ← فاتورة تحصيل ← بوابة الدفع للمختبر ← العلاج
+   ===================================================================== */
+const ER_ST = {
+  arrived: ['وصل', 'pending'],
+  triaged: ['مُفرَّز', 'in_progress'],
+  under_treatment: ['قيد العلاج', 'in_progress'],
+  discharged: ['خرج', 'reviewed'],
+  closed: ['مغلق', 'cancelled'],
+};
+const ER_TRIAGE = {
+  resuscitation: ['فأجي', 'cancelled'],
+  emergent: ['طارئ', 'cancelled'],
+  urgent: ['عاجل', 'partial'],
+  less_urgent: ['أقل إلحاحًا', 'in_progress'],
+  non_urgent: ['غير عاجل', 'reviewed'],
+  standard: ['قياسي', 'pending'],
+};
+const ER_PAY = {
+  unbilled: ['لم تُفوتر', 'pending'],
+  unpaid: ['بانتظار التحصيل', 'partial'],
+  partial: ['مدفوع جزئيًا', 'partial'],
+  paid: ['مدفوعة', 'paid'],
+};
+const ER_LAB_ST = {
+  pending: ['مسجّل', 'pending'], in_progress: ['قيد التنفيذ', 'in_progress'],
+  ready: ['جاهزة', 'ready'], reviewed: ['مراجَعة', 'reviewed'], cancelled: ['ملغاة', 'cancelled'],
+};
+const ER_KIND = {
+  visit: 'كشفية', lab: 'تحليل', radiology: 'أشعة',
+  pharmacy: 'دواء', service: 'خدمة', other: 'أخرى',
+};
+
+let ER = {
+  cases: [], tests: [], meds: [], pats: [], unpaid: [],
+  sel: null, sum: null, rx: [], q: '',
+};
+
+function erPill(map, key) {
+  const v = map[key] || [key, 'pending'];
+  return `<span class="pill ${v[1]}">${v[0]}</span>`;
+}
+function erNowLocal() {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 16);
+}
+function erIsClosed(c) { return c === 'discharged' || c === 'closed'; }
+
+async function renderEr(main) {
+  const [cases, tests, unpaid] = await Promise.all([
+    api('/service-units/emergency?limit=500'),
+    api('/lab-tests/?active_only=true'),
+    api('/invoices/?status=unpaid&limit=500').catch(() => []),
+  ]);
+  ER.cases = cases; ER.tests = tests;
+  ER.unpaid = (unpaid || []).map(x => x.id);
+  if (ER.sel && !cases.some(c => c.id === ER.sel)) ER.sel = null;
+  ER.sum = ER.sel
+    ? await api('/service-units/emergency/' + ER.sel + '/summary')
+    : null;
+  /* المنتقي في شاشة الطوارئ: كل الفئات (مخبري + أشعة) واختيارات متعددة */
+  TP = { mode: 'multi', type: 'both', g: '', q: TP.q || '', sel: [] };
+  main.innerHTML = erHTML();
+}
+
+function erHTML() {
+  const open = ER.cases.filter(c => !erIsClosed(c.status));
+  const wait = ER.cases.filter(c => c.invoice_id && ER.unpaid.includes(c.invoice_id)).length;
+  const cur = ER.sum;
+  return `
+  <div class="stats">
+    <div class="stat green"><div class="num">${open.length}</div><div class="lbl">حالة مفتوحة</div></div>
+    <div class="stat amber"><div class="num">${wait}</div><div class="lbl">فاتورة بانتظار التحصيل</div></div>
+    <div class="stat"><div class="num">${ER.cases.length}</div><div class="lbl">إجمالي الحالات</div></div>
+    ${cur ? `<div class="stat"><div class="num">${cur.tests_ready}</div><div class="lbl">نتائج جاهزة لهذه الحالة</div></div>` : ''}
+  </div>
+
+  <div class="er-shell">
+    <div class="card er-side">
+      <div class="toolbar" style="margin-bottom:8px">
+        <h3 style="margin:0">🚑 الحالات</h3>
+        <button class="btn success" onclick="erNewFile()">➕ فتح ملف</button>
+      </div>
+      <input class="er-q" placeholder="🔍 ابحث بالمريض أو الشكوى أو رقم الحالة…"
+             value="${esc(ER.q)}" oninput="erSearch(this.value)">
+      <div class="er-list">${erListHTML()}</div>
+    </div>
+    <div class="card er-work" id="er-work">${erWorkHTML()}</div>
+  </div>`;
+}
+
+function erListHTML() {
+  const q = (ER.q || '').trim().toLowerCase();
+  const rows = ER.cases.filter(c => !q ||
+    String(c.patient_name || '').toLowerCase().includes(q) ||
+    String(c.complaint || '').toLowerCase().includes(q) ||
+    String(c.id) === q);
+  if (!rows.length) return '<div class="empty">لا توجد حالات مطابقة</div>';
+  const unpaid = new Set(ER.unpaid);
+  return rows.map(c => {
+    const closed = erIsClosed(c.status);
+    const pay = !c.invoice_id ? 'لم تُفوتر'
+      : unpaid.has(c.invoice_id) ? '⏳ بانتظار التحصيل' : 'مدفوعة';
+    return `<div class="er-item${c.id === ER.sel ? ' on' : ''}${closed ? ' done' : ''}"
+                 onclick="erSelect(${c.id})">
+      <div class="er-it-top"><b>#${c.id}</b> ${esc(c.patient_name || ('مريض ' + c.patient_id))}</div>
+      <div class="er-it-sub">${esc(c.complaint)}</div>
+      <div class="er-it-tags">${erPill(ER_TRIAGE, c.triage_level)}
+        ${erPill(ER_ST, c.status)}<span class="er-pay ${closed ? 'ok' : ''}">${pay}</span></div>
+    </div>`;
+  }).join('');
+}
+
+function erSearch(v) {
+  ER.q = v;
+  const el = document.querySelector('.er-list');
+  if (el) el.innerHTML = erListHTML();
+}
+
+async function erSelect(id) {
+  ER.sel = (ER.sel === id) ? null : id;
+  ER.rx = [];
+  TP = { mode: 'multi', type: 'both', g: '', q: '', sel: [] };
+  return navigate('er');
+}
+
+function erWorkHTML() {
+  const s = ER.sum;
+  if (!s) {
+    return `<div class="empty">اختر حالة من القائمة، أو افتح ملفًا جديدًا لبدء سير العمل.
+      <div style="margin-top:14px"><button class="btn success" onclick="erNewFile()">➕ فتح ملف طوارئ</button></div></div>`;
+  }
+  const c = s.case;
+  const closed = erIsClosed(c.status);
+  const pay = ER_PAY[s.payment_status] || ER_PAY.unbilled;
+  return `
+  <div class="er-head">
+    <div>
+      <h3 style="margin:0 0 4px">حالة #${c.id} · ${esc(s.patient_name)}</h3>
+      <div class="muted">${esc(c.complaint)}</div>
+    </div>
+    <div class="er-badges">
+      ${erPill(ER_TRIAGE, c.triage_level)}
+      ${erPill(ER_ST, c.status)}
+      <span class="pill ${pay[1]}">${pay[0]}</span>
+    </div>
+  </div>
+
+  <div class="er-meta">
+    <div><span>قيمة الكشف</span><b>${Number(c.consult_fee || 0)} ر.س</b></div>
+    <div><span>الطبيب المناوب</span><b>${c.doctor_id ? '#' + c.doctor_id : '—'}</b></div>
+    <div><span>وقت الوصول</span><b>${esc(String(c.arrival_at || '').replace('T', ' ').slice(0, 16))}</b></div>
+    <div><span>الفحوصات</span><b>${s.lab_orders.length}</b></div>
+    ${c.diagnosis ? `<div style="grid-column:1/-1"><span>التشخيص</span><b>${esc(c.diagnosis)}</b></div>` : ''}
+    ${c.treatment ? `<div style="grid-column:1/-1"><span>العلاج</span><b>${esc(c.treatment)}</b></div>` : ''}
+  </div>
+
+  <div class="er-block">
+    <h4>🧫 طلب الفحوصات من الدليل المصنَّف</h4>
+    ${closed ? '<p class="muted">الحالة منتهية — لا يُقبل طلب جديد.</p>' : `
+      <div id="er-pick">${testPickerHTML()}</div>
+      <div class="er-actions">
+        <select id="er-prio">
+          <option value="routine">روتيني</option><option value="stat">عاجل (STAT)</option>
+        </select>
+        <button class="btn success" onclick="erOrder()">➕ إضافة الفحوصات المحدَّدة</button>
+      </div>
+      <p class="muted">تُضاف الفحوصات فورًا وتظهر للمختبر، لكن تنفيذها يبدأ بعد دفع الكشفية معها.</p>`}
+  </div>
+
+  ${s.lab_orders.length ? `<div class="er-block">
+    <h4>📋 فحوصات هذه الحالة</h4>
+    <table><thead><tr><th>الفحص</th><th>النوع</th><th>الأولوية</th><th>السعر</th>
+      <th>الحالة</th><th>التحصيل</th><th>النتيجة</th></tr></thead><tbody>
+    ${s.lab_orders.map(o => `<tr>
+      <td>${o.priority === 'stat' ? '⚡ ' : ''}${esc(o.test_name)}</td>
+      <td>${o.test_type === 'radiology' ? '🩻 أشعة' : '🧪 مختبر'}</td>
+      <td>${o.priority === 'stat' ? 'عاجل' : 'روتيني'}</td>
+      <td>${Number(o.price || 0)}</td>
+      <td>${erPill(ER_LAB_ST, o.status)}</td>
+      <td>${o.billed ? (s.payment_status === 'paid'
+            ? '<span class="pill paid">مدفوع</span>'
+            : '<span class="pill partial">مفوتر · لم يُحصَّل</span>')
+          : '<span class="pill cancelled">لم يُفوتر</span>'}</td>
+      <td>${o.result ? `<b>${esc(o.result)}</b>` : '<span class="muted">—</span>'}</td>
+    </tr>`).join('')}
+    </tbody></table>
+    <div class="er-actions"><button class="btn" onclick="navigate('lab')">🔬 فتح شاشة المختبر للتنفيذ</button></div>
+  </div>` : ''}
+
+  <div class="er-block">
+    <h4>🧾 التحصيل</h4>
+    ${erPayHTML(s)}
+  </div>
+
+  <div class="er-block">
+    <h4>💊 العلاج والوصفة</h4>
+    ${s.has_record ? erRecordHTML(s) : erTreatHTML(c, closed)}
+  </div>
+
+  ${closed ? '' : `<div class="er-block">
+    <h4>🔄 حالة الحالة</h4>
+    <div class="er-actions">
+      <select id="er-st">${Object.entries(ER_ST)
+        .map(([k, v]) => `<option value="${k}" ${k === c.status ? 'selected' : ''}>${v[0]}</option>`).join('')}</select>
+      <button class="btn" onclick="erStatus(V('er-st'))">تحديث الحالة</button>
+    </div>
+  </div>`}`;
+}
+
+function erPayHTML(s) {
+  const c = s.case;
+  const closed = erIsClosed(c.status);
+  if (s.payment_status === 'unbilled') {
+    return `
+      <p class="muted">لم تُفتح فاتورة لهذه الحالة بعد. الفتح يجمع الكشفية وما لم يُفوتر
+      من الفحوصات في سطور واحدة لكل بند.</p>
+      <div class="er-actions">
+        <label>قيمة الكشف (ر.س)</label>
+        <input id="er-fee" type="number" step="0.01" min="0" value="${Number(c.consult_fee || 0)}" style="width:140px">
+        <button class="btn success" ${closed ? 'disabled' : ''} onclick="erCheckout()">🧾 فتح فاتورة التحصيل</button>
+      </div>`;
+  }
+  const settled = s.payment_status === 'paid';
+  return `
+    <table><thead><tr><th>البند</th><th>البيان</th><th>المبلغ</th></tr></thead><tbody>
+    ${s.lines.map(l => `<tr><td>${ER_KIND[l.kind] || l.kind}</td>
+      <td>${esc(l.description)}</td><td>${Number(l.amount || 0)} ر.س</td></tr>`).join('')}
+    </tbody></table>
+    <div class="er-tot">
+      <span>الإجمالي <b>${Number(s.billed_total)} ر.س</b></span>
+      <span>المدفوع <b>${Number(s.paid_amount)} ر.س</b></span>
+      <span>المتبقي <b class="${s.due > 0 ? 'due' : ''}">${Number(s.due)} ر.س</b></span>
+      <span>الفواتير <b>${(s.invoices || []).map(i => '#' + i.id).join(' · ')}</b></span>
+    </div>
+    ${settled
+      ? '<p class="muted">✅ حُصِّلت الحالة بالكامل — تنفيذ المختبر مفتوح.</p>'
+      : `<div class="er-actions">
+          <select id="er-method">
+            <option value="cash">نقدًا</option><option value="card">بطاقة</option>
+            <option value="insurance">تأمين</option>
+          </select>
+          <button class="btn success" onclick="erPay()">💳 تحصيل ${Number(s.due)} ر.س</button>
+        </div>
+        <p class="muted">أو حصّلها من شاشة الفواتير — البوابة تراقب كل فواتير الحالة.</p>`}`;
+}
+
+function erRecordHTML(s) {
+  return `<div class="er-meta">
+      <div style="grid-column:1/-1"><span>التشخيص</span><b>${esc(s.case.diagnosis || '—')}</b></div>
+      <div style="grid-column:1/-1"><span>العلاج</span><b>${esc(s.case.treatment || '—')}</b></div>
+      <div><span>السجل الطبي</span><b>#${s.case.record_id}</b></div>
+      <div><span>الوصفة</span><b>${s.case.prescription_id ? '#' + s.case.prescription_id + ' — لدى الصيدلية' : 'بدون أدوية'}</b></div>
+    </div>`;
+}
+
+function erTreatHTML(c, closed) {
+  if (closed) return '<p class="muted">الحالة منتهية — لا يُسجَّل علاج بعدها.</p>';
+  const meds = ER.meds || [];
+  return `
+    <div class="form-grid">
+      <div class="field"><label>التشخيص *</label><input id="er-dx" placeholder="مثال: التهاب زائدة دودية مبكر"></div>
+      <div class="field"><label>شكوى المريض عند الوصول</label><input id="er-cc" value="${esc(c.complaint)}"></div>
+    </div>
+    <div class="field"><label>العلاج *</label>
+      <textarea id="er-tx" rows="2" placeholder="مثال: مضاد حيوي وريدي + مسكن"></textarea></div>
+
+    <div class="er-block inner">
+      <h4>الوصفة — تظهر فورًا لصاحب الصيدلية</h4>
+      ${meds.length ? `<div class="er-actions">
+        <select id="er-med">${meds.map(m => `<option value="${m.id}">${esc(m.name)} — متوفر ${m.quantity}</option>`).join('')}</select>
+        <input id="er-rxq" type="number" min="1" value="1" style="width:80px" title="الكمية">
+        <input id="er-rxd" placeholder="الجرعة (قرص)" style="width:130px">
+        <input id="er-rxf" placeholder="التكرار (كل 8 ساعات)" style="width:170px">
+        <input id="er-rxt" placeholder="المدة (5 أيام)" style="width:130px">
+        <button class="btn" onclick="erRxAdd()">➕ إضافة دواء</button>
+      </div>` : '<p class="muted">تعذّر جلب قائمة الأدوية — يمكن حفظ العلاج دون وصفة.</p>'}
+      <div id="er-rx" class="tp-sel" style="margin-top:8px">${erRxHTML()}</div>
+    </div>
+
+    <div class="form-grid" style="margin-top:10px">
+      <div class="field"><label>ملاحظات</label><textarea id="er-rn" rows="2"></textarea></div>
+      <div class="field"><label>الخروج من الطوارئ</label>
+        <select id="er-dis"><option value="">لا — تبقّاء في الحالة</option>
+        <option value="1">نعم — إنهاء الحالة وخروج المريض</option></select></div>
+    </div>
+    <div class="er-actions" style="margin-top:8px">
+      <button class="btn success" onclick="erTreat()">💾 حفظ العلاج</button>
+    </div>`;
+}
+
+function erRxHTML() {
+  if (!ER.rx.length) return '<span class="muted">لا توجد أدوية موصوفة بعد</span>';
+  return ER.rx.map((r, i) => `<span class="tp-tag">${esc(r.name)} ×${r.quantity}
+    <button class="tp-tagx" onclick="erRxDel(${i})">×</button></span>`).join('');
+}
+function erRxRender() {
+  const el = document.getElementById('er-rx');
+  if (el) el.innerHTML = erRxHTML();
+}
+function erRxAdd() {
+  const mid = Number(V('er-med'));
+  if (!mid) return toast('اختر دواءً من القائمة', true);
+  const med = (ER.meds || []).find(m => m.id === mid);
+  ER.rx.push({
+    medication_id: mid, name: med ? med.name : ('دواء #' + mid),
+    quantity: Number(V('er-rxq')) || 1,
+    dosage: V('er-rxd') || '', frequency: V('er-rxf') || '', duration: V('er-rxt') || '',
+  });
+  erRxRender();
+}
+function erRxDel(i) { ER.rx.splice(i, 1); erRxRender(); }
+
+/* ---------- إجراءات السير العمل ---------- */
+async function erNewFile() {
+  if (!ER.pats.length) {
+    ER.pats = await api('/patients/').catch(() => []);
+    if (!ER.pats.length) return toast('تعذّر جلب قائمة المرضى', true);
+  }
+  openModal('🚑 فتح ملف طوارئ', `
+    <div class="field"><label>المريض *</label><select id="er-npat">
+      ${ER.pats.map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join('')}</select></div>
+    <div class="field"><label>الشكوى *</label>
+      <input id="er-ncomp" placeholder="مثال: ألم شديد بالبطن مع غثيان"></div>
+    <div class="form-grid">
+      <div class="field"><label>مستوى الفرز</label><select id="er-ntri">
+        ${Object.entries(ER_TRIAGE).map(([k, v]) =>
+          `<option value="${k}" ${k === 'standard' ? 'selected' : ''}>${v[0]}</option>`).join('')}</select></div>
+      <div class="field"><label>قيمة الكشف (ر.س)</label>
+        <input id="er-nfee" type="number" step="0.01" min="0" value="50"></div>
+      <div class="field"><label>وقت الوصول</label>
+        <input id="er-nat" type="datetime-local" value="${erNowLocal()}"></div>
+    </div>
+    <div class="field"><label>ملاحظات</label><textarea id="er-nnotes" rows="2"></textarea></div>
+    <div class="actions" style="margin-top:10px">
+      <button class="btn success" onclick="erCreateFile()">فتح الملف</button>
+      <button class="btn ghost" onclick="closeModal()">إلغاء</button>
+    </div>`, true);
+}
+
+async function erCreateFile() {
+  const complaint = (V('er-ncomp') || '');
+  const pid = Number(V('er-npat'));
+  if (!complaint || complaint.length < 2) return toast('الشكوى مطلوبة (حرفان على الأقل)', true);
+  if (!pid || Number.isNaN(pid)) return toast('اختر المريض من القائمة', true);
+  const feeRaw = V('er-nfee');
+  const fee = feeRaw === '' || feeRaw == null ? 0 : Number(feeRaw);
+  if (Number.isNaN(fee) || fee < 0) return toast('قيمة الكشف غير صالحة', true);
+  const body = {
+    patient_id: pid,
+    complaint: complaint,
+    triage_level: V('er-ntri') || 'standard',
+    arrival_at: V('er-nat') || new Date().toISOString(),
+    consult_fee: fee,
+  };
+  if (V('er-nnotes')) body.notes = V('er-nnotes');
+  try {
+    const c = await api('/service-units/emergency', {
+      method: 'POST', body: JSON.stringify(body) });
+    closeModal();
+    ER.sel = c.id; ER.rx = [];
+    toast('فُتح ملف #' + c.id + ' — وجّه المريض للتحصيل بعد طرح الفحوصات ✅');
+    await navigate('er');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function erOrder() {
+  if (!ER.sel) return;
+  if (!TP.sel.length) return toast('اختر فحصًا واحدًا على الأقل من الدليل', true);
+  const prio = V('er-prio') || 'routine';
+  try {
+    await api('/service-units/emergency/' + ER.sel + '/orders', {
+      method: 'POST',
+      body: JSON.stringify({
+        lines: TP.sel.map(id => ({ lab_test_id: id, priority: prio })),
+      }),
+    });
+    TP.sel = [];
+    toast('أُضيفت الفحوصات إلى الحالة 🧫');
+    await navigate('er');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function erCheckout() {
+  if (!ER.sel) return;
+  const fee = V('er-fee');
+  const body = {};
+  if (fee !== undefined && fee !== null && fee !== '') body.consult_fee = Number(fee);
+  try {
+    ER.sum = await api('/service-units/emergency/' + ER.sel + '/checkout', {
+      method: 'POST', body: JSON.stringify(body) });
+    toast('فُتحت فاتورة التحصيل: الكشفية + الفحوصات 🧾');
+    await navigate('er');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function erPay() {
+  const s = ER.sum;
+  if (!s) return;
+  const due = (s.invoices || []).filter(
+    i => Number(i.paid_amount || 0) < Number(i.total || 0) - 0.01);
+  if (!due.length) return toast('كل فواتير هذه الحالة مدفوعة', true);
+  const method = V('er-method') || 'cash';
+  try {
+    for (const inv of due) {
+      await api('/invoices/' + inv.id + '/pay', {
+        method: 'POST', body: JSON.stringify({ method }) });
+    }
+    toast('حُصِّلت فاتورة الحالة — فُتح تنفيذ المختبر ✅');
+    await navigate('er');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function erTreat() {
+  if (!ER.sel) return;
+  if (!V('er-dx')) return toast('التشخيص مطلوب', true);
+  if (!V('er-tx')) return toast('العلاج مطلوب', true);
+  const body = {
+    diagnosis: V('er-dx'), treatment: V('er-tx'),
+    discharge: V('er-dis') === '1',
+  };
+  if (V('er-cc')) body.chief_complaint = V('er-cc');
+  if (V('er-rn')) body.notes = V('er-rn');
+  if (ER.rx.length) {
+    body.prescription = ER.rx.map(r => ({
+      medication_id: r.medication_id, quantity: r.quantity,
+      dosage: r.dosage || null, frequency: r.frequency || null,
+      duration: r.duration || null,
+    }));
+  }
+  try {
+    await api('/service-units/emergency/' + ER.sel + '/treatment', {
+      method: 'POST', body: JSON.stringify(body) });
+    ER.rx = [];
+    toast(body.prescription
+      ? 'سُجّل العلاج — الوصفة لدى الصيدلية 💊'
+      : 'سُجّل العلاج في السجل الطبي ✅');
+    await navigate('er');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function erStatus(next) {
+  if (!ER.sel || !next) return;
+  try {
+    await api('/service-units/emergency/' + ER.sel + '/status', {
+      method: 'POST', body: JSON.stringify({ status: next }) });
+    toast('حُدِّثت حالة الحالة');
+    await navigate('er');
+  } catch (e) { toast(e.message, true); }
+}
+
 
 /* ========== بدء التشغيل ========== */
 initLang();

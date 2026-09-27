@@ -478,6 +478,44 @@ class Invoice(Base):
     def total(self) -> float:
         return round(self.subtotal + self.tax, 2)
 
+    # ===== البنود =====
+    lines = relationship(
+        "InvoiceLine", back_populates="invoice",
+        cascade="all, delete-orphan", lazy="selectin",
+    )
+
+    @property
+    def lines_total(self) -> float:
+        """مجموع سطور الفاتورة — يساوي amount حين تُبنى من بنود."""
+        return round(sum(float(x.amount or 0) for x in self.lines), 2)
+
+
+# ===== بنود الفاتورة =====
+class InvoiceLine(Base):
+    """سطر ضمن فاتورة: كشفية، فحص مختبر، أشعة، دواء…
+
+    ``amount`` يُخزَّن محسوبًا ``(quantity × unit_price)`` لا يُعاد حسابه في
+    كل تقرير. و``ref_type/ref_id`` يربط السطر بمصدره (lab_order،
+    prescription، emergency_case) فيُعرف مصدر كل بند ويُمنع ازدواج التحصيل
+    حين يعاد فتح نفس الطلب على فاتورة أخرى.
+    """
+    __tablename__ = "invoice_lines"
+
+    id = Column(Integer, primary_key=True, index=True)
+    invoice_id = Column(Integer, ForeignKey("invoices.id", ondelete="CASCADE"),
+                        nullable=False, index=True)
+    # visit=كشفية · lab=تحليل · radiology=أشعة · pharmacy=دواء · service=خدمة
+    kind = Column(String, nullable=False, default="service", server_default="service")
+    description = Column(String, nullable=False)
+    quantity = Column(Float, nullable=False, default=1, server_default="1")
+    unit_price = Column(Float, nullable=False, default=0, server_default="0")
+    amount = Column(Float, nullable=False, default=0, server_default="0")
+    ref_type = Column(String, nullable=True)      # lab_order / prescription / emergency_case
+    ref_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    invoice = relationship("Invoice", back_populates="lines")
+
 
 # ===== التقارير =====
 class Report(Base):
@@ -596,9 +634,14 @@ class LabOrder(Base):
     delivered_at = Column(DateTime, nullable=True)
     delivered_by = Column(String, nullable=True)
     delivery_channel = Column(String, nullable=True)  # pdf, portal, whatsapp, sms, email
+    # — ربط سير الطوارئ: الطلب المفتوح من نوبة الطوارئ يبقى معلّق التحصيل
+    # حتى تُدفع الكشفية معه، وعندها فقط يبدأ المختبر تنفيذه —
+    emergency_case_id = Column(Integer, ForeignKey("emergency_cases.id", ondelete="SET NULL"),
+                               nullable=True, index=True)
 
     patient = relationship("Patient")
     doctor = relationship("Doctor")
+    emergency_case = relationship("EmergencyCase", back_populates="lab_orders")
 
 
 # ===== دليل الفحوصات (كتالوج التحاليل والأشعة) =====
@@ -616,6 +659,10 @@ class LabTest(Base):
     unit = Column(String, nullable=True)                 # وحدة القياس
     ref_min = Column(Float, nullable=True)               # النطاق الطبيعي: الحد الأدنى
     ref_max = Column(Float, nullable=True)               # النطاق الطبيعي: الحد الأعلى
+    # — التجميع داخل شاشة الطبيب: دم/بول/براز/كيمياء… أو نوع الأشعة —
+    # قيم شائعة: blood, urine, stool, swab, chemistry, hormones, culture,
+    #            coagulation, other | xray, ct, mri, ultrasound
+    specimen_group = Column(String, nullable=True, index=True)
     active = Column(Boolean, default=True)               # مفعّل في نموذج الطلب
 
     orders = relationship("LabOrder", backref="test_catalog")
@@ -1545,6 +1592,12 @@ class NutritionCase(Base):
 
 
 class EmergencyCase(Base):
+    """حالة طوارئ — وحدة سير العمل والفوترة.
+
+    ربط الطبيب المناوب والفاتورة والسجل والوصفة يجعل الحالة محورًا
+    يمرّ عليه المريض كله: الاستقبال ← التحصيل ← المختبر ← العلاج ←
+    الصيدلية، فلا تتشتّت معلومات الزيارة بين شاشات منفصلة.
+    """
     __tablename__ = "emergency_cases"
     id = Column(Integer, primary_key=True, index=True)
     patient_id = Column(Integer, ForeignKey("patients.id", ondelete="RESTRICT"), nullable=False, index=True)
@@ -1557,6 +1610,25 @@ class EmergencyCase(Base):
     created_by = Column(String(100), nullable=False)
     created_at = Column(DateTime, server_default=func.now())
     closed_at = Column(DateTime, nullable=True)
+
+    # — الطبيب المناوب الذي فتح الملف —
+    doctor_id = Column(Integer, ForeignKey("doctors.id", ondelete="SET NULL"),
+                       nullable=True, index=True)
+    # — الفاتورة التي تجمع الكشفية وبنود الفحوصات —
+    invoice_id = Column(Integer, ForeignKey("invoices.id", ondelete="SET NULL"), nullable=True)
+    consult_fee = Column(Float, nullable=False, default=0, server_default="0")
+    # — العلاج: سجل طبي + وصفة تظهر للصيدلية —
+    record_id = Column(Integer, ForeignKey("medical_records.id", ondelete="SET NULL"), nullable=True)
+    prescription_id = Column(Integer, ForeignKey("prescriptions.id", ondelete="SET NULL"), nullable=True)
+    diagnosis = Column(String(500), nullable=True)
+    treatment = Column(String(2000), nullable=True)
+
+    patient = relationship("Patient")
+    doctor = relationship("Doctor")
+    invoice = relationship("Invoice")
+    record = relationship("MedicalRecord")
+    prescription = relationship("Prescription")
+    lab_orders = relationship("LabOrder", back_populates="emergency_case")
 
 
 class HomeHealthCase(Base):

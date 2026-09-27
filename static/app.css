@@ -338,3 +338,66 @@
 .qo-kbd { font-size: 11px; opacity: .7; }
 #qo-body table input[type="number"], #qo-body table input[type="text"] { max-width: 110px; }
 .qo-ok { border-inline-start: 5px solid #28a745; }
+
+/* ===== منتقي الفحوصات المصنَّف (شاشة الطوارئ + طلب المختبر) ===== */
+.tpick { border: 1.5px solid #e3e6ea; border-radius: 10px; padding: 10px; background: #fbfcfe; }
+.tp-top { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
+.tp-q { flex: 1; padding: 9px 12px; border: 1.5px solid #ddd; border-radius: 8px; font-size: 14px; }
+.tp-count { font-size: 12px; color: #666; white-space: nowrap; }
+.tp-clear { border: 1px solid #dc3545; background: #fff; color: #dc3545; border-radius: 14px;
+  font-size: 11px; padding: 2px 8px; cursor: pointer; margin-right: 6px; }
+.tp-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.tp-chip { border: 1.5px solid #dde1e6; background: #fff; border-radius: 16px; padding: 4px 10px;
+  font-size: 12px; cursor: pointer; color: #444; }
+.tp-chip.on { background: #2c7be5; border-color: #2c7be5; color: #fff; font-weight: bold; }
+.tp-list { max-height: 268px; overflow-y: auto; border-top: 1px solid #eee; }
+.tp-row { display: grid; grid-template-columns: 26px 1fr auto auto 22px; gap: 8px; align-items: center;
+  padding: 7px 6px; border-bottom: 1px solid #f1f3f5; cursor: pointer; font-size: 13px; }
+.tp-row:hover { background: #eef5ff; }
+.tp-row.on { background: #e2f0ff; box-shadow: inset 3px 0 0 #2c7be5; }
+.tp-ic { font-size: 16px; text-align: center; }
+.tp-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tp-mt { color: #888; font-size: 11px; white-space: nowrap; }
+.tp-pr { color: #2c7be5; font-weight: bold; font-size: 12px; white-space: nowrap; }
+.tp-ck { text-align: center; color: #2c7be5; }
+.tp-empty { padding: 18px; text-align: center; color: #999; font-size: 13px; }
+.tp-sel { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 8px; }
+.tp-tag { display: inline-flex; align-items: center; gap: 6px; background: #e2f0ff;
+  border: 1px solid #bcd9f7; border-radius: 14px; padding: 3px 9px; font-size: 12px; }
+.tp-tagx { border: 0; background: transparent; color: #dc3545; font-weight: bold; cursor: pointer;
+  font-size: 14px; line-height: 1; padding: 0; }
+
+/* ===== شاشة الطوارئ: قائمة الحالات + مساحة العمل ===== */
+.er-shell { display: grid; grid-template-columns: 330px 1fr; gap: 14px; align-items: start; }
+@media (max-width: 900px) { .er-shell { grid-template-columns: 1fr; } }
+.er-side { padding: 12px; max-height: 78vh; overflow: auto; }
+.er-q { width: 100%; padding: 9px 12px; border: 1.5px solid #ddd; border-radius: 8px; margin-bottom: 8px; }
+.er-list { display: flex; flex-direction: column; gap: 7px; }
+.er-item { border: 1.5px solid #e6e9ee; border-radius: 9px; padding: 8px 10px; cursor: pointer; background: #fff; }
+.er-item:hover { border-color: #9dc4f5; }
+.er-item.on { border-color: #2c7be5; background: #eef5ff; }
+.er-item.done { opacity: .7; }
+.er-it-top { font-size: 14px; }
+.er-it-sub { font-size: 12px; color: #666; margin: 3px 0 5px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.er-it-tags { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
+.er-pay { font-size: 11px; color: #8a6d00; background: #fff3cd; border-radius: 12px; padding: 2px 8px; }
+.er-pay.ok { background: #d4edda; color: #155724; }
+.er-work { padding: 16px; }
+.er-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start;
+  border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.er-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+.er-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px 14px; margin-bottom: 14px; font-size: 13px; }
+.er-meta span { color: #888; display: block; font-size: 11px; }
+.er-meta b { font-size: 14px; }
+.er-block { border: 1.5px solid #eceff2; border-radius: 10px; padding: 12px;
+  margin-bottom: 12px; background: #fcfdfe; }
+.er-block h4 { margin: 0 0 10px; font-size: 15px; }
+.er-block.inner { background: #fff; border-style: dashed; }
+.er-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+.er-actions input, .er-actions select { padding: 8px 10px; border: 1.5px solid #ddd; border-radius: 8px; }
+.er-tot { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; font-size: 13px;
+  color: #555; background: #f6f8fa; border-radius: 8px; padding: 9px 12px; }
+.er-tot b { color: #2c7be5; font-size: 15px; }
+.er-tot b.due { color: #dc3545; }
