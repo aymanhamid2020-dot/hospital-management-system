@@ -92,12 +92,12 @@ async function showStatement() {
     box.innerHTML = `
       <div class="kv"><span>المريض</span><b>${esc(st.patient.full_name)} (#${st.patient.id})</b></div>
       <div class="kv"><span>الجوال</span><b>${esc(st.patient.phone || '-')}</b></div>
-      ${row('مبيعات الصيدلية', t.sales_total.toLocaleString() + ' ر.س')}
-      ${row('مدفوع من المبيعات', t.sales_paid.toLocaleString() + ' ر.س', 'ok')}
-      ${row('إجمالي الفواتير', t.inv_total.toLocaleString() + ' ر.س')}
-      ${row('مدفوع من الفواتير', t.inv_paid.toLocaleString() + ' ر.س', 'ok')}
-      ${row('إجمالي المستحقات', t.dues.toLocaleString() + ' ر.س')}
-      ${row('الرصيد المستحق', t.outstanding.toLocaleString() + ' ر.س',
+      ${row('مبيعات الصيدلية', money(t.sales_total))}
+      ${row('مدفوع من المبيعات', money(t.sales_paid), 'ok')}
+      ${row('إجمالي الفواتير', money(t.inv_total))}
+      ${row('مدفوع من الفواتير', money(t.inv_paid), 'ok')}
+      ${row('إجمالي المستحقات', money(t.dues))}
+      ${row('الرصيد المستحق', money(t.outstanding),
             t.outstanding > 0 ? 'bad' : 'ok')}
       <div class="kv"><span>عدد حركات الصيدلية</span><b>${st.sales.length}</b></div>
       <div class="kv"><span>عدد الفواتير</span><b>${st.invoices.length}</b></div>
@@ -139,6 +139,58 @@ function toggleByPerm(sel, ok) {
 
 /* ========== اللغة: عربي / English (i18n) ========== */
 let LANG = localStorage.getItem('hms_lang') || 'ar';
+
+/* ===== العملة · يُعبَّأ من /currencies/config لدمج رمز العملة وخاناتها
+   والأرقام كانت مثبَّتة — لا رمز الريال مختف في الواجهة. */
+const CUR = { code: 'YER', ar: 'ر.ي', en: 'YER', decimals: 2 };
+
+/** رمز العملة الحالي (اللغة الجارية مبنيةً) — يُقرأ بعد تبديل اللغة. */
+function cur(lang) {
+  const l = lang || (typeof LANG !== 'undefined' ? LANG : 'ar');
+  return l === 'en' ? CUR.en : CUR.ar;
+}
+
+/** مبلغ منسَّق بعملة محدَّدة — الموضع الوحيد الذي يُعرض به السعر.
+
+    الأرقام غربية دائمًا (‏`en-US`) اتساقًا مع بقية الواجهة وملفات PDF؛
+    `ar-EG` كانت تُنتج أرقامًا هندية (٥٬٠٠٠) فتخالف ما اعتاده المستخدم. */
+function money(value, lang) {
+  const n = Number(value || 0);
+  const txt = Number.isFinite(n)
+    ? n.toLocaleString('en-US',
+        { minimumFractionDigits: CUR.decimals, maximumFractionDigits: CUR.decimals })
+    : (0).toFixed(CUR.decimals);
+  return txt + ' ' + cur(lang);
+}
+
+/** تسجيل رمز العملة في قائمة الترجمة بعد جلبه من الخادم.
+
+    الترجمة هنا قائمة أزواج `[عربي, إنجليزي]` تُستبدل نصيًا، ورمز العملة
+    يُجلب بعد تعريف القائمة ⇒ يُحقن وقت التشغيل. الزوج القديم يُحدَّث
+    بدل التكرار (وإلا استبدل `trEn` الرمز مرتين عند أول عرض). */
+function registerCurrencyLabels() {
+  if (typeof _enPairs === 'undefined' || !Array.isArray(_enPairs)) return;
+  const i = _enPairs.findIndex(
+    (pair) => pair && (pair[0] === CUR.ar || pair[0] === CUR.en));
+  if (i >= 0) _enPairs[i] = [CUR.ar, CUR.en];
+  else _enPairs.push([CUR.ar, CUR.en]);
+}
+
+/** جلب إعدادات العملة من الخادم.
+   Fallback: صفحة بالريال اليمني حتى يعمل العرض قبل الإقلاع. */
+async function loadCurrency() {
+  try {
+    const cfg = await api('/currencies/config');
+    if (cfg && cfg.base_code) {
+      CUR.code = cfg.base_code;
+      CUR.ar = cfg.symbol_ar || CUR.ar;
+      CUR.en = cfg.symbol_en || CUR.en;
+      CUR.decimals = (typeof cfg.decimals === 'number') ? cfg.decimals : CUR.decimals;
+    }
+  } catch (e) { /* عرض العملة يتبع الاحتياط */ }
+  return CUR;
+}
+
 
 /* ===== الوضع الداكن 🌙 ===== */
 let THEME = localStorage.getItem('hms_theme') || 'light';
@@ -232,9 +284,9 @@ const AR2EN = {
   'عملية جديدة': 'New operation',
   'اختر العملية': 'Choose the operation',
   'السلة فارغة': 'Basket is empty',
-  'الخصم (ر.س)': 'Discount (SAR)',
+  'الخصم (${cur()})': 'Discount (SAR)',
   'الضريبة %': 'Tax %',
-  'المدفوع (ر.س)': 'Paid (SAR)',
+  'المدفوع (${cur()})': 'Paid (SAR)',
   'طريقة الدفع': 'Payment method',
   'نقدًا': 'Cash',
   'بطاقة': 'Card',
@@ -311,7 +363,7 @@ const AR2EN = {
   'الطريقة': 'Method',
   'لا توجد مبيعات في هذه الفترة': 'No sales in this period',
   'تسديد': 'Record payment',
-  'المبلغ المدفوع (ر.س):': 'Paid amount (SAR):',
+  'المبلغ المدفوع (${cur()}):': 'Paid amount (SAR):',
   'طريقة الدفع (cash/card/insurance):': 'Payment method (cash/card/insurance):',
   'تم تسجيل الدفعة ✅': 'Payment recorded ✅',
   'لا يمكن أن يتجاوز المبلغ إجمالي العملية': 'Amount cannot exceed the operation total',
@@ -320,7 +372,7 @@ const AR2EN = {
   /* نافذة التسديد */
   '💰 تسديد دفعة': '💰 Record payment',
   'عملية البيع': 'Sale operation',
-  'المبلغ (ر.س)': 'Amount (SAR)',
+  'المبلغ (${cur()})': 'Amount (SAR)',
   'طريقة الدفع': 'Payment method',
   'المتبقي بعد الدفع': 'Remaining after payment',
   'تأكيد التسديد': 'Confirm payment',
@@ -355,7 +407,6 @@ const AR2EN = {
   'طبيب': 'Doctor',
   'مدير': 'Admin',
   'موظف': 'Staff',
-  'ر.س': 'SAR',
   'ذكر': 'Male',
   'أنثى': 'Female',
   'حذف': 'Delete',
@@ -568,7 +619,7 @@ const AR2EN = {
   /* قسم المخزون */
   '📦 المخزون': '📦 Inventory',
   'المخزون': 'Inventory',
-  'قيمة المخزون (ر.س)': 'Inventory value (SAR)',
+  'قيمة المخزون (${cur()})': 'Inventory value (SAR)',
   'عدد الأصناف': 'Items count',
   'إجمالي القطع': 'Total units',
   'مخزون منخفض': 'Low stock',
@@ -987,14 +1038,14 @@ async function invMedsHTML() {
       <div class="field"><label>اسم الدواء *</label><input id="f-mname"></div>
       <div class="field"><label>الكمية</label><input id="f-qty" type="number" min="0" value="0"></div>
       <div class="field"><label>الوحدة</label><input id="f-unit" value="علبة"></div>
-      <div class="field"><label>السعر (ر.س)</label><input id="f-mprice" type="number" step="0.01" min="0"></div>
+      <div class="field"><label>السعر (${cur()})</label><input id="f-mprice" type="number" step="0.01" min="0"></div>
       <div class="field"><label>حد التنبيه</label><input id="f-minq" type="number" min="0" value="10"></div>
     </div>
     <button class="btn success" style="margin-top:12px" onclick="addMedication('inventory')">حفظ الدواء</button>
     </details>` : '';
   const legacyHTML = `
     <div class="stats">
-      <div class="stat"><div class="num">${sum.total_value.toLocaleString()} ر.س</div><div class="lbl">قيمة المخزون (ر.س)</div></div>
+      <div class="stat"><div class="num">${money(sum.total_value)}</div><div class="lbl">قيمة المخزون (${cur()})</div></div>
       <div class="stat green"><div class="num">${sum.items}</div><div class="lbl">عدد الأصناف</div></div>
       <div class="stat"><div class="num">${sum.units}</div><div class="lbl">إجمالي القطع</div></div>
       <div class="stat amber"><div class="num">${sum.low}</div><div class="lbl">مخزون منخفض</div></div>
@@ -1023,8 +1074,8 @@ async function invMedsHTML() {
           <td>${m.id}</td><td>${esc(m.code)}</td><td><strong>${esc(m.name)}</strong></td>
           <td>${m.quantity} ${esc(m.unit)}</td>
           <td><span class="pill ${stPill[m.status] || 'partial'}">${stLbl[m.status] || m.status}</span></td>
-          <td>${m.price.toLocaleString()} ر.س</td>
-          <td>${m.value.toLocaleString()} ر.س</td>
+          <td>${money(m.price)}</td>
+          <td>${money(m.value)}</td>
           <td>${m.min_quantity}</td>
           <td>${m.expiry_date ? fmtDate(m.expiry_date) : '—'}${(m.status === 'expiring' || m.status === 'expired') && m.days_to_expiry !== null ? ` <small title="أيام متبقية للانتهاء">⏱ ${m.days_to_expiry}</small>` : ''}</td>
           <td class="actions">
@@ -1100,7 +1151,7 @@ async function invCatalogHTML() {
     <td><strong>${esc(i.name)}</strong>${i.generic_name ? `<br><small>الاسم العلمي: ${esc(i.generic_name)}</small>` : ''}</td>
     <td>${esc(i.category)}</td><td>${esc(i.unit)}</td><td>${i.quantity}</td>
     <td>${i.min_quantity} / ${i.reorder_point == null ? '—' : i.reorder_point} / ${i.max_quantity == null ? '—' : i.max_quantity}</td>
-    <td>${(i.unit_cost || 0).toLocaleString()} ر.س</td>
+    <td>${money(i.unit_cost || 0)}</td>
     <td>${esc(i.storage_condition || '—')}</td>
     <td>${i.expiry_date ? fmtDate(i.expiry_date) : '—'}</td>
     <td class="actions">
@@ -1155,7 +1206,7 @@ async function invWarehousesHTML() {
     <div class="stats" style="margin-bottom:12px">
       <div class="stat"><div class="num">${list.length}</div><div class="lbl">مستودع</div></div>
       <div class="stat green"><div class="num">${summary.items}</div><div class="lbl">صنف نشط</div></div>
-      <div class="stat"><div class="num">${(summary.total_value || 0).toLocaleString()} ر.س</div><div class="lbl">قيمة المخزون</div></div>
+      <div class="stat"><div class="num">${money(summary.total_value || 0)}</div><div class="lbl">قيمة المخزون</div></div>
       <div class="stat amber"><div class="num">${summary.expiring_within_90}</div><div class="lbl">تنتهي خلال 90 يومًا</div></div>
     </div>
     <div style="overflow-x:auto"><table>
@@ -1182,8 +1233,8 @@ function whItems(id) {
       <tbody>${rows.map(r => `<tr>
         <td>${r.item_id}</td><td>${esc(r.code)}</td><td>${esc(r.name)}</td>
         <td><span class="pill ${r.below_min ? 'lowstock' : 'confirmed'}">${r.quantity} ${esc(r.unit)}</span></td>
-        <td>${r.min_quantity}</td><td>${(r.unit_cost || 0).toLocaleString()} ر.س</td>
-        <td>${(r.value || 0).toLocaleString()} ر.س</td>
+        <td>${r.min_quantity}</td><td>${money(r.unit_cost || 0)}</td>
+        <td>${money(r.value || 0)}</td>
         <td><button class="btn sm ghost" onclick="closeModal(); itemCard(${r.item_id})">📋 بطاقة</button></td>
       </tr>`).join('') || '<tr><td colspan="8" class="empty">لا أصناف في هذا المستودع</td></tr>'}</tbody>
     </table></div>`;
@@ -1216,7 +1267,7 @@ async function invDocsHTML(type) {
     <td>${d.id}</td><td><strong>${esc(d.doc_no)}</strong></td>
     <td>${esc(d.from_warehouse || '—')}${d.to_warehouse ? ' ← ' + esc(d.to_warehouse) : ''}</td>
     <td>${esc(d.vendor_name || (d.department_id ? 'قسم #' + d.department_id : d.patient_id ? 'مريض #' + d.patient_id : '—'))}</td>
-    <td>${d.total_quantity} / ${d.total_value.toLocaleString()} ر.س</td>
+    <td>${d.total_quantity} / ${money(d.total_value)}</td>
     <td>${d.lines.length} صنف</td>
     <td><span class="pill ${DOC_STATUS_PILL[d.status] || 'partial'}">${DOC_STATUS_AR[d.status] || d.status}</span></td>
     <td>${fmtDate(d.created_at)}</td>
@@ -1251,7 +1302,7 @@ function showDoc(id) {
         <td>${esc(l.item_name || '')} <small>${esc(l.item_code || '')}</small></td>
         <td>${l.quantity}</td><td>${l.counted_quantity == null ? '—' : l.counted_quantity}</td>
         <td>${esc(l.batch_no || '—')}</td><td>${l.expiry_date ? fmtDate(l.expiry_date) : '—'}</td>
-        <td>${(l.unit_cost || 0).toLocaleString()} ر.س</td>
+        <td>${money(l.unit_cost || 0)}</td>
       </tr>`).join('')}</tbody></table></div>`;
   }).catch(e => toast(e.message || 'تعذّر التحميل', true));
 }
@@ -1348,7 +1399,7 @@ async function invExpiryHTML() {
         <td>${esc(r.warehouse || '—')}</td><td>${r.quantity}</td>
         <td>${esc(r.batch_no || '—')}</td><td>${fmtDate(r.expiry_date)}</td>
         <td><span class="pill ${r.days_left <= 30 ? 'cancelled' : r.days_left <= 60 ? 'lowstock' : 'pending'}">${r.days_left} يوم</span></td>
-        <td>${(r.value || 0).toLocaleString()} ر.س</td>
+        <td>${money(r.value || 0)}</td>
       </tr>`).join('') || '<tr><td colspan="7" class="empty">لا دفعات تنتهي خلال 90 يومًا ✅</td></tr>'}</tbody>
     </table></div></div>`;
 }
@@ -1389,7 +1440,7 @@ async function invItemCardHTML() {
     </div>
     ${card ? `<div class="stats" style="margin-bottom:12px">
       <div class="stat"><div class="num">${card.item.quantity}</div><div class="lbl">${esc(card.item.unit)}</div></div>
-      <div class="stat green"><div class="num">${(card.item.value || 0).toLocaleString()} ر.س</div><div class="lbl">قيمة الصنف</div></div>
+      <div class="stat green"><div class="num">${money(card.item.value || 0)}</div><div class="lbl">قيمة الصنف</div></div>
       <div class="stat amber"><div class="num">${card.item.min_quantity}</div><div class="lbl">حد الأمان</div></div>
       <div class="stat red"><div class="num">${card.batches.length}</div><div class="lbl">دفعة نشطة</div></div>
     </div>
@@ -1398,7 +1449,7 @@ async function invItemCardHTML() {
     ${card.batches.length ? `<div style="overflow-x:auto;margin-bottom:12px"><table>
       <thead><tr><th>التشغيلة</th><th>الكمية</th><th>ينتهي</th><th>التكلفة</th></tr></thead>
       <tbody>${card.batches.map(b => `<tr><td>${esc(b.batch_no || '—')}</td><td>${b.quantity}</td>
-        <td>${b.expiry_date ? fmtDate(b.expiry_date) : '—'}</td><td>${(b.unit_cost || 0).toLocaleString()} ر.س</td></tr>`).join('')}</tbody>
+        <td>${b.expiry_date ? fmtDate(b.expiry_date) : '—'}</td><td>${money(b.unit_cost || 0)}</td></tr>`).join('')}</tbody>
     </table></div>` : ''}
     <div style="overflow-x:auto"><table>
       <thead><tr><th>#</th><th>التاريخ</th><th>الحركة</th><th>المستودع</th><th>التغيّر</th>
@@ -1422,8 +1473,8 @@ async function invValuationHTML() {
   const fifo = rows.reduce((s, r) => s + r.total_fifo, 0);
   return `<div class="card">
     <div class="toolbar"><h3 style="margin:0">💰 قيمة المخزون (${rows.length} صنف)</h3>
-      <span class="pill confirmed">بالتكلفة المتوسطة: ${avg.toLocaleString()} ر.س</span>
-      <span class="pill in_progress">بطريقة FIFO: ${fifo.toLocaleString()} ر.س</span>
+      <span class="pill confirmed">بالتكلفة المتوسطة: ${money(avg)}</span>
+      <span class="pill in_progress">بطريقة FIFO: ${money(fifo)}</span>
     </div>
     <p style="margin:0 0 10px;color:#64748b">المتوسط = تكلفة مرجّحة بكميات الاستلام · FIFO = طبقات الدفعات الأقرب انتهاءً التي سيُصرف بها.</p>
     <div style="overflow-x:auto"><table>
@@ -1432,10 +1483,10 @@ async function invValuationHTML() {
       <tbody>${rows.map(r => `<tr>
         <td>${r.item_id}</td><td>${esc(r.code || '—')}</td><td>${esc(r.item_name || '')}</td>
         <td>${r.quantity}</td>
-        <td>${(r.average_cost || 0).toLocaleString()} ر.س</td>
-        <td>${(r.fifo_cost || 0).toLocaleString()} ر.س</td>
-        <td>${r.total_average.toLocaleString()} ر.س</td>
-        <td>${r.total_fifo.toLocaleString()} ر.س</td>
+        <td>${money(r.average_cost || 0)}</td>
+        <td>${money(r.fifo_cost || 0)}</td>
+        <td>${money(r.total_average)}</td>
+        <td>${money(r.total_fifo)}</td>
         <td>${(r.total_fifo - r.total_average).toFixed(2)}</td>
       </tr>`).join('') || '<tr><td colspan="9" class="empty">لا أرصدة للتقييم</td></tr>'}</tbody>
     </table></div></div>`;
@@ -1458,7 +1509,7 @@ async function invSlowHTML() {
         <td>${r.quantity}</td><td>${r.received_qty}</td><td><strong>${r.issued_qty}</strong></td>
         <td>${r.last_issue_at ? fmtDate(r.last_issue_at) : 'لم يُصرف'}</td>
         <td>${r.days_since_issue == null ? '—' : r.days_since_issue + ' يوم'}</td>
-        <td>${(r.value || 0).toLocaleString()} ر.س</td>
+        <td>${money(r.value || 0)}</td>
         <td><span class="pill ${r.is_slow ? 'cancelled' : 'confirmed'}">${r.is_slow ? 'راكد' : 'نشط'}</span></td>
       </tr>`).join('') || '<tr><td colspan="10" class="empty">لا أصناف</td></tr>'}</tbody>
     </table></div></div>`;
@@ -1593,7 +1644,7 @@ async function itemCard(id) {
     openModal('📋 بطاقة الصنف — ' + card.item.name, `
       <p style="margin:0 0 10px;color:#64748b">${esc(card.item.code)} · الوحدة ${esc(card.item.unit)}
         · الأرصدة: ${card.balances.map(b => esc(b.warehouse) + ' = ' + b.quantity).join(' · ') || '—'}
-        · قيمة الصنف ${(card.item.value || 0).toLocaleString()} ر.س</p>
+        · قيمة الصنف ${money(card.item.value || 0)}</p>
       <div style="overflow-x:auto"><table>
         <thead><tr><th>التاريخ</th><th>الحركة</th><th>المستودع</th><th>التغيّر</th><th>الرصيد</th><th>المستند</th><th>التشغيلة</th></tr></thead>
         <tbody>${card.movements.map(m => `<tr>
@@ -1691,7 +1742,7 @@ function deptNodeHTML(n, depth) {
     <td>${n.beds_occupied}/${n.beds_count}</td>
     <td>${n.rooms_count}</td>
     <td>${n.services_count}</td>
-    <td>${Number(n.monthly_operating_cost || 0).toLocaleString()} ر.س</td>
+    <td>${money(Number(n.monthly_operating_cost || 0))}</td>
     <td><span class="pill ${n.is_active ? 'confirmed' : 'cancelled'}">${n.is_active ? 'فعّال' : 'معطّل'}</span></td>
     <td class="actions">${isAdmin() ? `<button class="btn sm ghost" onclick="deptStructure(${n.id})">⚙️ هيكل</button>` : ''}</td>
   </tr>` + n.children.map(c => deptNodeHTML(c, depth + 1)).join('');
@@ -1760,7 +1811,7 @@ function deptStructure(id) {
       </select></div>
       <div class="field"><label>القسم الأب (وحدة فرعية)</label><select id="st-parent">
         <option value="">— قسم رئيسي —</option>${parents}</select></div>
-      <div class="field"><label>مصروف تشغيل شهري (ر.س)</label><input id="st-cost" type="number" min="0" step="0.01" value="${Number(d.monthly_operating_cost || 0)}"></div>
+      <div class="field"><label>مصروف تشغيل شهري (${cur()})</label><input id="st-cost" type="number" min="0" step="0.01" value="${Number(d.monthly_operating_cost || 0)}"></div>
       <div class="field"><label>الحالة</label><select id="st-active">
         <option value="true" ${d.is_active !== false ? 'selected' : ''}>فعّال</option>
         <option value="false" ${d.is_active === false ? 'selected' : ''}>معطّل</option></select></div>
@@ -1808,7 +1859,7 @@ async function deptTeamHTML(id) {
         <td>${d.id}</td><td>${esc(d.name)}</td><td>${esc(d.specialty || '—')}</td>
         <td>${esc(d.rank || '—')}</td>
         <td><span class="pill ${d.available ? 'confirmed' : 'partial'}">${d.available ? 'متاح' : 'مشغول'}</span></td>
-        <td>${Number(d.consultation_fee || 0).toLocaleString()} ر.س</td>
+        <td>${money(Number(d.consultation_fee || 0))}</td>
         <td>${isAdmin() ? `<button class="btn sm ghost" onclick="deptSetHead(${id},${d.id})">${team.head.doctor_id === d.id ? '✔️ رئيس القسم' : 'تعيينه رئيسًا'}</button>` : ''}</td>
       </tr>`).join('') || '<tr><td colspan="7" class="empty">لا أطباء في هذا القسم</td></tr>'}</tbody>
     </table></div>
@@ -1974,16 +2025,16 @@ async function deptServicesHTML(id) {
   return `<div class="card">
     <div class="toolbar"><h3 style="margin:0">💲 كتالوج خدمات القسم</h3>${deptPickerHTML()}
       <span class="pill confirmed">${rows.length} خدمة</span>
-      <span class="pill in_progress">${total.toLocaleString()} ر.س متوسط القائمة</span></div>
+      <span class="pill in_progress">${money(total)} متوسط القائمة</span></div>
     <div style="overflow-x:auto;margin-bottom:12px"><table>
       <thead><tr><th>#</th><th>الرمز</th><th>الخدمة/الإجراء</th><th>السعر</th>
         <th>حصة الطبيب</th><th>تأمين</th><th>على المريض</th><th>خطوات الإجراء</th><th></th></tr></thead>
       <tbody>${rows.map(r => `<tr>
         <td>${r.id}</td><td>${esc(r.code || '—')}</td><td><strong>${esc(r.name)}</strong></td>
-        <td>${Number(r.price).toLocaleString()} ر.س</td>
+        <td>${money(Number(r.price))}</td>
         <td>${r.doctor_share_pct}% <small>(${Number(r.doctor_amount).toLocaleString()})</small></td>
         <td>${r.insurance_pct}% <small>(${Number(r.insurance_amount).toLocaleString()})</small></td>
-        <td>${Number(r.patient_amount).toLocaleString()} ر.س</td>
+        <td>${money(Number(r.patient_amount))}</td>
         <td>${esc((r.procedure_note || '—').slice(0, 40))}</td>
         <td>${isAdmin() ? `<button class="btn sm danger" onclick="deptDelService(${id},${r.id})">حذف</button>` : ''}</td>
       </tr>`).join('') || '<tr><td colspan="9" class="empty">لا خدمات مسجّلة لهذا القسم</td></tr>'}</tbody>
@@ -1991,7 +2042,7 @@ async function deptServicesHTML(id) {
     ${isAdmin() ? `<div class="form-grid">
       <div class="field"><label>اسم الخدمة *</label><input id="sv-name" placeholder="منظار هضمي"></div>
       <div class="field"><label>الرمز</label><input id="sv-code" placeholder="SRV-1"></div>
-      <div class="field"><label>السعر (ر.س)</label><input id="sv-price" type="number" min="0" step="0.01" value="0"></div>
+      <div class="field"><label>السعر (${cur()})</label><input id="sv-price" type="number" min="0" step="0.01" value="0"></div>
       <div class="field"><label>نسبة الطبيب %</label><input id="sv-doc" type="number" min="0" max="100" value="0"></div>
       <div class="field"><label>نسبة التأمين %</label><input id="sv-ins" type="number" min="0" max="100" value="0"></div>
       <div class="field"><label>خطوات الإجراء</label><input id="sv-note" placeholder="صيام 8 ساعات"></div>
@@ -2086,13 +2137,13 @@ async function deptAnalyticsHTML() {
       <div class="stat ${totBeds && totOcc / totBeds > 0.8 ? 'red' : 'green'}">
         <div class="num">${totBeds ? ((totOcc / totBeds) * 100).toFixed(1) : 0}%</div>
         <div class="lbl">إشغال (${totOcc} من ${totBeds})</div></div>
-      <div class="stat green"><div class="num">${totRev.toLocaleString()}</div><div class="lbl">إجمالي الإيراد (ر.س)</div></div>
+      <div class="stat green"><div class="num">${totRev.toLocaleString()}</div><div class="lbl">إجمالي الإيراد (${cur()})</div></div>
       <div class="stat"><div class="num">${rows.reduce((s, r) => s + r.productivity.appointments, 0)}</div><div class="lbl">مواعيد</div></div>
       <div class="stat amber"><div class="num">${rows.reduce((s, r) => s + r.productivity.patients, 0)}</div><div class="lbl">مرضى مُخدمون</div></div>
     </div>
     ${focus ? `<h4>إنتاجية الأطباء — ${esc(focus.name)}</h4>
     <div style="overflow-x:auto;margin-bottom:12px"><table>
-      <thead><tr><th>الطبيب</th><th>مواعيد</th><th>مرضى</th><th>إيراده (ر.س)</th></tr></thead>
+      <thead><tr><th>الطبيب</th><th>مواعيد</th><th>مرضى</th><th>إيراده (${cur()})</th></tr></thead>
       <tbody>${focus.productivity.per_doctor.map(d => `<tr>
         <td>${esc(d.name || '—')}</td><td>${d.appointments}</td><td>${d.patients}</td>
         <td>${Number(d.revenue).toLocaleString()}</td></tr>`).join('')
@@ -2360,8 +2411,8 @@ Object.assign(AR2EN, {
   'الفرع / العيادة': 'Branch / clinic',
   'حساب المستخدم': 'User account',
   'مدة الزيرة (دقائق)': 'Consultation (minutes)',
-  'سعر الكشفية (ر.س)': 'Consultation fee',
-  'سعر الإعادة (ر.س)': 'Follow-up fee',
+  'سعر الكشفية (${cur()})': 'Consultation fee',
+  'سعر الإعادة (${cur()})': 'Follow-up fee',
   'المناوبات': 'Shifts',
   'الإجازات': 'Leaves',
   'أيام حظر الحجز': 'Blocked dates',
@@ -2460,8 +2511,8 @@ const docTable = (title, cols, rows, emptyMsg) => `
       : emptyRow(cols.length, emptyMsg)}</tbody>
   </table></div>`;
 
-const money = n => Number(n || 0).toLocaleString('en-US',
-  { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ر.س';
+// `money` صار دالة على مستوى الملف (أعلى) وتقرأ رمز العملة المحمَّل من
+// /currencies/config — فلا نسخة مثبَّتة هنا.
 const hm = t => t ? String(t).slice(0, 5) : '—';
 const dstr = d => d ? String(d).slice(0, 10) : '—';
 const pct = n => Math.round((Number(n) || 0) * 100) + '%';
@@ -2499,8 +2550,8 @@ function docTabProfile() {
     <h3>أوقات الكشف</h3>
     <div class="form-grid">
       ${fld('مدة الزيرة (دقائق)', 'mins', d.consultation_minutes, 'number')}
-      ${fld('سعر الكشفية (ر.س)', 'fee', d.consultation_fee, 'number')}
-      ${fld('سعر الإعادة (ر.س)', 'followup', d.followup_fee, 'number')}
+      ${fld('سعر الكشفية (${cur()})', 'fee', d.consultation_fee, 'number')}
+      ${fld('سعر الإعادة (${cur()})', 'followup', d.followup_fee, 'number')}
     </div>
     ${ro ? `<button class="btn success" onclick="saveDoctorProfile()">💾 حفظ الملف المهني</button>` : ''}`;
 }
@@ -2807,7 +2858,7 @@ function docTabFinance() {
     ${docTable('', ['التاريخ', 'الطريقة', 'المبلغ', 'الفترة', 'المرجع', 'ملاحظة', ''],
       payoutRows, 'لا تحويلات')}
     ${admin ? `<div class="form-grid" style="margin-top:10px">
-        <div class="field"><label>المبلغ (ر.س)</label><input id="po-amt" type="number" step="0.01" min="0"></div>
+        <div class="field"><label>المبلغ (${cur()})</label><input id="po-amt" type="number" step="0.01" min="0"></div>
         <div class="field"><label>الفترة</label><input id="po-period" type="month" value="${DOC_MONTH()}"></div>
         <div class="field"><label>الطريقة</label><select id="po-method">
           <option value="bank">تحويل بنكي</option>
@@ -3188,7 +3239,7 @@ function chartOrders() {
         <td>${esc(s.medication ? s.medication.name : '—')}</td>
         <td>${s.quantity ?? '—'}</td>
         <td>${esc(s.dosage || '—')}</td>
-        <td>${(s.total_price || 0).toLocaleString()} ر.س</td>
+        <td>${money(s.total_price || 0)}</td>
         <td><span class="pill ${s.status}">${esc(s.status)}</span></td>
       </tr>`).join('') || emptyRow(6, 'لا صرف')}</tbody>
     </table></div>
@@ -3208,7 +3259,7 @@ function chartBilling() {
       <div class="stat ${f.outstanding > 0 ? 'red' : 'green'}"><div class="num">${f.outstanding.toLocaleString()}</div><div class="lbl">المتبقي</div></div>
       <div class="stat"><div class="num">${CHART.invoices.length}</div><div class="lbl">فواتير</div></div>
     </div>
-    <p class="muted">فواتير الخدمات ${f.invoices_total.toLocaleString()} · صرف الصيدلية ${f.sales_total.toLocaleString()} ر.س</p>
+    <p class="muted">فواتير الخدمات ${f.invoices_total.toLocaleString()} · صرف الصيدلية ${money(f.sales_total)}</p>
   </div>
 
   <div class="card">
@@ -3231,7 +3282,7 @@ function chartBilling() {
     ${isAdmin() ? `<details class="addbox"><summary>➕ تقديم مطالبة</summary>
       <div class="form-grid">
         <div class="field"><label>رقم المطالبة *</label><input id="c-no"></div>
-        <div class="field"><label>القيمة (ر.س) *</label><input id="c-amount" type="number" step="0.01" min="0"></div>
+        <div class="field"><label>القيمة (${cur()}) *</label><input id="c-amount" type="number" step="0.01" min="0"></div>
         <div class="field wide"><label>ملاحظات</label><input id="c-notes"></div>
       </div>
       <button class="btn success" style="margin-top:12px" onclick="addClaim()">تقديم المطالبة</button>
@@ -3270,7 +3321,7 @@ async function addClaim() {
 async function decideClaim(id, action) {
   const body = { status: action };
   if (action === 'approved') {
-    const v = prompt('القيمة الموافق عليها (ر.س):', '0');
+    const v = prompt('القيمة الموافق عليها (${cur()}):', '0');
     if (v === null) return;
     body.approved_amount = Number(v);
   } else {
@@ -3349,10 +3400,10 @@ function payRowHTML(s) {
     `<option value="${v}" ${sel ? 'selected' : ''}>${label}</option>`;
   return `
     <div class="kv"><span>عملية البيع</span><b>#${s.id}</b></div>
-    <div class="kv"><span>الإجمالي</span><b>${s.total_price.toLocaleString()} ر.س</b></div>
-    <div class="kv"><span>المدفوع</span><b style="color:#28a745">${s.paid_amount.toLocaleString()} ر.س</b></div>
-    <div class="kv"><span>المتبقي</span><b style="color:${rest > 0 ? '#dc3545' : '#28a745'}">${rest.toLocaleString()} ر.س</b></div>
-    <div class="field"><label>المبلغ (ر.س)</label>
+    <div class="kv"><span>الإجمالي</span><b>${money(s.total_price)}</b></div>
+    <div class="kv"><span>المدفوع</span><b style="color:#28a745">${money(s.paid_amount)}</b></div>
+    <div class="kv"><span>المتبقي</span><b style="color:${rest > 0 ? '#dc3545' : '#28a745'}">${money(rest)}</b></div>
+    <div class="field"><label>المبلغ (${cur()})</label>
       <input id="pay-amount" type="number" step="0.01" min="0" value="${rest}" oninput="payPreview()"></div>
     <div class="field"><label>طريقة الدفع</label>
       <select id="pay-method">
@@ -3373,7 +3424,7 @@ function payPreview() {
   const box = document.getElementById('pay-after'); if (!box) return;
   if (isNaN(n) || n < 0) { box.innerHTML = '<span>المتبقي بعد الدفع</span><b>—</b>'; return; }
   const after = Math.max(0, Math.round((s.total_price - n) * 100) / 100);
-  box.innerHTML = `<span>المتبقي بعد الدفع</span><b style="color:${after > 0 ? '#dc3545' : '#28a745'}">${after.toLocaleString()} ر.س</b>`;
+  box.innerHTML = `<span>المتبقي بعد الدفع</span><b style="color:${after > 0 ? '#dc3545' : '#28a745'}">${money(after)}</b>`;
   applyI18n(box);
 }
 
@@ -3850,7 +3901,9 @@ async function renderGeneralLedger(main) {
       api('/accounts/ledger/entries?limit=30'), api('/accounts/ledger/vendors'),
       api('/accounts/ledger/vendor-bills'), api('/accounts/ledger/trial-balance')
     ]);
-    const money = v => `${(Number(v) || 0).toLocaleString('ar-SA', { maximumFractionDigits: 2 })} ر.س`;
+    // `money` المحلي كان ينادي نفسه (الاسم يحجب الدالة العامّة) ⇒ استدعاء لا نهايًا،
+    // وكان يُظهر الدفتر العامّة المنسّق برمز العملة الحيًّّ.
+
     const aging = (title, rows) => `<div class="card"><h3>${title}</h3>
       <div style="overflow-x:auto"><table><thead><tr><th>الفئة</th><th>العدد</th><th>الإجمالي</th><th>المتبقي</th></tr></thead>
       <tbody>${rows.map(r => `<tr><td>${esc(r.bucket)}</td><td>${r.count}</td><td>${money(r.total)}</td><td>${money(r.outstanding)}</td></tr>`).join('')}</tbody>
@@ -4162,10 +4215,9 @@ function qoGo(tab) {
   if (tab) QO.tab = tab;
   return navigate('quickops');
 }
-function qoMoney(n) {
-  return (Number(n) || 0).toLocaleString('en-US',
-    { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ر.س';
-}
+// الأليام الثلاثة كانت نسخ مثبّتًاً لعملة مختلفة
+// — الإنماع أصلاه تعليماً على ¥money ولا يُقثّل التكرار.
+const qoMoney = money;
 function qoNum(n) { return Number(n || 0).toLocaleString('en-US'); }
 
 async function quickops(main) {
@@ -4439,13 +4491,13 @@ function qoTotalsBar(mode) {
   const t = qoTotals();
   if (mode === 'sale') {
     return `<div class="qo-money">
-      <div class="field"><label>الخصم (ر.س)</label>
+      <div class="field"><label>الخصم (${cur()})</label>
         <input id="qo-discount" type="number" min="0" step="0.5" value="${QO.pay.discount || 0}"
           oninput="QO.pay.discount=Number(this.value)||0; qoRenderTotals();"></div>
       <div class="field"><label>الضريبة %</label>
         <input id="qo-tax" type="number" min="0" max="100" step="0.5" value="${QO.pay.tax || 0}"
           oninput="QO.pay.tax=Number(this.value)||0; qoRenderTotals();"></div>
-      <div class="field"><label>المدفوع (ر.س)</label>
+      <div class="field"><label>المدفوع (${cur()})</label>
         <input id="qo-paid" type="number" min="0" step="0.5" value="${QO.pay.paid || 0}"
           oninput="QO.pay.paid=Number(this.value)||0; qoRenderTotals();"></div>
       <div class="field"><label>طريقة الدفع</label>
@@ -4714,8 +4766,7 @@ const RC_TABS = [['pos', '💳 البيع والفواتير'], ['collect', '�
                  ['pricing', '🏷️ التسعير والخصومات'], ['reports', '📊 تقارير المبيعات']];
 const RC = { tab: 'pos', data: {}, busy: false, loaded: false,
   filters: { period: '', method: '', status: '', patient: '', staff: '' } };
-const rcMoney = (n) => (Number(n) || 0).toLocaleString('en-US',
-  { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ر.س';
+const rcMoney = money;   // الإنماع أصلاه تعليماً على ¥money (الإستخداد القديم)
 const rcDate = (d) => d ? new Date(d).toLocaleDateString('en-GB') : '—';
 const rcDateTime = (d) => d ? new Date(d).toLocaleString('en-GB',
   { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
@@ -4874,7 +4925,7 @@ function rcPos() {
 
 async function rcPaySale(id) {
   const rows = await api('/patients/?limit=1');
-  const amount = prompt('المبلغ المحصّل (ر.س)');
+  const amount = prompt('المبلغ المحصّل (${cur()})');
   if (amount === null) return;
   const method = prompt('طريقة الدفع: cash أو card أو insurance', 'cash');
   if (!method) return;
@@ -4953,7 +5004,7 @@ function rcCollect() {
     <div class="qo-money">
       <div class="field" style="min-width:230px"><label>المريض *</label>
         <input id="dep-patient" placeholder="رقم المريض"></div>
-      <div class="field"><label>المبلغ (ر.س)</label><input id="dep-amount" type="number" min="0" step="0.5"></div>
+      <div class="field"><label>المبلغ (${cur()})</label><input id="dep-amount" type="number" min="0" step="0.5"></div>
       <div class="field"><label>طريقة الدفع</label>
         <select id="dep-method"><option value="cash">نقدًا</option><option value="card">بطاقة</option>
         <option value="bank">بنك</option><option value="insurance">تأمين</option></select></div>
@@ -4983,12 +5034,12 @@ function rcCollect() {
     <h3>🧾 إغلاق الصندوق اليومي (وردية الكاشير)</h3>
     ${open ? `<div class="qo-money">
         <div>وردية مفتوحة منذ <b>${rcDateTime(open.opened_at)}</b> — رصيد افتتاحي ${rcMoney(open.opening_cash)}</div>
-        <div class="field"><label>النقد المعدّ فعليًا (ر.س)</label>
+        <div class="field"><label>النقد المعدّ فعليًا (${cur()})</label>
           <input id="shift-counted" type="number" min="0" step="0.5" value="${open.opening_cash}"></div>
         <button class="btn" onclick="rcCloseShift()">🔒 إغلاق ومطابقة</button>
       </div>`
       : `<div class="qo-money">
-          <div class="field"><label>الرصيد الافتتاحي (ر.س)</label>
+          <div class="field"><label>الرصيد الافتتاحي (${cur()})</label>
             <input id="shift-opening" type="number" min="0" step="0.5" value="0"></div>
           <button class="btn" onclick="rcOpenShift()">▶️ فتح وردية</button>
         </div>`}
@@ -5425,8 +5476,7 @@ async function rcRunReport() {
    ============================================================ */
 const CL = { tab: 'list', clinics: [], summary: null, loaded: false, q: '', status: '' };
 const CL_DAYS = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
-const clMoney = (n) => (Number(n) || 0).toLocaleString('en-US',
-  { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ر.س';
+const clMoney = money;   // الإنماع أصلاه تعليماً على ¥money (العيادة)
 const CL_TABS = [['list', '🏥 العيادات'], ['services', '💊 الخدمات والأسعار'],
                  ['schedule', '🕐 جدول الدوام'], ['summary', '📊 الملخص']];
 let CL_DEPTS = [];   // الأقسام المتاحة للربط (تُحمّل مرة عند فتح الشاشة)
@@ -6213,7 +6263,7 @@ const VIEWS = {
         <div class="field"><label>اسم الدواء *</label><input id="f-mname"></div>
         <div class="field"><label>الكمية</label><input id="f-qty" type="number" min="0" value="0"></div>
         <div class="field"><label>الوحدة</label><input id="f-unit" value="علبة"></div>
-        <div class="field"><label>السعر (ر.س)</label><input id="f-mprice" type="number" step="0.01" min="0"></div>
+        <div class="field"><label>السعر (${cur()})</label><input id="f-mprice" type="number" step="0.01" min="0"></div>
         <div class="field"><label>حد التنبيه</label><input id="f-minq" type="number" min="0" value="10"></div>
         <div class="field"><label>تاريخ الانتهاء</label><input id="f-exp" type="date"></div>
       </div>
@@ -6222,9 +6272,9 @@ const VIEWS = {
     /* بطاقات إحصاءات الفترة */
     const statsRow = stats ? `
       <div class="stats">
-        <div class="stat"><div class="num">${stats.revenue.toLocaleString()} ر.س</div><div class="lbl">إيراد الصرف</div></div>
-        <div class="stat green"><div class="num">${stats.paid.toLocaleString()} ر.س</div><div class="lbl">المحصّل</div></div>
-        <div class="stat red"><div class="num">${stats.outstanding.toLocaleString()} ر.س</div><div class="lbl">المتبقي</div></div>
+        <div class="stat"><div class="num">${money(stats.revenue)}</div><div class="lbl">إيراد الصرف</div></div>
+        <div class="stat green"><div class="num">${money(stats.paid)}</div><div class="lbl">المحصّل</div></div>
+        <div class="stat red"><div class="num">${money(stats.outstanding)}</div><div class="lbl">المتبقي</div></div>
         <div class="stat"><div class="num">${stats.units}</div><div class="lbl">وحدات مصروفة</div></div>
         <div class="stat"><div class="num">${stats.dispense_count}</div><div class="lbl">عمليات صرف</div></div>
         <div class="stat amber"><div class="num">${stats.low + stats.out}</div><div class="lbl">منخفض/نافد</div></div>
@@ -6320,7 +6370,7 @@ const VIEWS = {
               ? `<span class="pill lowstock">${m.quantity} ${esc(m.unit)} ⚠️</span>`
               : `<span class="pill confirmed">${m.quantity} ${esc(m.unit)}</span>`}</td>
             <td><span class="pill ${stPill[st]}">${stLbl[st]}</span></td>
-            <td>${m.price.toLocaleString()} ر.س</td>
+            <td>${money(m.price)}</td>
             <td>${m.min_quantity}</td>
             <td>${m.expiry_date ? fmtDate(m.expiry_date) : '—'}</td>
             <td class="actions">
@@ -6386,7 +6436,7 @@ const VIEWS = {
             <td>${r.consumed}</td><td>${r.avg_per_day}</td>
             <td>${r.days_cover === null ? '—' : r.days_cover}</td>
             <td><span class="pill lowstock">${r.suggested_qty} ${esc(r.unit)}</span></td>
-            <td>${r.suggested_cost.toLocaleString()} ر.س</td>
+            <td>${money(r.suggested_cost)}</td>
             <td class="actions">${isAdmin()
               ? `<button class="btn sm ghost" onclick="restockSuggested(${r.medication_id},${r.suggested_qty})">📦 توريد المقترح</button>`
               : ''}</td>
@@ -6405,7 +6455,7 @@ const VIEWS = {
               ${d.prescription_id ? `<br><small>وصفة #${d.prescription_id}</small>` : ''}</td>
             <td>${d.quantity}</td>
             <td><small>${esc([d.dosage, d.frequency, d.duration].filter(Boolean).join(' · ') || '—')}</small></td>
-            <td>${Number(d.total_price || 0).toLocaleString()} ر.س</td>
+            <td>${money(Number(d.total_price || 0))}</td>
             <td><span class="pill ${payPill(d.status)}">${payLbl[d.status] || d.status}</span></td>
             <td>${esc(d.dispensed_by || '-')}</td>
             <td>${d.returned_at
@@ -6446,12 +6496,12 @@ const VIEWS = {
     const maxRev = Math.max(1, ...rev.map(r => r.sales));
     main.innerHTML = `
       <div class="stats">
-        <div class="stat"><div class="num">${sum.total_sales.toLocaleString()} ر.س</div><div class="lbl">إجمالي المبيعات</div></div>
-        <div class="stat green"><div class="num">${sum.total_paid.toLocaleString()} ر.س</div><div class="lbl">المحصّل</div></div>
-        <div class="stat red"><div class="num">${outstanding.toLocaleString()} ر.س</div><div class="lbl">المتبقي (مدين)</div></div>
+        <div class="stat"><div class="num">${money(sum.total_sales)}</div><div class="lbl">إجمالي المبيعات</div></div>
+        <div class="stat green"><div class="num">${money(sum.total_paid)}</div><div class="lbl">المحصّل</div></div>
+        <div class="stat red"><div class="num">${money(outstanding)}</div><div class="lbl">المتبقي (مدين)</div></div>
         <div class="stat amber"><div class="num">${sum.count}</div><div class="lbl">عدد العمليات</div></div>
         <div class="stat"><div class="num">${debtors.length}</div><div class="lbl">عدد المدينين</div></div>
-        <div class="stat red"><div class="num">${totalDues.toLocaleString()} ر.س</div><div class="lbl">مستحقات المدينين</div></div>
+        <div class="stat red"><div class="num">${money(totalDues)}</div><div class="lbl">مستحقات المدينين</div></div>
       </div>
       <div class="card">
         <div class="toolbar" style="margin-bottom:6px">
@@ -6463,7 +6513,7 @@ const VIEWS = {
         </div>
         <div class="bars">
           ${rev.length ? rev.map(r => `
-            <div class="bar-wrap" title="${r.date}: ${r.sales.toLocaleString()} ر.س (${r.count} عملية)">
+            <div class="bar-wrap" title="${r.date}: ${money(r.sales)} (${r.count} عملية)">
               <div class="val">${Math.round(r.sales)}</div>
               <div class="bar" style="height:${Math.max(4, Math.round(r.sales / maxRev * 110))}px;
                 background:linear-gradient(180deg,#28a745,#85ce8f)"></div>
@@ -6473,7 +6523,7 @@ const VIEWS = {
       </div>
       ${pm.length ? `<div class="card"><h3>توزيع طرق الدفع</h3>
         <div class="toolbar">${pm.map(([k, v]) =>
-          `<span class="pill ${k === 'cash' ? 'paid' : (k === 'card' ? 'completed' : 'in_progress')}">${k === 'cash' ? 'نقدًا' : (k === 'card' ? 'بطاقة' : 'تأمين')}: ${Number(v).toLocaleString()} ر.س</span>`).join('')}</div>
+          `<span class="pill ${k === 'cash' ? 'paid' : (k === 'card' ? 'completed' : 'in_progress')}">${k === 'cash' ? 'نقدًا' : (k === 'card' ? 'بطاقة' : 'تأمين')}: ${money(Number(v))}</span>`).join('')}</div>
       </div>` : ''}
       <div class="card">
         <div class="toolbar"><h3 style="margin:0">🔗 أقسام مرتبطة</h3>
@@ -6504,24 +6554,24 @@ const VIEWS = {
       </div>
       <div class="card">
         <div class="toolbar"><h3 style="margin:0">🧾 المدينون (${debtors.length})</h3>
-          <span class="pill unpaid">إجمالي المستحقات: ${totalDues.toLocaleString()} ر.س</span></div>
+          <span class="pill unpaid">إجمالي المستحقات: ${money(totalDues)}</span></div>
         <div style="overflow-x:auto"><table>
           <thead><tr><th>المريض</th><th>عمليات غير مسدّدة</th><th>إجمالي مستحقاتهم</th><th>مدفوع</th><th>المتبقي</th><th></th></tr></thead>
           <tbody>${debtors.map(d => `<tr>
             <td><strong>${esc(d.full_name)}</strong> <span style="color:#999">#${d.patient_id}</span></td>
             <td>${d.operations}</td>
-            <td>${d.total.toLocaleString()} ر.س</td>
-            <td style="color:#28a745">${d.paid.toLocaleString()} ر.س</td>
-            <td style="color:#dc3545;font-weight:bold">${d.outstanding.toLocaleString()} ر.س</td>
+            <td>${money(d.total)}</td>
+            <td style="color:#28a745">${money(d.paid)}</td>
+            <td style="color:#dc3545;font-weight:bold">${money(d.outstanding)}</td>
             <td class="actions"><button class="btn sm ghost"
               onclick="document.getElementById('f-stmt-patient').value=${d.patient_id};showStatement()">🧾 كشف حساب</button></td>
           </tr>`).join('') || '<tr><td colspan="6" class="empty">✅ لا يوجد مدينون — كل المبالغ مسدّدة</td></tr>'}</tbody>
           ${debtors.length ? `<tfoot><tr>
             <td><strong>الإجمالي</strong></td>
             <td>${debtors.reduce((a, d) => a + d.operations, 0)}</td>
-            <td><strong>${debtors.reduce((a, d) => a + d.total, 0).toLocaleString()} ر.س</strong></td>
-            <td style="color:#28a745">${debtors.reduce((a, d) => a + d.paid, 0).toLocaleString()} ر.س</td>
-            <td style="color:#dc3545;font-weight:bold">${totalDues.toLocaleString()} ر.س</td>
+            <td><strong>${money(debtors.reduce((a, d) => a + d.total, 0))}</strong></td>
+            <td style="color:#28a745">${money(debtors.reduce((a, d) => a + d.paid, 0))}</td>
+            <td style="color:#dc3545;font-weight:bold">${money(totalDues)}</td>
             <td></td>
           </tr></tfoot>` : ''}
         </table></div>
@@ -6585,7 +6635,7 @@ const VIEWS = {
           <div class="field"><label>الموظف *</label><select id="f-staff">
             ${staff.map(s => `<option value="${s.id}" data-sal="${s.salary || 0}">${esc(s.full_name)} — ${esc(s.position)}</option>`).join('')}</select></div>
           <div class="field"><label>الفترة *</label><input id="f-period" placeholder="YYYY-MM" value="${thisMonth}"></div>
-          <div class="field"><label>الأساسي (ر.س) *</label><input id="f-base" type="number" step="0.01" min="0"></div>
+          <div class="field"><label>الأساسي (${cur()}) *</label><input id="f-base" type="number" step="0.01" min="0"></div>
           <div class="field"><label>البدلات</label><input id="f-bonus" type="number" step="0.01" min="0" value="0"></div>
           <div class="field"><label>الاستقطاعات</label><input id="f-ded" type="number" step="0.01" min="0" value="0"></div>
           <div class="field"><label>ملاحظات</label><input id="f-pnotes"></div>
@@ -6600,7 +6650,7 @@ const VIEWS = {
             <td>${esc(r.staff ? r.staff.full_name : '#' + r.staff_id)}</td>
             <td>${r.base_salary.toLocaleString()}</td><td>${r.bonus.toLocaleString()}</td>
             <td>${r.deduction.toLocaleString()}</td>
-            <td><strong style="color:#2c7be5">${r.net.toLocaleString()} ر.س</strong></td>
+            <td><strong style="color:#2c7be5">${money(r.net)}</strong></td>
             <td>${r.status === 'paid'
               ? `<span class="pill paid">مصروف ${r.paid_at ? '· ' + fmtDate(r.paid_at) : ''}</span>`
               : `<span class="pill unpaid">غير مصروف</span>`}</td>
@@ -6759,7 +6809,7 @@ const VIEWS = {
         <div class="stat amber"><div class="num">${s.appointments_today}</div><div class="lbl">مواعيد اليوم</div></div>
         <div class="stat red"><div class="num">${s.pending_appointments}</div><div class="lbl">مواعيد معلّقة</div></div>
         <div class="stat"><div class="num">${s.beds_occupied}/${s.beds_total}</div><div class="lbl">أسرّة مشغولة</div></div>
-        <div class="stat green"><div class="num">${s.revenue_paid.toLocaleString()}</div><div class="lbl">إيرادات محصّلة (ر.س)</div></div>
+        <div class="stat green"><div class="num">${s.revenue_paid.toLocaleString()}</div><div class="lbl">إيرادات محصّلة (${cur()})</div></div>
         <div class="stat red"><div class="num">${s.revenue_unpaid.toLocaleString()}</div><div class="lbl">مستحقات غير محصّلة</div></div>
         <div class="stat"><div class="num">${s.total_departments}</div><div class="lbl">الأقسام</div></div>
         <div class="stat amber"><div class="num">${s.operations.nursing_pending || 0}</div><div class="lbl">مهام تمريض مفتوحة</div></div>
@@ -6960,7 +7010,7 @@ const VIEWS = {
             <td>${esc(d.academic_rank || '—')}</td>
             <td>${esc(d.license_number)}</td><td>${esc(d.phone)}</td>
             <td>${esc(d.department ? d.department.name : '-')}</td>
-            <td>${d.consultation_fee ? d.consultation_fee.toLocaleString() + ' ر.س' : '—'}</td>
+            <td>${d.consultation_fee ? money(d.consultation_fee) : '—'}</td>
             <td>${d.is_available ? '✅' : '⛔'}</td>
             <td>
               <button class="btn sm ghost" onclick="openDoctorChart(${d.id})" title="ملف الطبيب الكامل">🗂️ الملف</button>
@@ -7126,8 +7176,8 @@ const VIEWS = {
         <div class="form-grid">
           <div class="field"><label>المريض *</label><select id="f-pat">
             ${patients.map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join('')}</select></div>
-          <div class="field"><label>المبلغ (ر.س) *</label><input id="f-amt" type="number" step="0.01" min="1"></div>
-          <div class="field"><label>الخصم (ر.س)</label><input id="f-disc" type="number" step="0.01" min="0" value="0"></div>
+          <div class="field"><label>المبلغ (${cur()}) *</label><input id="f-amt" type="number" step="0.01" min="1"></div>
+          <div class="field"><label>الخصم (${cur()})</label><input id="f-disc" type="number" step="0.01" min="0" value="0"></div>
           <div class="field"><label>الضريبة %</label><input id="f-tax" type="number" step="0.1" min="0" max="100" value="0"></div>
           <div class="field"><label>الحالة</label><select id="f-st">
             <option value="unpaid">غير مدفوعة</option><option value="paid">مدفوعة</option><option value="partial">جزئية</option></select></div>
@@ -7145,7 +7195,7 @@ const VIEWS = {
             <td>${i.id}${i.appointment_id ? ' 🔗' : ''}${i.record_id ? ' 📋' : ''}</td>
             <td>${fmtDate(i.created_at)}</td><td>${esc(i.patient.full_name)}</td>
             <td>${esc(i.description)}${i.insurer ? `<br><small>🏢 ${esc(i.insurer)}${i.policy_number ? ' — #' + esc(i.policy_number) : ''}</small>` : ''}</td>
-            <td><strong>${(i.total != null ? i.total : i.amount).toLocaleString()} ر.س</strong>${(i.discount || i.tax_rate) ? `<br><small>أساسي ${i.amount.toLocaleString()}${i.discount ? ' − خصم ' + i.discount.toLocaleString() : ''}${i.tax_rate ? ' + ضريبة ' + i.tax_rate + '%' : ''}</small>` : ''}${i.paid_amount ? `<br><small style="color:#28a745">مدفوع ${i.paid_amount.toLocaleString()}</small>` : ''}</td>
+            <td><strong>${money(i.total != null ? i.total : i.amount)}</strong>${(i.discount || i.tax_rate) ? `<br><small>أساسي ${i.amount.toLocaleString()}${i.discount ? ' − خصم ' + i.discount.toLocaleString() : ''}${i.tax_rate ? ' + ضريبة ' + i.tax_rate + '%' : ''}</small>` : ''}${i.paid_amount ? `<br><small style="color:#28a745">مدفوع ${i.paid_amount.toLocaleString()}</small>` : ''}</td>
             <td>${pill(i.status)}</td>
             <td>${i.paid_at ? `${esc(i.payment_method || '-')} · ${fmtDate(i.paid_at)}` : '—'}</td>
             <td class="actions">
@@ -8355,7 +8405,7 @@ function labSheetHTML(o) {
       ${cell('الأنبوب', c && c.tube_type ? esc(c.tube_type) : '')}
       ${cell('الصيام', c && c.fasting_hours ? c.fasting_hours + ' ساعة' : '')}
       ${cell('الوحدة', esc(r.unit || ''))}
-      ${cell('السعر', Number(o.price || 0) + ' ر.س')}
+      ${cell('السعر', money(o.price || 0))}
       <div class="lab-cell"><span>حالة الاختبار في الدليل</span><b>${
         c ? (c.active
           ? '<span class="pill reviewed">✅ مفعّل · active</span>'
@@ -8410,7 +8460,7 @@ function labOrderFormHTML(type) {
         <input type="hidden" id="f-cat" value="">
         <div id="lab-pick">${testPickerHTML()}</div></div>
       <div class="field"><label>اسم الفحص *</label><input id="f-test" placeholder="مثال: CBC"></div>
-      <div class="field"><label>السعر (ر.س)</label><input id="f-price" type="number" step="0.01" min="0"></div>
+      <div class="field"><label>السعر (${cur()})</label><input id="f-price" type="number" step="0.01" min="0"></div>
       <div class="field"><label>الأولوية</label><select id="f-prio">
         <option value="routine">روتيني</option><option value="stat">عاجل (STAT)</option></select></div>
       <div class="field lab-rad-field" ${radField}><label>جهاز الأشعة</label><select id="f-modality">
@@ -8710,7 +8760,7 @@ function editLabTest(id) {
       <div class="field"><label>التصنيف</label><select id="m-category">
         <option value="lab" ${t.category === 'lab' ? 'selected' : ''}>تحاليل</option>
         <option value="radiology" ${t.category === 'radiology' ? 'selected' : ''}>أشعة</option></select></div>
-      <div class="field"><label>السعر (ر.س)</label>
+      <div class="field"><label>السعر (${cur()})</label>
         <input id="m-price" type="number" step="0.01" value="${t.price || 0}"></div>
       <div class="field"><label>ساعات الصيام</label>
         <input id="m-fasting" type="number" min="0" value="${t.fasting_hours || 0}"></div>
@@ -8868,7 +8918,7 @@ const LAB_VIEWS = {
           <td>${esc(o.patient.full_name)}${
             o.patient.file_no != null ? `<br><small>📁 ملف ${o.patient.file_no}</small>` : ''}</td>
           <td>${esc(o.doctor ? o.doctor.full_name : '-')}</td>
-          <td><strong>${esc(o.test_name)}</strong>${o.price ? `<br><small>${o.price.toLocaleString()} ر.س</small>` : ''}
+          <td><strong>${esc(o.test_name)}</strong>${o.price ? `<br><small>${money(o.price)}</small>` : ''}
             ${o.lab_test_id ? `<br><small>📖 من الدليل #${o.lab_test_id}</small>` : ''}</td>
           <td>${o.priority === 'stat'
             ? '<span class="pill cancelled">عاجل STAT</span>'
@@ -9003,7 +9053,7 @@ const LAB_VIEWS = {
           <div class="field"><label>الاسم *</label><input id="ct-name" placeholder="صورة الدم الكاملة"></div>
           <div class="field"><label>التصنيف</label><select id="ct-category">
             <option value="lab">تحاليل مختبرية</option><option value="radiology">فحص أشعة</option></select></div>
-          <div class="field"><label>السعر (ر.س)</label><input id="ct-price" type="number" step="0.01" min="0"></div>
+          <div class="field"><label>السعر (${cur()})</label><input id="ct-price" type="number" step="0.01" min="0"></div>
           <div class="field"><label>ساعات الصيام</label><input id="ct-fasting" type="number" min="0" value="0"></div>
           <div class="field"><label>نوع الأنبوب</label><input id="ct-tube" placeholder="EDTA / سيرم / بول"></div>
           <div class="field"><label>نوع العينة</label><input id="ct-spec" placeholder="دم / بول / مسحة"></div>
@@ -9024,7 +9074,7 @@ const LAB_VIEWS = {
           <td><code>${esc(t.code)}</code></td>
           <td><strong>${esc(t.name)}</strong></td>
           <td>${t.category === 'radiology' ? '🩻 أشعة' : '🧪 تحليل'}</td>
-          <td>${Number(t.price || 0).toLocaleString()} ر.س</td>
+          <td>${money(Number(t.price || 0))}</td>
           <td>${t.fasting_hours ? t.fasting_hours + ' ساعة' : '—'}</td>
           <td><small>${esc(t.tube_type || '—')} / ${esc(t.specimen_type || '—')}</small></td>
           <td>${esc(t.unit || '—')}</td>
@@ -9056,7 +9106,7 @@ const LAB_VIEWS = {
         <tbody>${rows.map(o => `<tr data-status="${o.status}">
           <td>${o.id}</td><td>${fmtDate(o.ordered_at)}</td>
           <td>${esc(o.patient.full_name)}</td>
-          <td><strong>${esc(o.test_name)}</strong>${o.price ? `<br><small>${o.price.toLocaleString()} ر.س</small>` : ''}</td>
+          <td><strong>${esc(o.test_name)}</strong>${o.price ? `<br><small>${money(o.price)}</small>` : ''}</td>
           <td>${o.priority === 'stat'
             ? '<span class="pill cancelled">عاجل STAT</span>'
             : '<span class="pill pending">روتيني</span>'}</td>
@@ -9231,7 +9281,7 @@ const LAB_VIEWS = {
       <div class="stats">
         <div class="stat"><div class="num">${sum.items}</div><div class="lbl">صنف</div></div>
         <div class="stat"><div class="num">${sum.units}</div><div class="lbl">وحدة</div></div>
-        <div class="stat green"><div class="num">${Number(sum.total_value).toLocaleString()}</div><div class="lbl">القيمة (ر.س)</div></div>
+        <div class="stat green"><div class="num">${Number(sum.total_value).toLocaleString()}</div><div class="lbl">القيمة (${cur()})</div></div>
         <div class="stat ${sum.low ? 'red' : ''}"><div class="num">${sum.low}</div><div class="lbl">منخفض</div></div>
         <div class="stat ${sum.out ? 'red' : ''}"><div class="num">${sum.out}</div><div class="lbl">نافد</div></div>
         <div class="stat ${sum.expiring || sum.expired ? 'red' : ''}">
@@ -9262,9 +9312,11 @@ const LAB_VIEWS = {
       .map(o => (new Date(o.result_at) - new Date(o.ordered_at)) / 36e5)
       .filter(h => h >= 0);
     const avgTat = tat.length ? tat.reduce((a, b) => a + b, 0) / tat.length : null;
-    const money = list => list.reduce((s, o) => s + (Number(o.price) || 0), 0);
-    const rev = money(rows);
-    const revDone = money(rows.filter(o => o.status === 'ready' || o.status === 'reviewed'));
+    // مجموع أسعار العيونات ليس منسّقاً — سميته `sumPrice` توضيحًا
+    // عن سمّيه الداخل الموسوم: `money` ينسفه (كان يحجب منفقي المختصص).
+    const sumPrice = list => list.reduce((a, o) => a + (Number(o.price) || 0), 0);
+    const rev = sumPrice(rows);
+    const revDone = sumPrice(rows.filter(o => o.status === 'ready' || o.status === 'reviewed'));
     const counts = {};
     rows.forEach(o => { counts[o.test_name] = (counts[o.test_name] || 0) + 1; });
     const top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8);
@@ -9285,9 +9337,9 @@ const LAB_VIEWS = {
         <div class="stat green"><div class="num">${verified}</div><div class="lbl">معتمدة إلكترونيًا</div></div>
         <div class="stat"><div class="num">${avgTat == null ? '—' : avgTat.toFixed(1)}</div>
           <div class="lbl">متوسط زمن الإنجاز (ساعة)</div></div>
-        <div class="stat"><div class="num">${rev.toLocaleString()}</div><div class="lbl">إيراد الطلبات (ر.س)</div></div>
+        <div class="stat"><div class="num">${rev.toLocaleString()}</div><div class="lbl">إيراد الطلبات (${cur()})</div></div>
       </div>
-      <p class="muted">النتائج الجاهزة ${done} · إيراد الطلبات الجاهزة ${revDone.toLocaleString()} ر.س
+      <p class="muted">النتائج الجاهزة ${done} · إيراد الطلبات الجاهزة ${money(revDone)}
         ${tat.length ? ` · أسرع نتيجة ${Math.min.apply(null, tat).toFixed(1)} ساعة` : ''}</p>
       <div class="toolbar"><h3 style="margin:0">الحالات</h3></div>
       <div class="actions">${Object.entries(LAB_ST).map(([k, v]) =>
@@ -9406,7 +9458,7 @@ async function dispenseBatch() {
     const res = await api('/dispenses/batch', { method: 'POST',
       body: JSON.stringify({ patient_id: Number(V('f-dpat')), items,
                              notes: V('f-basket-notes') || null }) });
-    toast(`تم صرف ${res.count} بند — الإجمالي ${res.total} ر.س ✅`);
+    toast(`تم صرف ${res.count} بند — الإجمالي ${money(res.total)} ✅`);
     await navigate('pharmacy');
   } catch (e) { toast(e.message, true); }
 }
@@ -9744,7 +9796,7 @@ function tpListHTML(list) {
       <span class="tp-ic">${TEST_GROUP[g] ? TEST_GROUP[g].ic : '🧾'}</span>
       <span class="tp-nm"><b>${esc(t.code)}</b> ${esc(t.name)}</span>
       <span class="tp-mt">${esc(tpMeta(t))}</span>
-      <span class="tp-pr">${Number(t.price || 0)} ر.س</span>
+      <span class="tp-pr">${money(t.price || 0)}</span>
       <span class="tp-ck">${on ? '☑' : '☐'}</span></div>`;
   }).join('');
 }
@@ -10000,7 +10052,7 @@ function erWorkHTML() {
   </div>
 
   <div class="er-meta">
-    <div><span>قيمة الكشف</span><b>${Number(c.consult_fee || 0)} ر.س</b></div>
+    <div><span>قيمة الكشف</span><b>${money(c.consult_fee || 0)}</b></div>
     <div><span>الطبيب المناوب</span><b>${c.doctor_id ? '#' + c.doctor_id : '—'}</b></div>
     <div><span>وقت الوصول</span><b>${esc(String(c.arrival_at || '').replace('T', ' ').slice(0, 16))}</b></div>
     <div><span>الفحوصات</span><b>${s.lab_orders.length}</b></div>
@@ -10069,7 +10121,7 @@ function erPayHTML(s) {
       <p class="muted">لم تُفتح فاتورة لهذه الحالة بعد. الفتح يجمع الكشفية وما لم يُفوتر
       من الفحوصات في سطور واحدة لكل بند.</p>
       <div class="er-actions">
-        <label>قيمة الكشف (ر.س)</label>
+        <label>قيمة الكشف (${cur()})</label>
         <input id="er-fee" type="number" step="0.01" min="0" value="${Number(c.consult_fee || 0)}" style="width:140px">
         <button class="btn success" ${closed ? 'disabled' : ''} onclick="erCheckout()">🧾 فتح فاتورة التحصيل</button>
       </div>`;
@@ -10078,12 +10130,12 @@ function erPayHTML(s) {
   return `
     <table><thead><tr><th>البند</th><th>البيان</th><th>المبلغ</th></tr></thead><tbody>
     ${s.lines.map(l => `<tr><td>${ER_KIND[l.kind] || l.kind}</td>
-      <td>${esc(l.description)}</td><td>${Number(l.amount || 0)} ر.س</td></tr>`).join('')}
+      <td>${esc(l.description)}</td><td>${money(l.amount || 0)}</td></tr>`).join('')}
     </tbody></table>
     <div class="er-tot">
-      <span>الإجمالي <b>${Number(s.billed_total)} ر.س</b></span>
-      <span>المدفوع <b>${Number(s.paid_amount)} ر.س</b></span>
-      <span>المتبقي <b class="${s.due > 0 ? 'due' : ''}">${Number(s.due)} ر.س</b></span>
+      <span>الإجمالي <b>${money(s.billed_total)}</b></span>
+      <span>المدفوع <b>${money(s.paid_amount)}</b></span>
+      <span>المتبقي <b class="${s.due > 0 ? 'due' : ''}">${money(s.due)}</b></span>
       <span>الفواتير <b>${(s.invoices || []).map(i => '#' + i.id).join(' · ')}</b></span>
     </div>
     ${settled
@@ -10093,7 +10145,7 @@ function erPayHTML(s) {
             <option value="cash">نقدًا</option><option value="card">بطاقة</option>
             <option value="insurance">تأمين</option>
           </select>
-          <button class="btn success" onclick="erPay()">💳 تحصيل ${Number(s.due)} ر.س</button>
+          <button class="btn success" onclick="erPay()">💳 تحصيل ${money(s.due)}</button>
         </div>
         <p class="muted">أو حصّلها من شاشة الفواتير — البوابة تراقب كل فواتير الحالة.</p>`}`;
 }
@@ -10179,7 +10231,7 @@ async function erNewFile() {
       <div class="field"><label>مستوى الفرز</label><select id="er-ntri">
         ${Object.entries(ER_TRIAGE).map(([k, v]) =>
           `<option value="${k}" ${k === 'standard' ? 'selected' : ''}>${v[0]}</option>`).join('')}</select></div>
-      <div class="field"><label>قيمة الكشف (ر.س)</label>
+      <div class="field"><label>قيمة الكشف (${cur()})</label>
         <input id="er-nfee" type="number" step="0.01" min="0" value="50"></div>
       <div class="field"><label>وقت الوصول</label>
         <input id="er-nat" type="datetime-local" value="${erNowLocal()}"></div>
@@ -10305,6 +10357,9 @@ async function erStatus(next) {
 
 /* ========== بدء التشغيل ========== */
 initLang();
+// إعدادات العملة قبل أول رسم: بدونها تعرض الواجهة رمز الريال اليمني
+// الاحتياطي. الاستدعاء لا يؤخّر الإقلاع (fallback مضمّن).
+loadCurrency().then(registerCurrencyLabels);
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {}));
 }

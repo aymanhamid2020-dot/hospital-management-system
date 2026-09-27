@@ -473,7 +473,7 @@ class Invoice(Base):
     appointment_id = Column(Integer, ForeignKey("appointments.id", ondelete="SET NULL"), nullable=True)
     record_id = Column(Integer, ForeignKey("medical_records.id", ondelete="SET NULL"), nullable=True)
     amount = Column(Float, nullable=False)            # السعر الأساسي
-    discount = Column(Float, nullable=False, default=0, server_default="0")   # خصم (ر.س)
+    discount = Column(Float, nullable=False, default=0, server_default="0")   # خصم بعملة الفاتورة
     tax_rate = Column(Float, nullable=False, default=0, server_default="0")    # نسبة الضريبة %
     paid_amount = Column(Float, nullable=False, default=0, server_default="0") # المدفوع فعليًا
     description = Column(String, nullable=True)
@@ -540,6 +540,34 @@ class InvoiceLine(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     invoice = relationship("Invoice", back_populates="lines")
+
+
+# ===== أسعار الصرف التاريخية =====
+class FxRate(Base):
+    """سعر تحويل بين عملتين.
+
+    تاريخي باستمراع سعر الصرف لكل تاريخ: عند تغيير سعر
+    اليوم لا تتغيّر أرقام الصلاحات السابقة — فقط عند تغيير
+    العملة الأساسية يتغيّر إٌى كل الشرائط القديمة.
+
+    ``base_code`` مُخزّن لأن تتسقبل التбديل بين عملة أساسية جديدة
+    إذا تتراجع التاريخ.
+    """
+    __tablename__ = "fx_rates"
+    __table_args__ = (UniqueConstraint("base_code", "quote_code", "as_of",
+                                       name="uq_fx_rate_day"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    base_code = Column(String(3), nullable=False)       # عملة الأساسية للسعر
+    quote_code = Column(String(3), nullable=False)      # عملة العرض (الأخرى)
+    rate = Column(Float, nullable=False)                # كم واحدة من quote بعملة base
+    as_of = Column(DateTime, nullable=False)            # تاريخ السعر
+    source = Column(String, nullable=True)              # مصدر السعر (بنك/تدوين رسمي)
+    created_at = Column(DateTime, server_default=func.now())
+
+    def __repr__(self):
+        return (f"<FxRate {self.base_code}/{self.quote_code} "
+                f"@{self.rate} {self.as_of}>")
 
 
 # ===== التقارير =====
@@ -2164,3 +2192,30 @@ class BackupDestination(Base):
     last_file = Column(String, nullable=True)
     last_error = Column(String, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
+
+
+# ===== أعمدة العملة: حقن على كل جداول مالي =====
+# يُقحن في أصل مؤلفي من `currency.CURRENCY_TABLES` بلا أسطر تيريد المحتاج:
+#   * قاعدة جديدة تحمل العملة واحدة، الأنواع قابلة للتعديل.
+#   * مع الإقلاح الذي لمابارًا بالتعديل المحركي.
+# كتابة هذه تكتب إضافة أعمدة تقريباً (idempotent) لأن من عمود:
+#   - قاعدة جديدة: `Base.metadata.create_all` يُنشئ الأعمدة مع الجداول.
+#   - قاعدة قائمة: `database.PENDING_COLUMNS` يُضيف الأعمدة بألتر يوماثًاث دون فقد بيانات.
+# مثال السعر محزود: كم واحدة من العملة بعملة الأساسية (إلا \is_base يُعاد 1).
+from app.currency import BASE_CURRENCY, CURRENCY_TABLES  # noqa: E402
+
+for _model in list(Base.registry.mappers):
+    _cls = _model.class_
+    _tbl = getattr(_cls, "__tablename__", None)
+    if not _tbl or _tbl not in CURRENCY_TABLES:
+        continue
+    if getattr(_cls, "__currency_columns__", False):
+        continue
+    _cls.currency = Column(
+        String(3), nullable=False, default=BASE_CURRENCY,
+        server_default=BASE_CURRENCY,
+    )
+    _cls.exchange_rate = Column(
+        Float, nullable=False, default=1.0, server_default="1",
+    )
+    _cls.__currency_columns__ = True

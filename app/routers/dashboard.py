@@ -5,6 +5,7 @@ from typing import Optional
 from fastapi import Query
 from datetime import datetime, date
 
+from app.currency import base_expr
 from app.database import get_db
 from app.models import (
     Patient, Doctor, Appointment, Staff, Invoice, Department, Bed,
@@ -65,9 +66,16 @@ def get_stats(db = Depends(get_db), _ = Depends(get_current_user)):
         (Invoice.amount - func.coalesce(Invoice.discount, 0.0))
         * (1.0 + func.coalesce(Invoice.tax_rate, 0.0) / 100.0)
     )
-    revenue_total = db.query(func.coalesce(func.sum(total_expr), 0.0)).scalar() or 0.0
+    # الجمع بالعملة الأساسية: أعمدة العملة تُمرَّر صراحةً لأن `total_expr` تعبير
+    # محسوب (لا عمود) فلا يستطيع `base_expr` استنتاجها من صاحبه.
+    revenue_total = (
+        db.query(func.coalesce(func.sum(
+            base_expr(total_expr, Invoice.currency, Invoice.exchange_rate)), 0.0)
+        ).scalar() or 0.0
+    )
     revenue_paid = (
-        db.query(func.coalesce(func.sum(Invoice.paid_amount), 0.0)).scalar() or 0.0
+        db.query(func.coalesce(func.sum(base_expr(Invoice.paid_amount)), 0.0)).scalar()
+        or 0.0
     )
     revenue_unpaid = max(0.0, float(revenue_total) - float(revenue_paid))
 

@@ -494,7 +494,7 @@ def test_accounts_receipt_html(client, admin):
     en = client.get(f"/accounts/sales/{disp_id}/receipt", headers=admin,
                     params={"lang": "en"})
     assert en.status_code == 200 and "Payment receipt" in en.text
-    assert "SAR" in en.text
+    assert "YER" in en.text   # العملة الأساسية هي الريال اليمني
     assert client.get(f"/accounts/sales/{disp_id}/receipt", headers=admin,
                       params={"lang": "fr"}).status_code == 400
     assert client.get("/accounts/sales/999999/receipt",

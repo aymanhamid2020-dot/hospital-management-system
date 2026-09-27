@@ -62,12 +62,14 @@ def ar(text) -> str:
     return _ar(text)
 
 
-def money(value, currency: str = "ر.س") -> str:
-    """تنسيق نقدي موحّد: 1,250.00 ر.س."""
-    try:
-        return f"{float(value or 0):,.2f} {currency}"
-    except (TypeError, ValueError):
-        return f"0.00 {currency}"
+def money(value, currency: str = None, lang: str = "ar") -> str:
+    """تنسيق نقدي موحّد: 1,250.00 ر.ي.
+
+    يتولى من صندورة العملة تماماً — الرمز يتبع من
+    العملة الأساسية (الريال اليمني افتراضًا) وليس مثبّتًا.
+    """
+    from app.currency import format_money
+    return format_money(value, currency, lang=lang)
 
 
 def _env(key: str, default: str) -> str:

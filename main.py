@@ -359,6 +359,7 @@ from app.routers.prescriptions import router as prescriptions_router
 from app.routers.payroll import router as payroll_router
 from app.routers.audit import router as audit_router
 from app.routers.accounts import router as accounts_router
+from app.routers.currencies import router as currencies_router
 from app.routers.accounting import router as accounting_router
 from app.routers.inventory import router as inventory_router
 from app.routers.general_stock import router as general_stock_router
@@ -402,6 +403,7 @@ app.include_router(prescriptions_router)
 app.include_router(payroll_router)
 app.include_router(audit_router)
 app.include_router(accounts_router)
+app.include_router(currencies_router)
 app.include_router(accounting_router)
 app.include_router(inventory_router)
 app.include_router(general_stock_router)

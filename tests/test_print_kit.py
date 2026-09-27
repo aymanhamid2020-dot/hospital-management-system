@@ -23,10 +23,11 @@ def test_ar_reshapes_arabic_and_keeps_latin():
 
 
 def test_money_formats_two_decimals_with_separators():
-    assert money(0) == "0.00 \u0631.\u0633"      # العملة الافتراضية
+    assert money(0) == "0.00 ر.ي"      # العملة الافتراضية
     assert money(1234.5).startswith("1,234.50")
-    assert money(None) == "0.00 \u0631.\u0633"
-    assert money(10, "$") == "10.00 $"
+    assert money(None) == "0.00 ر.ي"
+    assert money(10, "USD", "en") == "10.00 USD"
+    assert money(10, "SAR") == "10.00 ر.س"
 
 
 def test_colors_are_three_channel_tuples():
@@ -62,7 +63,7 @@ def test_arabic_report_renders():
     d = _doc()
     d.section("توزيع الحالات")
     d.kv_grid([("المريض", "أحمد الشمسان"), ("رقم الملف", "77")])
-    d.stat_tiles([("إجمالي", "148,500.00 ر.س")])
+    d.stat_tiles([("إجمالي", "148,500.00 ر.ي")])
     d.table(["الحالة", "العدد"], [["مكتملة", "142"], ["معلقة", "26"]],
             totals=["الإجمالي", "194"])
     d.bars([("طبيب", 512), ("ممرض", 431)])

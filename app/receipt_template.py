@@ -7,6 +7,7 @@ import html as _html
 from datetime import datetime
 from typing import Iterable, Optional
 
+from app.currency import base_currency
 from app.print_kit import (
     foot_html, grid_html, head_html, ltr_html, page_html, sign_html, tiles_html,
 )
@@ -59,7 +60,7 @@ def _rows_table(headers, rows, empty_text: str) -> str:
 def sale_receipt_html(d, lang: str = "ar") -> str:
     """إيصال طباعة لعملية صرف/بيع واحدة — بنظام التصميم الموحّد."""
     en = lang == "en"
-    sar = "SAR" if en else "ر.س"
+    sar = base_currency().symbol("en" if en else "ar")
     patient = d.patient.full_name if d.patient else f"#{d.patient_id}"
     med = d.medication.name if d.medication else f"#{d.medication_id}"
     rest = round(float(d.total_price or 0) - float(d.paid_amount or 0), 2)
@@ -128,7 +129,7 @@ def patient_statement_html(patient, sales: Iterable, invoices: Iterable,
                            totals: dict, lang: str = "ar") -> str:
     """كشف حساب مريض: مبيعات الصيدلية + الفواتير + الأرصدة."""
     en = lang == "en"
-    sar = "SAR" if en else "ر.س"
+    sar = base_currency().symbol("en" if en else "ar")
     title = "Patient statement" if en else "كشف حساب مريض"
     kind = "Statement" if en else "كشف حساب"
     pm = _PM_EN if en else _PM

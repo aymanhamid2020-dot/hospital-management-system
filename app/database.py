@@ -205,6 +205,19 @@ PENDING_COLUMNS = {
     },
 }
 
+# ===== ترحيل العملات: `currency` + `exchange_rate` على كل جدول مالي =====
+# مبنية ديناميكيًا من `currency.CURRENCY_TABLES` (مصدر واحد مع حقن الأعمدة في
+# `models.py`) فلا تُكتب 37 إدخالًا يدويًا وتstay متزامنة. القيم الافتراضية
+# فول之际 درجة: `YER` وسعر 1 ⇒ كل بيانات القائمة تُقرأ كما هي بلا تحويل،
+# فلا يَئثّر الترحيل على أرقام موجودة إطلاقًا.
+from app.currency import BASE_CURRENCY, CURRENCY_TABLES  # noqa: E402
+
+for _t in sorted(CURRENCY_TABLES):
+    PENDING_COLUMNS.setdefault(_t, {}).update({
+        "currency": f"VARCHAR(3) NOT NULL DEFAULT '{BASE_CURRENCY}'",
+        "exchange_rate": "FLOAT NOT NULL DEFAULT 1",
+    })
+
 # إعادة بناء جدول الفواتير مع مفاتيح FK سليمة (ALTER TABLE لا يدعم REFERENCES في SQLite)
 _INVOICES_REBUILD_DDL = """
 CREATE TABLE _invoices_rebuild (

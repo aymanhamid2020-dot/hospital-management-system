@@ -53,6 +53,29 @@ def ar(text: str) -> str:
         return str(text)
 
 
+
+# ===== تنسيق المبالغ =====
+def amt(value, lang: str = "ar") -> str:
+    """مبلغ منسَّق بعملة النظام (الافتراضي الريال اليمني) — بدل كتابة «ر.س» يدويًا.
+
+    اسمها `amt` لا `m` لأن `m` متغيّر حلقة شائع (‏`for m in meds`)
+    فاستدعاؤها `m(...)` كان يصطدم به ويصير استدعاء كائن.
+
+    الدالة 
+
+    كل سطر في التقارير كان يحمل رمز العملة مثبَّتًا، فتقارير الفاتورة كانت
+    بالريال السعودي بينما بقية النظام بالريال اليمني. ``amt`` يجعلها تتبع
+    ``HMS_BASE_CURRENCY`` من مركز واحد.
+    """
+    from app.currency import format_money
+    return format_money(value, lang=lang)
+
+
+def cur(lang: str = "ar") -> str:
+    """رمز العملة الأساسية فقط — لعناوين الأقسام مثل «المالية (ر.ي)»."""
+    from app.currency import base_currency
+    return base_currency().symbol(lang)
+
 class ArabicPDF(FPDF):
     """PDF بخط عربي جاهز مع ترويسة وتذييل.
 
@@ -187,19 +210,19 @@ def invoice_pdf(invoice, patient_name: str) -> bytes:
     pdf.section("المبلغ")
     pdf.set_font("ar", "B", 20)
     pdf.set_text_color(*(RED if status_value == "unpaid" else PRIMARY))
-    pdf.cell(0, 16, ar(f"الإجمالي: {invoice.total:,.2f} ر.س"), align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 16, ar(f"الإجمالي: {amt(invoice.total)}"), align="C", new_x="LMARGIN", new_y="NEXT")
 
     # تفاصيل الدفع والروابط
-    pdf.kv_row("المبلغ الأساسي", f"{invoice.amount:,.2f} ر.س")
+    pdf.kv_row("المبلغ الأساسي", f"{amt(invoice.amount)}")
     if invoice.discount:
-        pdf.kv_row("الخصم", f"-{invoice.discount:,.2f} ر.س")
+        pdf.kv_row("الخصم", f"-{amt(invoice.discount)}")
     if invoice.tax_rate:
-        pdf.kv_row(f"الضريبة ({invoice.tax_rate:g}%)", f"{invoice.tax:,.2f} ر.س")
+        pdf.kv_row(f"الضريبة ({invoice.tax_rate:g}%)", f"{amt(invoice.tax)}")
     if invoice.paid_amount:
-        pdf.kv_row("المدفوع", f"{invoice.paid_amount:,.2f} ر.س")
+        pdf.kv_row("المدفوع", f"{amt(invoice.paid_amount)}")
         remaining = invoice.total - invoice.paid_amount
         if remaining > 0.005:
-            pdf.kv_row("المتبقي", f"{remaining:,.2f} ر.س")
+            pdf.kv_row("المتبقي", f"{amt(remaining)}")
     if invoice.paid_at:
         method = invoice.payment_method or "-"
         method_labels = {"cash": "نقدي", "card": "بطاقة", "insurance": "تأمين"}
@@ -275,7 +298,7 @@ def stats_report_pdf(stats: dict, period_label: str, lang: str = "ar") -> bytes:
     for k, v in (stats.get("appointments_by_status") or {}).items():
         pdf.kv_row(f"  • {status_labels.get(k, k)}", v)
 
-    pdf.section("المالية (ر.س)")
+    pdf.section("المالية ({cur()})")
     pdf.kv_row("إجمالي الفواتير", f"{stats.get('revenue_total', 0):,.2f}")
     pdf.kv_row("المحصّل", f"{stats.get('revenue_paid', 0):,.2f}")
     pdf.kv_row("المتبقي", f"{stats.get('revenue_unpaid', 0):,.2f}")
@@ -358,16 +381,16 @@ def patient_file_pdf(patient, records, appointments, invoices, attachments) -> b
     total = sum(i.total for i in invoices)
     paid = sum((i.paid_amount or 0) for i in invoices)
     pdf.section(f"الفواتير ({len(invoices)})")
-    pdf.kv_row("إجمالي المستحقات", f"{total:,.2f} ر.س")
-    pdf.kv_row("المحصّل", f"{paid:,.2f} ر.س")
-    pdf.kv_row("المتبقي", f"{max(0.0, total - paid):,.2f} ر.س")
+    pdf.kv_row("إجمالي المستحقات", f"{amt(total)}")
+    pdf.kv_row("المحصّل", f"{amt(paid)}")
+    pdf.kv_row("المتبقي", f"{amt(max(0.0, total - paid))}")
     if invoices:
         status_labels = {"paid": "مدفوعة", "unpaid": "غير مدفوعة", "partial": "جزئية"}
         for inv in invoices[:15]:
             st = status_labels.get(inv.status.value if hasattr(inv.status, "value") else str(inv.status), "-")
             pdf.set_font("ar", "", 10)
             pdf.cell(0, 7,
-                     ar(f"• فاتورة #{inv.id} — {inv.total:,.2f} ر.س — {st}"),
+                     ar(f"• فاتورة #{inv.id} — {amt(inv.total)} — {st}"),
                      align="R", new_x="LMARGIN", new_y="NEXT")
 
     # --- المرفقات ---
@@ -430,7 +453,7 @@ def lab_report_pdf(orders, label: str, lang: str = "ar") -> bytes:
                     f"({'أشعة' if ttype == 'radiology' else 'تحليل'}) — "
                     f"{status_labels.get(key, key)}")
             if o.price:
-                line += f" — {o.price:,.2f} ر.س"
+                line += f" — {amt(o.price)}"
             pdf.set_font("ar", "", 10)
             pdf.set_text_color(*DARK)
             pdf.cell(0, 7, ar(line[:115]), align="R", new_x="LMARGIN", new_y="NEXT")
@@ -463,7 +486,7 @@ def pharmacy_report_pdf(medications, dispenses, label: str, dispense_count: int 
 
     pdf.section("ملخص المخزون")
     pdf.kv_row("عدد الأدوية", len(medications))
-    pdf.kv_row("قيمة المخزون (ر.س)", f"{total_value:,.2f}")
+    pdf.kv_row("قيمة المخزون ({cur()})", f"{total_value:,.2f}")
     pdf.kv_row("أدوية تحت حد التنبيه", len(low))
     pdf.kv_row("عمليات الصرف الإجمالية", dispense_count)
 
@@ -481,7 +504,7 @@ def pharmacy_report_pdf(medications, dispenses, label: str, dispense_count: int 
         for d in dispenses[:30]:
             pat = d.patient.full_name if d.patient else "-"
             med = d.medication.name if d.medication else f"#{d.medication_id}"
-            line = f"• {pat} — {med} × {d.quantity} — {(d.unit_price or 0):,.2f} ر.س"
+            line = f"• {pat} — {med} × {d.quantity} — {amt((d.unit_price or 0))}"
             if getattr(d, "returned_at", None) is not None:
                 line += " — مرتجع"
             pdf.set_font("ar", "", 10)
@@ -517,7 +540,7 @@ def payroll_report_pdf(entries, period_label: str, lang: str = "ar") -> bytes:
     pdf.kv_row("تاريخ الإصدار", _dt.now().strftime("%Y-%m-%d %H:%M"))
     pdf.kv_row("عدد القيود", len(entries))
 
-    pdf.section("الإجماليات (ر.س)")
+    pdf.section("الإجماليات ({cur()})")
     pdf.kv_row("إجمالي الأساسي", f"{sum(e.base_salary or 0 for e in entries):,.2f}")
     pdf.kv_row("إجمالي البدلات", f"{sum(e.bonus or 0 for e in entries):,.2f}")
     pdf.kv_row("إجمالي الاستقطاعات", f"{sum(e.deduction or 0 for e in entries):,.2f}")
@@ -576,7 +599,7 @@ def _stats_report_en(stats: dict, period_label: str) -> bytes:
     for k, v in (stats.get("appointments_by_status") or {}).items():
         pdf.kv_row(f"  • {st_en.get(k, k)}", v)
 
-    pdf.section("Finance (SAR)")
+    pdf.section("Finance ({cur('en')})")
     pdf.kv_row("Total invoices", f"{stats.get('revenue_total', 0):,.2f}")
     pdf.kv_row("Collected", f"{stats.get('revenue_paid', 0):,.2f}")
     pdf.kv_row("Remaining", f"{stats.get('revenue_unpaid', 0):,.2f}")
@@ -622,7 +645,7 @@ def _lab_report_en(orders, label: str) -> bytes:
                     f"({'Radiology' if ttype == 'radiology' else 'Lab test'}) — "
                     f"{st_en.get(key, key)}")
             if o.price:
-                line += f" — {o.price:,.2f} SAR"
+                line += f" — {amt(o.price, 'en')}"
             pdf.set_font("ar", "", 10)
             pdf.set_text_color(*DARK)
             pdf.cell(0, 7, line[:115], align="L", new_x="LMARGIN", new_y="NEXT")
@@ -652,7 +675,7 @@ def _pharmacy_report_en(medications, dispenses, label: str, dispense_count: int,
 
     pdf.section("Inventory summary")
     pdf.kv_row("Medications count", len(medications))
-    pdf.kv_row("Inventory value (SAR)", f"{total_value:,.2f}")
+    pdf.kv_row("Inventory value ({cur('en')})", f"{total_value:,.2f}")
     pdf.kv_row("Low-stock medications", len(low))
     pdf.kv_row("Total dispenses", dispense_count)
 
@@ -670,7 +693,7 @@ def _pharmacy_report_en(medications, dispenses, label: str, dispense_count: int,
         for d in dispenses[:30]:
             pat = d.patient.full_name if d.patient else "-"
             med = d.medication.name if d.medication else f"#{d.medication_id}"
-            line = f"• {pat} — {med} × {d.quantity} — {(d.unit_price or 0):,.2f} SAR"
+            line = f"• {pat} — {med} × {d.quantity} — {amt((d.unit_price or 0), 'en')}"
             if getattr(d, "returned_at", None) is not None:
                 line += " — returned"
             pdf.set_font("ar", "", 10)
@@ -704,7 +727,7 @@ def _payroll_report_en(entries, period_label: str) -> bytes:
     pdf.kv_row("Issued at", _dt.now().strftime("%Y-%m-%d %H:%M"))
     pdf.kv_row("Entries count", len(entries))
 
-    pdf.section("Totals (SAR)")
+    pdf.section("Totals ({cur('en')})")
     pdf.kv_row("Total base salary", f"{sum(e.base_salary or 0 for e in entries):,.2f}")
     pdf.kv_row("Total allowances", f"{sum(e.bonus or 0 for e in entries):,.2f}")
     pdf.kv_row("Total deductions", f"{sum(e.deduction or 0 for e in entries):,.2f}")
@@ -751,19 +774,19 @@ def pharmacy_stats_pdf(stats, lang: str = "ar") -> bytes:
     pdf.section("ملخص الفترة")
     pdf.kv_row("عمليات الصرف", stats.dispense_count)
     pdf.kv_row("الوحدات المصروفة", stats.units)
-    pdf.kv_row("الإيراد (ر.س)", f"{stats.revenue:,.2f}")
-    pdf.kv_row("المحصّل (ر.س)", f"{stats.paid:,.2f}")
-    pdf.kv_row("المتبقي (ر.س)", f"{stats.outstanding:,.2f}")
+    pdf.kv_row("الإيراد ({cur()})", f"{stats.revenue:,.2f}")
+    pdf.kv_row("المحصّل ({cur()})", f"{stats.paid:,.2f}")
+    pdf.kv_row("المتبقي ({cur()})", f"{stats.outstanding:,.2f}")
 
     pdf.section("المخزون الحالي")
-    pdf.kv_row("قيمة المخزون (ر.س)", f"{stats.inventory_value:,.2f}")
+    pdf.kv_row("قيمة المخزون ({cur()})", f"{stats.inventory_value:,.2f}")
     pdf.kv_row("منخفض / نافد", f"{stats.low} / {stats.out}")
     pdf.kv_row("منتهٍ / قارب الانتهاء", f"{stats.expired} / {stats.expiring}")
 
     if stats.top_medications:
         pdf.section("أكثر الأدوية صرفًا")
         for t in stats.top_medications[:10]:
-            line = f"• {t.name} ({t.code}) — {t.units} وحدة — {t.revenue:,.2f} ر.س"
+            line = f"• {t.name} ({t.code}) — {t.units} وحدة — {amt(t.revenue)}"
             pdf.set_font("ar", "", 10)
             pdf.set_text_color(*DARK)
             pdf.cell(0, 7, ar(line[:110]), align="R", new_x="LMARGIN", new_y="NEXT")
@@ -771,7 +794,7 @@ def pharmacy_stats_pdf(stats, lang: str = "ar") -> bytes:
     if stats.daily:
         pdf.section("التجميع اليومي (آخر 14 يومًا)")
         for p in stats.daily[-14:]:
-            line = f"• {p.date} — {p.units} وحدة — {p.revenue:,.2f} ر.س"
+            line = f"• {p.date} — {p.units} وحدة — {amt(p.revenue)}"
             pdf.set_font("ar", "", 10)
             pdf.set_text_color(*DARK)
             pdf.cell(0, 7, ar(line[:110]), align="R", new_x="LMARGIN", new_y="NEXT")
@@ -879,19 +902,19 @@ def _pharmacy_stats_en(stats) -> bytes:
     pdf.section("Period summary")
     pdf.kv_row("Dispense operations", stats.dispense_count)
     pdf.kv_row("Units dispensed", stats.units)
-    pdf.kv_row("Revenue (SAR)", f"{stats.revenue:,.2f}")
-    pdf.kv_row("Collected (SAR)", f"{stats.paid:,.2f}")
-    pdf.kv_row("Outstanding (SAR)", f"{stats.outstanding:,.2f}")
+    pdf.kv_row("Revenue ({cur('en')})", f"{stats.revenue:,.2f}")
+    pdf.kv_row("Collected ({cur('en')})", f"{stats.paid:,.2f}")
+    pdf.kv_row("Outstanding ({cur('en')})", f"{stats.outstanding:,.2f}")
 
     pdf.section("Current inventory")
-    pdf.kv_row("Inventory value (SAR)", f"{stats.inventory_value:,.2f}")
+    pdf.kv_row("Inventory value ({cur('en')})", f"{stats.inventory_value:,.2f}")
     pdf.kv_row("Low / out of stock", f"{stats.low} / {stats.out}")
     pdf.kv_row("Expired / expiring", f"{stats.expired} / {stats.expiring}")
 
     if stats.top_medications:
         pdf.section("Top dispensed medications")
         for t in stats.top_medications[:10]:
-            line = f"• {t.name} ({t.code}) — {t.units} units — {t.revenue:,.2f} SAR"
+            line = f"• {t.name} ({t.code}) — {t.units} units — {amt(t.revenue, 'en')}"
             pdf.set_font("ar", "", 10)
             pdf.set_text_color(*DARK)
             pdf.cell(0, 7, line[:110], align="L", new_x="LMARGIN", new_y="NEXT")
@@ -899,7 +922,7 @@ def _pharmacy_stats_en(stats) -> bytes:
     if stats.daily:
         pdf.section("Daily totals (last 14 days)")
         for p in stats.daily[-14:]:
-            line = f"• {p.date} — {p.units} units — {p.revenue:,.2f} SAR"
+            line = f"• {p.date} — {p.units} units — {amt(p.revenue, 'en')}"
             pdf.set_font("ar", "", 10)
             pdf.set_text_color(*DARK)
             pdf.cell(0, 7, line[:110], align="L", new_x="LMARGIN", new_y="NEXT")
@@ -1004,9 +1027,9 @@ def accounts_sales_pdf(entries, period_label: str, lang: str = "ar") -> bytes:
     pdf = ArabicPDF(period_label, lang=lang)
     pdf.section("الملخص")
     pdf.kv_row("عدد العمليات", str(len(entries)))
-    pdf.kv_row("الإجمالي", f"{total_sales:,.2f} ر.س")
-    pdf.kv_row("المدفوع", f"{total_paid:,.2f} ر.س")
-    pdf.kv_row("المتبقي", f"{outstanding:,.2f} ر.س")
+    pdf.kv_row("الإجمالي", f"{amt(total_sales)}")
+    pdf.kv_row("المدفوع", f"{amt(total_paid)}")
+    pdf.kv_row("المتبقي", f"{amt(outstanding)}")
     pdf.section(f"المبيعات ({len(entries)})")
     if entries:
         st_labels = {"UNPAID": "غير مدفوع", "PARTIAL": "مدفوع جزئيًا", "PAID": "مدفوع"}
@@ -1042,7 +1065,7 @@ def _accounts_sales_en(entries, period_label: str) -> bytes:
     pdf.section(f"Period: {period_label}")
     pdf.kv_row("Issued at", _dt.now().strftime("%Y-%m-%d %H:%M"))
 
-    pdf.section("Summary (SAR)")
+    pdf.section("Summary ({cur('en')})")
     pdf.kv_row("Number of sales", str(len(entries)))
     pdf.kv_row("Total", f"{total_sales:,.2f}")
     pdf.kv_row("Paid", f"{total_paid:,.2f}")
@@ -1087,7 +1110,7 @@ def patient_statement_pdf(patient, sales, invoices, totals: dict,
     pdf.kv_row("الجوال", patient.phone or "-")
     pdf.kv_row("تاريخ الإصدار", _dt.now().strftime("%Y-%m-%d %H:%M"))
 
-    pdf.section("الأرصدة (ر.س)")
+    pdf.section("الأرصدة ({cur()})")
     pdf.kv_row("مبيعات الصيدلية", f"{totals['sales_total']:,.2f}")
     pdf.kv_row("مدفوع من المبيعات", f"{totals['sales_paid']:,.2f}")
     pdf.kv_row("إجمالي الفواتير", f"{totals['inv_total']:,.2f}")
@@ -1152,7 +1175,7 @@ def _patient_statement_en(patient, sales, invoices, totals: dict) -> bytes:
     pdf.kv_row("Phone", patient.phone or "-")
     pdf.kv_row("Issued at", _dt.now().strftime("%Y-%m-%d %H:%M"))
 
-    pdf.section("Balances (SAR)")
+    pdf.section("Balances ({cur('en')})")
     pdf.kv_row("Pharmacy sales", f"{totals['sales_total']:,.2f}")
     pdf.kv_row("Sales paid", f"{totals['sales_paid']:,.2f}")
     pdf.kv_row("Invoices total", f"{totals['inv_total']:,.2f}")
@@ -1327,7 +1350,7 @@ def labels_pdf(meds) -> bytes:
         # السعر وتاريخ الانتهاء
         pdf.set_font("ar", "", 7)
         pdf.set_text_color(*GRAY)
-        meta = f"{(m.price or 0):,.2f} ر.س"
+        meta = f"{amt((m.price or 0))}"
         if m.expiry_date:
             meta += f" — ينتهي {m.expiry_date:%Y-%m-%d}"
         pdf.set_xy(x + 2, y + 27.5)
@@ -1460,7 +1483,7 @@ def lab_result_pdf(order, lang: str = "ar") -> bytes:
     if order.priority == "stat":
         pdf.kv_row("الأولوية", "طارئة")
     pdf.kv_row("الحالة", _LAB_STATUS_AR.get(key, key))
-    pdf.kv_row("السعر", f"{(order.price or 0):,.2f} ر.س")
+    pdf.kv_row("السعر", f"{amt((order.price or 0))}")
 
     pat = order.patient
     pdf.section("بيانات المريض")

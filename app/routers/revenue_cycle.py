@@ -22,6 +22,7 @@ from app.models import (
 )
 from app.routers.accounting import _ensure_chart, _money, _new_entry
 from app.routers.stock_ops import _next_doc_no, _warehouse
+from app.currency import base_expr
 from app.schemas import (
     ClaimBatchBuildIn, ClaimBatchItemOut, ClaimBatchOut, ClaimBatchSubmitIn,
     CreditNoteIn, CreditNoteOut, DepositApplyIn, DepositIn, DepositOut,
@@ -499,12 +500,12 @@ def close_shift(payload: ShiftCloseIn, db: Session = Depends(get_db),
         raise HTTPException(404, "لا توجد وردية مفتوحة")
     # نقد محصّل خلال الوردية (فواتير + صرف أدوية) + الودائع النقدية
     since = row.opened_at
-    inv_cash = (db.query(func.coalesce(func.sum(Invoice.paid_amount), 0))
+    inv_cash = (db.query(func.coalesce(func.sum(base_expr(Invoice.paid_amount)), 0))
                 .filter(Invoice.created_at >= since, Invoice.payment_method == "cash").scalar() or 0)
-    med_cash = (db.query(func.coalesce(func.sum(Dispense.paid_amount), 0))
+    med_cash = (db.query(func.coalesce(func.sum(base_expr(Dispense.paid_amount)), 0))
                 .filter(Dispense.created_at >= since, Dispense.payment_method == "cash",
                         Dispense.returned_at.is_(None)).scalar() or 0)
-    dep_cash = (db.query(func.coalesce(func.sum(PatientDeposit.amount), 0))
+    dep_cash = (db.query(func.coalesce(func.sum(base_expr(PatientDeposit.amount)), 0))
                 .filter(PatientDeposit.received_at >= since,
                         PatientDeposit.method == "cash").scalar() or 0)
     count = (db.query(func.count(Invoice.id))

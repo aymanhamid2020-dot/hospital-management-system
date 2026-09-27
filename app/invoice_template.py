@@ -45,11 +45,11 @@ INVOICE_HTML_TEMPLATE = """<!DOCTYPE html>
       <tr><th>البيان</th><th>المبلغ</th></tr>
     </thead>
     <tbody>
-      <tr><td>{description}</td><td>{amount} ر.س</td></tr>
+      <tr><td>{description}</td><td>{amount} {cur}</td></tr>
 {extra_rows}
     </tbody>
     <tfoot>
-      <tr class="total"><td>الإجمالي</td><td class="total">{total} ر.س</td></tr>
+      <tr class="total"><td>الإجمالي</td><td class="total">{total} {cur}</td></tr>
 {footer_rows}
     </tfoot>
   </table>
@@ -69,26 +69,34 @@ STATUS_LABELS = {
 
 
 def render_invoice_html(invoice, patient_name: str) -> str:
-    """توليد HTML للفاتورة من كائن Invoice واسم المريض."""
+    """توليد HTML للفاتورة من كائن Invoice واسم المريض.
+
+    رمز العملة يُؤخذ من الفاتورة نفسها (`invoice.currency`) فتُطبع فاتورة
+    الدولار بالدولار، ويتراجع للعملة الأساسية إن كان الحقل فارغًا. تُعرَّف
+    ``cur`` محليًّا لأنها مستعملة في الـ f-strings وفي القالب معًا.
+    """
     status_value = invoice.status.value if hasattr(invoice.status, "value") else str(invoice.status)
+    cur = get_currency(getattr(invoice, "currency", None)).symbol_ar
     extra_rows = []
     footer_rows = []
     if invoice.discount:
         extra_rows.append(
-            f'      <tr><td>الخصم</td><td>-{invoice.discount:,.2f} ر.س</td></tr>')
+            f'      <tr><td>الخصم</td><td>-{invoice.discount:,.2f} {cur}</td></tr>')
     if invoice.tax_rate:
         extra_rows.append(
             f'      <tr><td>الضريبة ({invoice.tax_rate:g}%)</td>'
-            f'<td>{invoice.tax:,.2f} ر.س</td></tr>')
+            f'<td>{invoice.tax:,.2f} {cur}</td></tr>')
     if invoice.paid_amount:
         footer_rows.append(
-            f'      <tr><td>المدفوع</td><td>{invoice.paid_amount:,.2f} ر.س</td></tr>')
+            f'      <tr><td>المدفوع</td><td>{invoice.paid_amount:,.2f} {cur}</td></tr>')
         remaining = invoice.total - invoice.paid_amount
         if remaining > 0.005:
             footer_rows.append(
-                f'      <tr><td>المتبقي</td><td>{remaining:,.2f} ر.س</td></tr>')
+                f'      <tr><td>المتبقي</td><td>{remaining:,.2f} {cur}</td></tr>')
     return INVOICE_HTML_TEMPLATE.format(
         id=invoice.id,
+        # رمز العملة من سجل العملات (الريال اليمني افتراضيًا) لا قيمة مكتوبة يدويًا
+        cur=cur,
         created_at=invoice.created_at.strftime("%Y-%m-%d %H:%M") if invoice.created_at else "",
         status_class=status_value,
         status_label=STATUS_LABELS.get(status_value, status_value),
@@ -100,3 +108,4 @@ def render_invoice_html(invoice, patient_name: str) -> str:
         extra_rows="\n".join(extra_rows),
         footer_rows="\n".join(footer_rows),
     )
+from app.currency import base_currency, get_currency

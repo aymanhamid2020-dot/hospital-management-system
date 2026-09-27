@@ -171,6 +171,20 @@ async def create_invoice(invoice: InvoiceCreate, db = Depends(get_db),
             detail="لا يوجد مريض بالمعرف المحدد"
         )
     
+    # العملة تُطبَّع وتُتحقَّق قبل الحفظ: رمز مجهول يُرفض بدل أن يُخزَّن صامتًا
+    # ويفسد كل التقارير لاحقًا.
+    from app.currency import CURRENCIES, normalize_code
+    _cur = normalize_code(invoice.currency)
+    if _cur not in CURRENCIES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"عملة غير مدعومة: {invoice.currency}")
+    _rate = float(invoice.exchange_rate or 1.0)
+    if _cur != normalize_code(None) and _rate <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="سعر الصرف يجب أن يكون أكبر من صفر للعملة الأجنبية")
+
     db_invoice = Invoice(
         patient_id=invoice.patient_id,
         appointment_id=invoice.appointment_id,
@@ -183,6 +197,8 @@ async def create_invoice(invoice: InvoiceCreate, db = Depends(get_db),
         status=invoice.status,
         insurer=invoice.insurer,
         policy_number=invoice.policy_number,
+        currency=_cur,
+        exchange_rate=_rate,
     )
     # البنود أولًا: المبلغ يُشتقّ منها فلا يتخلّف الإجمالي عن سطر واحد
     _attach_lines(db, db_invoice, invoice.lines)

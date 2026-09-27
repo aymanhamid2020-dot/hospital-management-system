@@ -35,6 +35,7 @@ from app.routers.stock_ops import (
     _default_warehouse, _item, _next_doc_no, _post_doc, _seed_legacy_balance,
     _warehouse,
 )
+from app.currency import base_expr
 from app.schemas import (
     QuickCatalogItem, QuickOpLine, QuickOpsOverview, QuickPurchaseCreate,
     QuickPurchaseOut, QuickRecentOp, QuickSaleCreate, QuickSaleLineOut, QuickSaleOut,
@@ -184,10 +185,10 @@ def overview(db: Session = Depends(get_db), _: User = Depends(get_current_user))
     wh = _default_warehouse(db)
     today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
-    inv_sum, inv_count = (db.query(func.coalesce(func.sum(Invoice.amount - Invoice.discount), 0),
+    inv_sum, inv_count = (db.query(func.coalesce(func.sum(base_expr(Invoice.amount - Invoice.discount)), 0),
                                    func.count(Invoice.id))
                           .filter(Invoice.created_at >= today).first())
-    med_sum, med_count = (db.query(func.coalesce(func.sum(Dispense.total_price), 0),
+    med_sum, med_count = (db.query(func.coalesce(func.sum(base_expr(Dispense.total_price)), 0),
                                    func.count(Dispense.id))
                           .filter(Dispense.created_at >= today,
                                   Dispense.returned_at.is_(None)).first())

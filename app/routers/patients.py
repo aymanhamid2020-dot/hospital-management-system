@@ -18,6 +18,7 @@ from app.schemas import (
     InsuranceClaimCreate, InsuranceClaimUpdate, InsuranceClaimInDB,
 )
 from app.auth import get_current_user, require_admin, get_user_role
+from app.currency import base_expr
 
 router = APIRouter(prefix="/patients", tags=["Patients"])
 
@@ -151,7 +152,7 @@ def list_patients(
             outstanding[inv.patient_id] = outstanding.get(inv.patient_id, 0.0) + rest
 
     dsp = (db.query(Dispense.patient_id,
-                    func.sum(Dispense.total_price - func.coalesce(Dispense.paid_amount, 0)))
+                    func.sum(base_expr(Dispense.total_price - func.coalesce(Dispense.paid_amount, 0))))
            .filter(Dispense.patient_id.in_(ids), Dispense.returned_at.is_(None))
            .group_by(Dispense.patient_id).all())
     for pid, val in dsp:

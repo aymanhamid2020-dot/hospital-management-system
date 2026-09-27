@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func as _func
 
+from app.currency import base_expr as _base_expr
 from app.database import get_db
 from app.models import Dispense, Patient, User
 from app.auth import get_current_user
@@ -77,16 +78,17 @@ async def sales_summary(
     q = _active(db.query(Dispense))
     q, label = _apply_period(q, period, from_date, to_date)
 
+    # المجاميع بالعملة الأساسية (عبر السعر)
     agg = q.with_entities(
-        _func.sum(Dispense.total_price),
-        _func.sum(Dispense.paid_amount),
+        _func.sum(_base_expr(Dispense.total_price)),
+        _func.sum(_base_expr(Dispense.paid_amount)),
         _func.count(Dispense.id),
     ).one()
     total_sales = float(agg[0] or 0)
     total_paid = float(agg[1] or 0)
     count = agg[2] or 0
     pm_rows = q.with_entities(
-        Dispense.payment_method, _func.sum(Dispense.total_price)
+        Dispense.payment_method, _func.sum(_base_expr(Dispense.total_price))
     ).group_by(Dispense.payment_method).all()
     by_payment_method = {m: float(v or 0) for m, v in pm_rows}
     return SaleSummary(
@@ -119,8 +121,8 @@ async def revenue_curve(
     rows = (
         q.with_entities(
             bucket.label("bucket"),
-            _func.sum(Dispense.total_price),
-            _func.sum(Dispense.paid_amount),
+            _func.sum(_base_expr(Dispense.total_price)),
+            _func.sum(_base_expr(Dispense.paid_amount)),
             _func.count(Dispense.id),
         )
         .group_by(bucket)
@@ -151,8 +153,8 @@ async def debtors(
         q.with_entities(
             Dispense.patient_id,
             _func.count(Dispense.id),
-            _func.sum(Dispense.total_price),
-            _func.sum(Dispense.paid_amount),
+            _func.sum(_base_expr(Dispense.total_price)),
+            _func.sum(_base_expr(Dispense.paid_amount)),
         )
         .group_by(Dispense.patient_id)
         .all()

@@ -29,6 +29,7 @@ from app.schemas import (
     DoctorsStats,
 )
 from app.auth import get_current_user, require_admin
+from app.currency import base_expr
 
 router = APIRouter(prefix="/doctors", tags=["Doctors"])
 
@@ -262,7 +263,7 @@ def _ledger_for(db: Session, doctor: Doctor, period: str, start: datetime,
             "amount": amount,
         })
 
-    paid = db.query(func.sum(DoctorPayout.amount)).filter(
+    paid = db.query(func.sum(base_expr(DoctorPayout.amount))).filter(
         DoctorPayout.doctor_id == doctor.id,
         DoctorPayout.period == period,
     ).scalar() or 0.0

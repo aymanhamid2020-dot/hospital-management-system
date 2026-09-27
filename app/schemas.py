@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator, mo
 from typing import Optional, List
 from datetime import datetime, time
 
+from app.currency import BASE_CURRENCY
 from app.models import (
     Gender, UserRole, AppointmentStatus, InvoiceStatus, BedStatus,
     TestType, LabStatus, PayrollStatus, ClaimStatus,
@@ -21,6 +22,21 @@ class UserBase(BaseModel):
     full_name: str = Field(..., description="الاسم الكامل")
     role: str = Field("receptionist", max_length=40,
                   description="مفتاح الدور من جدول الأدوار (RBAC)")
+
+
+
+class CurrencyFields(BaseModel):
+    """حقل العملة والسعر — يُوضع في كل المخاشر المالية دون تكرارها.
+
+    ``exchange_rate`` يُحفظ عند الإقلاس لأن التقارير التاريخي
+    لا يتأثّر بتغيير سعر الصرف لليوم.
+    """
+    currency: str = Field(
+        BASE_CURRENCY, min_length=3, max_length=3,
+        description="رمز العملة (ISO 4217) — مثال الفاتورة الأساسية")
+    exchange_rate: float = Field(
+        1.0, gt=0,
+        description="كم واحدة من العملة بعملة الأساسية (مثال 1 USD = 250 YER ⇒ 250)")
 
 
 class UserCreate(UserBase):
@@ -883,12 +899,12 @@ class InvoiceLineInDB(InvoiceLineBase):
     model_config = ConfigDict(from_attributes=True)
 
 
-class InvoiceBase(BaseModel):
+class InvoiceBase(CurrencyFields):
     patient_id: int = Field(..., description="معرّف المريض")
     appointment_id: Optional[int] = Field(None, description="الموعد المرتبط (اختياري)")
     record_id: Optional[int] = Field(None, description="السجل الطبي المرتبط (اختياري)")
     amount: float = Field(..., gt=0, description="المبلغ الأساسي")
-    discount: float = Field(0, ge=0, description="الخصم (ر.س)")
+    discount: float = Field(0, ge=0, description="الخصم بعملة الفاتورة")
     tax_rate: float = Field(0, ge=0, le=100, description="نسبة الضريبة %")
     description: str = Field(..., description="وصف الفاتورة")
     status: InvoiceStatus = Field(InvoiceStatus.UNPAID, description="حالة الفاتورة")
@@ -1507,7 +1523,7 @@ class SlowMovingRow(BaseModel):
     is_slow: bool = False
 
 
-class DispenseCreate(BaseModel):
+class DispenseCreate(CurrencyFields):
     medication_id: int = Field(..., description="معرّف الدواء")
     patient_id: int = Field(..., description="معرّف المريض")
     quantity: int = Field(1, gt=0, description="الكمية المصروفة")
@@ -1519,7 +1535,7 @@ class DispenseCreate(BaseModel):
     instructions: Optional[str] = Field(None, description="تعليمات إضافية")
 
 
-class DispenseInDB(ORMModel):
+class DispenseInDB(CurrencyFields, ORMModel):
     id: int
     medication_id: int
     patient_id: int
@@ -1786,7 +1802,7 @@ class AdjustIn(BaseModel):
 
 
 # ===== الرواتب =====
-class PayrollBase(BaseModel):
+class PayrollBase(CurrencyFields):
     staff_id: int = Field(..., description="معرّف الموظف")
     period: str = Field(..., pattern=r"^\d{4}-\d{2}$", description="الشهر YYYY-MM")
     base_salary: float = Field(0, ge=0, description="الراتب الأساسي")
@@ -1799,7 +1815,7 @@ class PayrollCreate(PayrollBase):
     pass
 
 
-class PayrollUpdate(BaseModel):
+class PayrollUpdate(CurrencyFields):
     base_salary: Optional[float] = Field(None, ge=0)
     bonus: Optional[float] = Field(None, ge=0)
     deduction: Optional[float] = Field(None, ge=0)
@@ -1904,7 +1920,7 @@ class VendorOut(ORMModel):
     created_at: datetime
 
 
-class VendorBillCreate(BaseModel):
+class VendorBillCreate(CurrencyFields):
     bill_no: str = Field(..., min_length=2, max_length=40)
     vendor_id: int
     bill_date: datetime
@@ -1929,7 +1945,7 @@ class VendorBillOut(BaseModel):
     created_at: datetime
 
 
-class VendorPaymentCreate(BaseModel):
+class VendorPaymentCreate(CurrencyFields):
     amount: float = Field(..., gt=0)
     paid_at: datetime
     method: Literal["cash", "card", "bank"] = "bank"
@@ -2249,7 +2265,7 @@ class QuotationLineIn(BaseModel):
     unit_price: float = Field(0, ge=0)
 
 
-class QuotationIn(BaseModel):
+class QuotationIn(CurrencyFields):
     patient_id: int = Field(..., gt=0)
     package_id: Optional[int] = Field(None, gt=0)
     title: str = Field(..., min_length=2, max_length=200)
@@ -2270,7 +2286,7 @@ class QuotationLineOut(BaseModel):
     line_total: float
 
 
-class QuotationOut(BaseModel):
+class QuotationOut(CurrencyFields):
     id: int
     quote_no: str
     patient_id: int
@@ -2296,7 +2312,7 @@ class QuotationStatusIn(BaseModel):
 
 
 # ===== 2) السندات والودائع وإغلاق الصندوق =====
-class DepositIn(BaseModel):
+class DepositIn(CurrencyFields):
     patient_id: int = Field(..., gt=0)
     invoice_id: Optional[int] = Field(None, gt=0)
     admission_id: Optional[int] = Field(None, gt=0)
@@ -2312,7 +2328,7 @@ class DepositApplyIn(BaseModel):
     amount: Optional[float] = Field(None, gt=0, description="الخصم — كامل الرصيد عند تركه فارغًا")
 
 
-class DepositOut(ORMModel):
+class DepositOut(CurrencyFields, ORMModel):
     id: int
     patient_id: int
     patient_name: Optional[str] = None
