@@ -94,9 +94,9 @@ def test_create_backup_trims_manual_pile(bdir, client, admin, monkeypatch):
 
 
 def test_created_backup_lands_in_isolated_dir(bdir, client, admin):
-    """عزل BACKUP_DIR يعمل: لا يُنشأ شيء في backups/ الحقيقية."""
-    repo_dir = os.path.join(os.path.dirname(os.path.dirname(
-        os.path.abspath(backup_mod.__file__))), "backups")
+    """عزل BACKUP_DIR يعمل: لا يُنشأ شيء في مجلد النسخ الحقيقي."""
+    from app import backup_sync
+    repo_dir = backup_sync.default_backup_dir()
     before = set(os.listdir(repo_dir)) if os.path.isdir(repo_dir) else set()
     r = client.post("/backup", headers=admin)
     assert r.status_code == 200

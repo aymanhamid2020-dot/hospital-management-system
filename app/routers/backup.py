@@ -1,17 +1,25 @@
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
+from app import backup_sync
 from app.config import DATABASE_URL
-from app.models import User
+from app.database import get_db
+from app.models import (BACKUP_FREQUENCIES, BACKUP_KINDS, BackupDestination,
+                        BackupSchedule, User)
 from app.auth import require_admin
 from app.tasks import prune_backups
 
 router = APIRouter(prefix="/backup", tags=["Backup"])
 
-BACKUP_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backups")
+# مصدر واحد للمجلد — يُوحَّد مع tasks.create_auto_backup (كانا يختلفان بمستوى
+# فتذهب النسخ اليدوية والمجدولة إلى مجلدَين ولا تعرض الواجهة إلا أحدهما)
+BACKUP_DIR = backup_sync.default_backup_dir()
 
 
 def _db_file_path() -> str:
@@ -22,8 +30,9 @@ def _db_file_path() -> str:
 
 
 @router.post("", summary="إنشاء نسخة احتياطية")
-async def create_backup(_: User = Depends(require_admin)):
-    """نسخ ملف قاعدة البيانات إلى مجلد backups (للمدير فقط)"""
+async def create_backup(_: User = Depends(require_admin),
+                        db: Session = Depends(get_db)):
+    """نسخ ملف قاعدة البيانات إلى مجلد backups ودفعه لكل وجهة (للمدير فقط)"""
     src = _db_file_path()
     if not os.path.exists(src):
         raise HTTPException(status_code=404, detail="ملف قاعدة البيانات غير موجود")
@@ -47,12 +56,16 @@ async def create_backup(_: User = Depends(require_admin)):
     size_kb = round(os.path.getsize(dest) / 1024, 2)
     # تقليم فوري حسب السياسة — يمنع تكدّس hospital_* بتكرار الفحوصات
     pruned = prune_backups(BACKUP_DIR)
+    # دفع فوري إلى كل وجهة مفعّلة (مجلد محلي آخر / سحابة) — لا وجهات ⇒ لا شيء
+    import asyncio
+    push = await asyncio.to_thread(backup_sync.push_to_destinations, db, dest)
     return {
         "message": "تم إنشاء النسخة الاحتياطية بنجاح",
         "file": os.path.basename(dest),
         "size_kb": size_kb,
         "path": dest,
         "pruned": len(pruned),
+        "push": push,
     }
 
 
@@ -187,6 +200,224 @@ async def prune_now(
     eff = keep if keep is not None else int(os.getenv("BACKUP_RETENTION", "7"))
     return {"message": f"حُذف {len(deleted)} نسخة زائدة (الاحتفاظ بآخر {eff} لكل نوع)",
             "deleted": deleted, "files_remaining": remaining, "retention": eff}
+
+
+def _push_to_destinations(db: Session, filepath: str) -> List[dict]:
+    """يرفع نسخة إلى كل وجهة مفعّلة — دفعة واحدة عبر backup_sync المشترك."""
+    return backup_sync.push_to_destinations(db, filepath)
+
+
+# ------------------------------------------------- حذف نسخة مفردة
+@router.delete("/{filename}", summary="حذف نسخة احتياطية محددة")
+async def delete_backup(filename: str, _: User = Depends(require_admin)):
+    """حذف نسخة واحدة باسمها (للمدير فقط) — التمييز عن التقليم الدوري."""
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="اسم ملف غير صالح")
+    path = os.path.join(BACKUP_DIR, filename)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="النسخة الاحتياطية غير موجودة")
+    if not filename.endswith(".db"):
+        raise HTTPException(status_code=400, detail="يمكن حذف ملفات النسخ فقط (.db)")
+    os.remove(path)
+    return {"message": f"حُذفت النسخة {filename}", "file": filename}
+
+
+# ------------------------------------------------- جدولة النسخ
+class ScheduleIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    frequency: str = Field(default="daily")
+    enabled: bool = True
+    hour: int = Field(default=3, ge=0, le=23)
+    minute: int = Field(default=0, ge=0, le=59)
+    weekday: int = Field(default=0, ge=0, le=6)
+    monthday: int = Field(default=1, ge=1, le=31)
+    year_month: int = Field(default=1, ge=1, le=12)
+    year_day: int = Field(default=1, ge=1, le=31)
+    keep: int = Field(default=12, ge=1, le=1000)
+
+
+def _schedule_out(row: BackupSchedule) -> dict:
+    from app.tasks import compute_next_run
+    return {"id": row.id, "name": row.name, "frequency": row.frequency,
+            "frequency_ar": {"daily": "يومية", "weekly": "أسبوعية",
+                             "monthly": "شهرية", "yearly": "سنوية"}.get(
+                row.frequency, row.frequency),
+            "enabled": bool(row.enabled), "hour": row.hour, "minute": row.minute,
+            "weekday": row.weekday, "monthday": row.monthday,
+            "year_month": row.year_month, "year_day": row.year_day,
+            "keep": row.keep, "last_run_at": row.last_run_at,
+            "last_file": row.last_file, "last_result": row.last_result,
+            "next_run_at": compute_next_run(row)}
+
+
+def _validated(payload: ScheduleIn) -> ScheduleIn:
+    if payload.frequency not in BACKUP_FREQUENCIES:
+        raise HTTPException(status_code=400,
+                            detail="frequency يجب أن تكون: يومية/أسبوعية/شهرية/سنوية")
+    return payload
+
+
+@router.get("/schedules", summary="قائمة جداول النسخ")
+async def list_schedules(_: User = Depends(require_admin),
+                         db: Session = Depends(get_db)):
+    rows = db.query(BackupSchedule).order_by(BackupSchedule.id).all()
+    return [_schedule_out(r) for r in rows]
+
+
+@router.post("/schedules", summary="إنشاء جدول نسخ")
+async def create_schedule(payload: ScheduleIn, _: User = Depends(require_admin),
+                          db: Session = Depends(get_db)):
+    from app.tasks import compute_next_run
+    p = _validated(payload)
+    row = BackupSchedule(**p.model_dump())
+    db.add(row)
+    db.flush()
+    row.next_run_at = compute_next_run(row)
+    db.commit()
+    return _schedule_out(row)
+
+
+@router.put("/schedules/{sid}", summary="تعديل جدول نسخ")
+async def update_schedule(sid: int, payload: ScheduleIn,
+                          _: User = Depends(require_admin),
+                          db: Session = Depends(get_db)):
+    from app.tasks import compute_next_run
+    p = _validated(payload)
+    row = db.get(BackupSchedule, sid)
+    if row is None:
+        raise HTTPException(status_code=404, detail="الجدول غير موجود")
+    for k, v in p.model_dump().items():
+        setattr(row, k, v)
+    row.next_run_at = compute_next_run(row)
+    db.commit()
+    return _schedule_out(row)
+
+
+@router.delete("/schedules/{sid}", summary="حذف جدول نسخ")
+async def delete_schedule(sid: int, _: User = Depends(require_admin),
+                          db: Session = Depends(get_db)):
+    row = db.get(BackupSchedule, sid)
+    if row is None:
+        raise HTTPException(status_code=404, detail="الجدول غير موجود")
+    db.delete(row)
+    db.commit()
+    return {"message": "حُذف الجدول"}
+
+
+@router.post("/schedules/{sid}/run", summary="تشغيل جدول نسخ الآن")
+async def run_schedule(sid: int, _: User = Depends(require_admin),
+                       db: Session = Depends(get_db)):
+    from app.tasks import run_schedule_now
+    row = db.get(BackupSchedule, sid)
+    if row is None:
+        raise HTTPException(status_code=404, detail="الجدول غير موجود")
+    result = run_schedule_now(row, db)
+    db.commit()
+    return {"message": "تم تشغيل الجدول", "schedule": _schedule_out(row),
+            "push": result.get("push", [])}
+
+
+# ------------------------------------------------- وجهات التخزين
+class DestinationIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    kind: str = Field(default="local")
+    enabled: bool = True
+    config: dict = Field(default_factory=dict)
+    keep: Optional[int] = Field(default=None, ge=1, le=1000)
+
+
+def _dest_out(row: BackupDestination) -> dict:
+    # كشف مفاتيح سرّية: لا تُعاد أبدًا إلى الواجهة
+    cfg = dict(row.config or {})
+    for secret in ("client_secret", "refresh_token", "password", "token"):
+        if cfg.get(secret):
+            cfg[secret] = "•••"
+    return {"id": row.id, "name": row.name, "kind": row.kind,
+            "enabled": bool(row.enabled), "config": cfg, "keep": row.keep,
+            "last_sync_at": row.last_sync_at, "last_file": row.last_file,
+            "last_error": row.last_error}
+
+
+def _apply_config(old: dict, new: dict) -> dict:
+    """قيم «•••» في الطلب تعني «احتفظ بما هو مخزَّن» — لا تُفرَّغ المفاتيح."""
+    merged = dict(new or {})
+    for k, v in merged.items():
+        if v == "•••":
+            merged[k] = (old or {}).get(k)
+    for k, v in (old or {}).items():
+        if v and k not in merged:
+            merged[k] = v
+    return merged
+
+
+def _validated_dest(p: DestinationIn) -> DestinationIn:
+    if p.kind not in BACKUP_KINDS:
+        raise HTTPException(status_code=400,
+                            detail="kind يجب أن يكون: local/onedrive/gdrive/webdav/http")
+    return p
+
+
+@router.get("/destinations", summary="قائمة وجهات النسخ")
+async def list_destinations(_: User = Depends(require_admin),
+                            db: Session = Depends(get_db)):
+    rows = db.query(BackupDestination).order_by(BackupDestination.id).all()
+    return [_dest_out(r) for r in rows]
+
+
+@router.post("/destinations", summary="إنشاء وجهة نسخ")
+async def create_destination(payload: DestinationIn,
+                             _: User = Depends(require_admin),
+                             db: Session = Depends(get_db)):
+    p = _validated_dest(payload)
+    row = BackupDestination(name=p.name, kind=p.kind, enabled=p.enabled,
+                            config=p.config or {}, keep=p.keep)
+    db.add(row)
+    db.commit()
+    return _dest_out(row)
+
+
+@router.put("/destinations/{did}", summary="تعديل وجهة نسخ")
+async def update_destination(did: int, payload: DestinationIn,
+                             _: User = Depends(require_admin),
+                             db: Session = Depends(get_db)):
+    p = _validated_dest(payload)
+    row = db.get(BackupDestination, did)
+    if row is None:
+        raise HTTPException(status_code=404, detail="الوجهة غير موجودة")
+    row.name = p.name
+    row.kind = p.kind
+    row.enabled = p.enabled
+    row.keep = p.keep
+    row.config = _apply_config(row.config or {}, p.config or {})
+    db.commit()
+    return _dest_out(row)
+
+
+@router.delete("/destinations/{did}", summary="حذف وجهة نسخ")
+async def delete_destination(did: int, _: User = Depends(require_admin),
+                             db: Session = Depends(get_db)):
+    row = db.get(BackupDestination, did)
+    if row is None:
+        raise HTTPException(status_code=404, detail="الوجهة غير موجودة")
+    db.delete(row)
+    db.commit()
+    return {"message": "حُذفت الوجهة"}
+
+
+@router.post("/destinations/{did}/test", summary="اختبار الاتصال بالوجهة")
+async def test_destination(did: int, _: User = Depends(require_admin),
+                           db: Session = Depends(get_db)):
+    row = db.get(BackupDestination, did)
+    if row is None:
+        raise HTTPException(status_code=404, detail="الوجهة غير موجودة")
+    import asyncio
+    ok, msg = await asyncio.to_thread(
+        backup_sync.test_connection, row.kind, row.config or {})
+    row.last_error = None if ok else msg
+    if ok:
+        row.last_sync_at = datetime.now()
+    db.commit()
+    return {"ok": ok, "message": msg, "destination": _dest_out(row)}
 
 
 @router.get("/{filename}", summary="تنزيل نسخة احتياطية")

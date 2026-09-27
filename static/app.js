@@ -6693,27 +6693,19 @@ const VIEWS = {
       </div>`;
   },
 
-  /* --- النسخ الاحتياطي --- */
+  /* --- النسخ الاحتياطي: شريط تبويبات (نسخ / جدولة / وجهات) --- */
   async backup(main) {
     if (!isAdmin()) { main.innerHTML = '<div class="empty">🔒 هذه الصفحة متاحة للمدير فقط</div>'; return; }
-    const [rows, st] = await Promise.all([
-      api('/backup'), api('/backup/status').catch(() => null)]);
+    const tabs = [['files', '📁 النسخ'], ['schedules', '⏰ الجدولة'],
+                  ['destinations', '☁️ الوجهات']];
     main.innerHTML = `
-      <div class="card">
-        <h3>النسخ الاحتياطي لقاعدة البيانات</h3>
-        <button class="btn success" onclick="makeBackup()">💾 إنشاء نسخة احتياطية الآن</button>
-        <button class="btn ghost" onclick="verifyBackups()">🩺 فحص السلامة</button>
-        <button class="btn ghost" onclick="pruneNow()">🧹 تنظيف النسخ حسب السياسة</button>
-        ${st ? `<p style="margin:12px 0 0; color:#64748b; font-size:13px">📁 ${st.files} ملف (${st.total_mb} م.ب) · الاحتفاظ بآخر ${st.retention} من كل نوع · حرّ ${st.disk_free_mb ?? '—'} م.ب</p>` : ''}
-        <div style="overflow-x:auto; margin-top:18px"><table>
-          <thead><tr><th>الملف</th><th>الحجم (KB)</th><th>تاريخ الإنشاء</th><th></th><th></th></tr></thead>
-          <tbody>${rows.map(f => `<tr>
-            <td><strong>${esc(f.file)}</strong></td><td>${f.size_kb}</td><td>${fmtDate(f.created_at)}</td>
-            <td><button class="btn sm ghost" onclick="download('/backup/${encodeURIComponent(f.file)}','${esc(f.file)}')">⬇️ تنزيل</button></td>
-            <td>${f.restorable ? `<button class="btn sm danger" onclick="restoreBackup('${esc(f.file)}')">♻️ استعادة</button>` : ''}</td>
-          </tr>`).join('') || '<tr><td colspan="5" class="empty">لا توجد نسخ بعد</td></tr>'}</tbody>
-        </table></div>
-      </div>`;
+      <div class="tabbar" id="bk-tabs" role="tablist">
+        ${tabs.map(([k, l], i) => `<button type="button" role="tab"
+          class="tab${i === 0 ? ' active' : ''}" data-tab="${k}"
+          aria-selected="${i === 0}" onclick="setBackupTab('${k}')">${tr(l)}</button>`).join('')}
+      </div>
+      <div id="bk-body"><div class="empty">جارٍ التحميل…</div></div>`;
+    await setBackupTab('files');
   },
 
   /* --- شاشة المحاسبة: شريط التبويبات + حاوية المحتوى --- */
@@ -7243,6 +7235,360 @@ async function restoreBackup(name) {
     const r = await api('/backup/' + encodeURIComponent(name) + '/restore', { method: 'POST' });
     toast('تمت الاستعادة: ' + r.restored + ' (نسخة الأمان: ' + r.safety_copy + ')');
     await navigate('backup');
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ==================== شاشة النسخ الاحتياطي: التبويبات الثلاثة ============= */
+const BK_WEEKDAYS = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس',
+                     'الجمعة', 'السبت'];
+const BK_FREQ_AR = { daily: 'يومية', weekly: 'أسبوعية',
+                     monthly: 'شهرية', yearly: 'سنوية' };
+const BK_KIND_AR = { local: 'مجلد محلي', gdrive: 'Google Drive',
+                     onedrive: 'OneDrive', webdav: 'WebDAV', http: 'خادم HTTP' };
+/* حقول النموذج لكل نوع — تُخفى غير المطلوبة كي لا يتوه المستخدم */
+const BK_KIND_FIELDS = {
+  local: ['path'],
+  gdrive: ['client_id', 'client_secret', 'refresh_token', 'folder'],
+  onedrive: ['client_id', 'client_secret', 'refresh_token', 'folder'],
+  webdav: ['url', 'user', 'pass'],
+  http: ['url', 'token'],
+};
+const BK_FIELD_ALL = ['path', 'folder', 'url', 'client_id', 'client_secret',
+                      'refresh_token', 'user', 'pass', 'token'];
+const BK_KIND_HINT = {
+  local: 'مجلد على هذا الجهاز أو قرص/مشاركة شبكة متصلة به — نسخة خارج مكان القاعدة.',
+  gdrive: 'OAuth من Google Cloud: أنشئ تطبيقًا ثم ضع Client ID وClient Secret وRefresh Token.',
+  onedrive: 'Microsoft Graph: سجّل تطبيقًا في Azure AD ثم خذ Client ID وRefresh Token.',
+  webdav: 'أي خدمة تدعم WebDAV (Nextcloud وownCloud وغيرها) بعنوانها وبيانات دخولها.',
+  http: 'خادمك الخاص يستقبل الملف في POST multipart باسم الحقل file.',
+};
+let BK_SEQ = 0;       /* يمنع تجاوز عرض تبويب أقدم بتبويب أحدث */
+let BK_EDIT = null;   /* رقم الجدول قيد التعديل (null = نموذج إنشاء) */
+let BK_DEST_EDIT = null;
+
+/* تبديل تبويب وعرض محتواه بأمان ضد تداخل عمليات العرض */
+async function setBackupTab(tab) {
+  document.querySelectorAll('#bk-tabs .tab').forEach(b => {
+    const on = b.dataset.tab === tab;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-selected', on);
+  });
+  const body = document.getElementById('bk-body');
+  if (!body) return;
+  const seq = ++BK_SEQ;
+  const stage = document.createElement('div');
+  stage.innerHTML = '<div class="empty">جارٍ التحميل…</div>';
+  try {
+    if (tab === 'schedules') await bkRenderSchedules(stage);
+    else if (tab === 'destinations') await bkRenderDestinations(stage);
+    else await bkRenderFiles(stage);
+  } catch (e) {
+    stage.innerHTML = `<div class="empty" style="color:#dc3545">⚠️ ${esc(e.message)}</div>`;
+  }
+  if (seq !== BK_SEQ || !body.isConnected) return;
+  body.innerHTML = stage.innerHTML;
+  if (tab === 'destinations') bkApplyKind(BK_DEST_EDIT === null ? 'new' : BK_DEST_EDIT);
+}
+
+/* ---------------------------------------------------- التبويب: النسخ */
+async function bkRenderFiles(stage) {
+  const [rows, st] = await Promise.all([
+    api('/backup'), api('/backup/status').catch(() => null)]);
+  stage.innerHTML = `
+    <div class="card">
+      <h3>النسخ الاحتياطي لقاعدة البيانات</h3>
+      <button class="btn success" onclick="makeBackup()">💾 إنشاء نسخة احتياطية الآن</button>
+      <button class="btn ghost" onclick="verifyBackups()">🩺 فحص السلامة</button>
+      <button class="btn ghost" onclick="pruneNow()">🧹 تنظيف النسخ حسب السياسة</button>
+      ${st ? `<p style="margin:12px 0 0; color:#64748b; font-size:13px">📁 ${st.files} ملف (${st.total_mb} م.ب) · الاحتفاظ بآخر ${st.retention} من كل نوع · حرّ ${st.disk_free_mb ?? '—'} م.ب</p>` : ''}
+      <div style="overflow-x:auto; margin-top:18px"><table>
+        <thead><tr><th>الملف</th><th>الحجم (KB)</th><th>تاريخ الإنشاء</th><th></th><th></th><th></th></tr></thead>
+        <tbody>${rows.map(f => `<tr>
+          <td><strong>${esc(f.file)}</strong></td><td>${f.size_kb}</td><td>${fmtDate(f.created_at)}</td>
+          <td><button class="btn sm ghost" onclick="download('/backup/${encodeURIComponent(f.file)}','${esc(f.file)}')">⬇️ تنزيل</button></td>
+          <td>${f.restorable ? `<button class="btn sm danger" onclick="restoreBackup('${esc(f.file)}')">♻️ استعادة</button>` : ''}</td>
+          <td><button class="btn sm danger" onclick="deleteBackupFile('${esc(f.file)}')">🗑️ حذف</button></td>
+        </tr>`).join('') || '<tr><td colspan="6" class="empty">لا توجد نسخ بعد</td></tr>'}</tbody>
+      </table></div>
+    </div>`;
+}
+
+/* حذف نسخة واحدة محددة — معتمد من المدير ومؤكَّد بـconfirm */
+async function deleteBackupFile(name) {
+  if (!confirm('حذف "' + name + '" نهائيًا؟ لا يمكن التراجع عن هذا الحذف.')) return;
+  try {
+    const r = await api('/backup/' + encodeURIComponent(name), { method: 'DELETE' });
+    toast(r.message + ' ✅');
+    await setBackupTab('files');
+  } catch (e) { toast(e.message, true); }
+}
+
+/* -------------------------------------------------- التبويب: الجدولة */
+function bkWhenText(s) {
+  const hh = String(s.hour).padStart(2, '0') + ':' + String(s.minute).padStart(2, '0');
+  if (s.frequency === 'weekly') return 'كل ' + (BK_WEEKDAYS[s.weekday] || '') + ' · ' + hh;
+  if (s.frequency === 'monthly') return 'يوم ' + s.monthday + ' من كل شهر · ' + hh;
+  if (s.frequency === 'yearly') return s.year_day + '/' + s.year_month + ' · ' + hh;
+  return 'يوميًّا · ' + hh;
+}
+
+async function bkRenderSchedules(stage) {
+  const rows = await api('/backup/schedules');
+  const editing = rows.find(r => r.id === BK_EDIT) || null;
+  stage.innerHTML = `
+    <div class="card">
+      <h3>جدولة النسخ التلقائي</h3>
+      <p style="color:#64748b; font-size:13px; margin:0 0 14px">
+        كل خطة تُنتج نسخة <code>sched#_…</code> وتحتفظ بآخر عددٍ تحدّده وحدها — فلا تزاحم خطةً أخرى احتفاظها مختلف.
+      </p>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>الخطة</th><th>التكرار</th><th>الوقت</th><th>الاحتفاظ</th>
+          <th>التالي</th><th>آخر تشغيل</th><th></th><th></th><th></th></tr></thead>
+        <tbody>${rows.map(s => `<tr>
+          <td><strong>${esc(s.name)}</strong>${s.enabled ? '' : ' <span style="color:#94a3b8">(معطّل)</span>'}</td>
+          <td>${s.frequency_ar}</td>
+          <td>${esc(bkWhenText(s))}</td>
+          <td>آخر ${s.keep}</td>
+          <td>${s.next_run_at ? fmtDate(s.next_run_at) : '—'}</td>
+          <td>${s.last_run_at ? `${fmtDate(s.last_run_at)}${s.last_file ? `<br><small>${esc(s.last_file)}</small>` : ''}` : 'لم يُشغَّل'}</td>
+          <td><button class="btn sm ghost" onclick="runBackupSchedule(${s.id})">▶️ تشغيل الآن</button></td>
+          <td><button class="btn sm ghost" onclick="editBackupSchedule(${s.id})">✏️ تعديل</button></td>
+          <td><button class="btn sm danger" onclick="deleteBackupSchedule(${s.id})">🗑️</button></td>
+        </tr>`).join('') || '<tr><td colspan="9" class="empty">لا توجد جداول بعد — أنشئ واحدة أدناه</td></tr>'}</tbody>
+      </table></div>
+      <hr style="margin:18px 0; border:0; border-top:1px solid #e2e8f0">
+      <h4 style="margin:0 0 10px">${editing ? '✏️ تعديل: ' + esc(editing.name) : '➕ خطة جديدة'}</h4>
+      ${bkScheduleForm(editing)}
+    </div>`;
+}
+
+function bkScheduleForm(row) {
+  const v = row || {};
+  const id = row ? row.id : 'new';
+  const num = (k, d, min, max) =>
+    `<input class="input" type="number" min="${min}" max="${max}" id="bk-${k}-${id}" value="${v[k] ?? d}">`;
+  return `
+    <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(155px,1fr)); gap:10px">
+      <label>اسم الخطة <input class="input" id="bk-name-${id}" value="${esc(v.name || '')}" placeholder="مثال: يومية الصباح"></label>
+      <label>التكرار <select class="input" id="bk-freq-${id}">
+        ${Object.entries(BK_FREQ_AR).map(([k, l]) =>
+          `<option value="${k}"${(v.frequency || 'daily') === k ? ' selected' : ''}>${l}</option>`).join('')}
+      </select></label>
+      <label>الساعة (0-23) ${num('hour', 3, 0, 23)}</label>
+      <label>الدقيقة ${num('minute', 0, 0, 59)}</label>
+      <label>يوم الأسبوع (للأسبوعية) <select class="input" id="bk-weekday-${id}">
+        ${BK_WEEKDAYS.map((w, i) => `<option value="${i}"${(v.weekday ?? 0) === i ? ' selected' : ''}>${w}</option>`).join('')}
+      </select></label>
+      <label>يوم الشهر (للشهرية) ${num('monthday', 1, 1, 31)}</label>
+      <label>شهر السنة (للسنوية) ${num('year_month', 1, 1, 12)}</label>
+      <label>يوم السنة (للسنوية) ${num('year_day', 1, 1, 31)}</label>
+      <label>عدد النسخ المحفوظة ${num('keep', 12, 1, 1000)}</label>
+      <label style="display:flex; align-items:center; gap:6px; margin-top:22px">
+        <input type="checkbox" id="bk-enabled-${id}" ${v.enabled === false ? '' : 'checked'}> مفعّلة</label>
+    </div>
+    <div style="margin-top:12px; display:flex; gap:8px">
+      <button class="btn success" onclick="saveBackupSchedule('${id}')">${row ? '💾 حفظ التعديل' : '➕ إنشاء'}</button>
+      ${row ? '<button class="btn ghost" onclick="cancelEditBackupSchedule()">إلغاء</button>' : ''}
+    </div>`;
+}
+
+async function saveBackupSchedule(id) {
+  const g = k => {
+    const el = document.getElementById(`bk-${k}-${id}`);
+    return el ? el.value : '';
+  };
+  const payload = {
+    name: g('name').trim(),
+    frequency: g('freq'),
+    enabled: document.getElementById(`bk-enabled-${id}`).checked,
+    hour: Number(g('hour')), minute: Number(g('minute')),
+    weekday: Number(g('weekday')), monthday: Number(g('monthday')),
+    year_month: Number(g('year_month')), year_day: Number(g('year_day')),
+    keep: Number(g('keep')),
+  };
+  if (!payload.name) { toast('اسم الخطة مطلوب', true); return; }
+  try {
+    const isNew = id === 'new';
+    await api(isNew ? '/backup/schedules' : `/backup/schedules/${id}`,
+              { method: isNew ? 'POST' : 'PUT', body: JSON.stringify(payload) });
+    toast((isNew ? 'أُنشئ الجدول ✅' : 'حُفظ التعديل ✅'));
+    BK_EDIT = null;
+    await setBackupTab('schedules');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function editBackupSchedule(id) {
+  BK_EDIT = id;
+  await setBackupTab('schedules');
+}
+
+async function cancelEditBackupSchedule() {
+  BK_EDIT = null;
+  await setBackupTab('schedules');
+}
+
+async function deleteBackupSchedule(id) {
+  if (!confirm('حذف هذا الجدول؟ النسخ التي أنشأها تبقى في مكانها.')) return;
+  try {
+    await api('/backup/schedules/' + id, { method: 'DELETE' });
+    toast('حُذف الجدول ✅');
+    if (BK_EDIT === id) BK_EDIT = null;
+    await setBackupTab('schedules');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function runBackupSchedule(id) {
+  try {
+    const r = await api(`/backup/schedules/${id}/run`, { method: 'POST' });
+    toast((r.message || 'تم التشغيل') + ' ✅');
+    const bad = (r.push || []).filter(p => !p.ok);
+    if (bad.length) toast('⚠️ ' + bad.map(b => b.name + ': ' + b.message).join(' | '), true);
+    await setBackupTab('schedules');
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ------------------------------------------------ التبويب: الوجهات */
+async function bkRenderDestinations(stage) {
+  const rows = await api('/backup/destinations');
+  const editing = rows.find(r => r.id === BK_DEST_EDIT) || null;
+  stage.innerHTML = `
+    <div class="card">
+      <h3>وجهات التخزين</h3>
+      <p style="color:#64748b; font-size:13px; margin:0 0 14px">
+        تُرفع كل نسخة جديدة إلى كل وجهة مفعّلة — محليًّا وسحابيًّا في آنٍ واحد.
+      </p>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>الوجهة</th><th>النوع</th><th>آخر رفع</th><th>آخر خطأ</th>
+          <th></th><th></th><th></th></tr></thead>
+        <tbody>${rows.map(d => `<tr>
+          <td><strong>${esc(d.name)}</strong>${d.enabled ? '' : ' <span style="color:#94a3b8">(معطّلة)</span>'}</td>
+          <td>${BK_KIND_AR[d.kind] || d.kind}${d.keep ? ` · احتفاظ ${d.keep}` : ''}</td>
+          <td>${d.last_sync_at ? fmtDate(d.last_sync_at) : 'لم تُجرَ'}</td>
+          <td style="color:#dc3545; font-size:12px">${d.last_error ? esc(d.last_error) : '—'}</td>
+          <td><button class="btn sm ghost" onclick="testBackupDestination(${d.id})">🔌 اختبار</button></td>
+          <td><button class="btn sm ghost" onclick="editBackupDestination(${d.id})">✏️ تعديل</button></td>
+          <td><button class="btn sm danger" onclick="deleteBackupDestination(${d.id})">🗑️</button></td>
+        </tr>`).join('') || '<tr><td colspan="7" class="empty">لا توجد وجهات — أضِف واحدة أدناه</td></tr>'}</tbody>
+      </table></div>
+      <hr style="margin:18px 0; border:0; border-top:1px solid #e2e8f0">
+      <h4 style="margin:0 0 10px">${editing ? '✏️ تعديل: ' + esc(editing.name) : '➕ وجهة جديدة'}</h4>
+      ${bkDestinationForm(editing)}
+    </div>`;
+}
+
+function bkDestinationForm(row) {
+  const v = row || {};
+  const id = row ? row.id : 'new';
+  const cfg = v.config || {};
+  const sec = k => (cfg[k] === '•••' ? '•••' : (cfg[k] || ''));
+  const lab = (k, title, extra) =>
+    `<label id="bd-l-${k}-${id}">${title} <input class="input" ${extra} id="bd-${k}-${id}"></label>`;
+  return `
+    <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px">
+      <label>اسم الوجهة <input class="input" id="bd-name-${id}" value="${esc(v.name || '')}" placeholder="مثال: OneDrive العيادة"></label>
+      <label>النوع <select class="input" id="bd-kind-${id}" onchange="bkApplyKind('${id}')">
+        ${Object.entries(BK_KIND_AR).map(([k, l]) =>
+          `<option value="${k}"${(v.kind || 'local') === k ? ' selected' : ''}>${l}</option>`).join('')}
+      </select></label>
+      <label>عدد النسخ المحفوظة على الوجهة (اختياري)
+        <input class="input" type="number" min="1" max="1000" id="bd-keep-${id}" value="${v.keep ?? ''}"></label>
+      <label style="display:flex; align-items:center; gap:6px; margin-top:22px">
+        <input type="checkbox" id="bd-enabled-${id}" ${v.enabled === false ? '' : 'checked'}> مفعّلة</label>
+    </div>
+    <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin-top:10px">
+      ${lab('path', 'المجلد المحلي', `value="${esc(cfg.path || '')}" placeholder="D:\\backups"`)}
+      ${lab('folder', 'مجلد داخل الحساب', `value="${esc(cfg.folder || cfg.folder_id || '')}" placeholder="HospitalBackups"`)}
+      ${lab('url', 'العنوان URL', `value="${esc(cfg.url || '')}" placeholder="https://…/dav"`)}
+      ${lab('client_id', 'Client ID', `value="${esc(cfg.client_id || '')}"`)}
+      ${lab('client_secret', 'Client Secret', `type="password" value="${esc(sec('client_secret'))}"`)}
+      ${lab('refresh_token', 'Refresh Token', `type="password" value="${esc(sec('refresh_token'))}"`)}
+      ${lab('user', 'اسم المستخدم', `value="${esc(cfg.username || '')}"`)}
+      ${lab('pass', 'كلمة المرور', `type="password" value="${esc(sec('password'))}"`)}
+      ${lab('token', 'التوكن (ترويسة Authorization)', `type="password" value="${esc(sec('token'))}"`)}
+    </div>
+    <p id="bd-hint-${id}" style="color:#64748b; font-size:12px; margin:10px 0 0"></p>
+    <div style="margin-top:12px; display:flex; gap:8px">
+      <button class="btn success" onclick="saveBackupDestination('${id}')">${row ? '💾 حفظ التعديل' : '➕ إضافة'}</button>
+      ${row ? '<button class="btn ghost" onclick="cancelEditBackupDestination()">إلغاء</button>' : ''}
+    </div>`;
+}
+
+/* إظهار حقول النوع المختار وحدها + تلميح تهيئته */
+function bkApplyKind(id) {
+  const sel = document.getElementById('bd-kind-' + id);
+  if (!sel) return;
+  const show = BK_KIND_FIELDS[sel.value] || [];
+  BK_FIELD_ALL.forEach(k => {
+    const lab = document.getElementById(`bd-l-${k}-${id}`);
+    if (lab) lab.style.display = show.includes(k) ? '' : 'none';
+  });
+  const hint = document.getElementById(`bd-hint-${id}`);
+  if (hint) hint.textContent = BK_KIND_HINT[sel.value] || '';
+}
+
+async function saveBackupDestination(id) {
+  const g = k => {
+    const el = document.getElementById(`bd-${k}-${id}`);
+    return el ? el.value.trim() : '';
+  };
+  const kind = g('kind');
+  const payload = {
+    name: g('name'),
+    kind,
+    enabled: document.getElementById(`bd-enabled-${id}`).checked,
+    keep: g('keep') === '' ? null : Number(g('keep')),
+    config: {},
+  };
+  if (!payload.name) { toast('اسم الوجهة مطلوب', true); return; }
+  const put = (k, v) => { if (v !== '') payload.config[k] = v; };
+  if (kind === 'local') put('path', g('path'));
+  if (kind === 'gdrive' || kind === 'onedrive') {
+    put('client_id', g('client_id'));
+    put('client_secret', g('client_secret'));
+    put('refresh_token', g('refresh_token'));
+    put(kind === 'gdrive' ? 'folder_id' : 'folder', g('folder'));
+  }
+  if (kind === 'webdav') {
+    put('url', g('url'));
+    put('username', g('user'));
+    put('password', g('pass'));
+  }
+  if (kind === 'http') { put('url', g('url')); put('token', g('token')); }
+  try {
+    const isNew = id === 'new';
+    await api(isNew ? '/backup/destinations' : `/backup/destinations/${id}`,
+              { method: isNew ? 'POST' : 'PUT', body: JSON.stringify(payload) });
+    toast((isNew ? 'أُضيفت الوجهة ✅' : 'حُفظت التعديلات ✅'));
+    BK_DEST_EDIT = null;
+    await setBackupTab('destinations');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function editBackupDestination(id) {
+  BK_DEST_EDIT = id;
+  await setBackupTab('destinations');
+}
+
+async function cancelEditBackupDestination() {
+  BK_DEST_EDIT = null;
+  await setBackupTab('destinations');
+}
+
+async function deleteBackupDestination(id) {
+  if (!confirm('حذف هذه الوجهة؟ لن تُحذف النسخ المرفوعة إليها سابقًا.')) return;
+  try {
+    await api('/backup/destinations/' + id, { method: 'DELETE' });
+    toast('حُذفت الوجهة ✅');
+    if (BK_DEST_EDIT === id) BK_DEST_EDIT = null;
+    await setBackupTab('destinations');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function testBackupDestination(id) {
+  try {
+    const r = await api(`/backup/destinations/${id}/test`, { method: 'POST' });
+    toast((r.ok ? '✅ ' : '⚠️ ') + r.message, !r.ok);
+    await setBackupTab('destinations');
   } catch (e) { toast(e.message, true); }
 }
 

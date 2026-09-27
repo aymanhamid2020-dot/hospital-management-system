@@ -192,7 +192,10 @@ def prune_backups(backup_dir, keep=None):
     الاحتفاظ بآخر ``BACKUP_RETENTION`` (7 افتراضيًا) من كل بادئة على حدة:
     ``hospital_*.db`` (الإنشاء اليدوي والفحوصات) و``auto_*.db`` (المجدول)؛
     وأي ملف آخر (مثل ملفات الاختبار ``_*.db``) لا يُمسّ إطلاقًا.
-    الأسماء تحوي طابعًا زمنيًا بترتيب تصاعدي، فالفرز التنازلي = الأحدث أولًا.
+    الأسماء تحوي طابعًا زمنيًا بترتيب تصاعدي، لكن ترتيب الملفات بالاسم
+    يكذب حين يختلف اسما النسختين عن نمط الطابع (مثل ``hospital_pre_clean_…``
+    الذي يسبق رقميًّا تاريخًا أحدث منه) فالفرز يكون بالوقت الفعلي أصلًا
+    وبالاسم كفاصل متساوٍ فقط.
     """
     import os
     if keep is None:
@@ -205,10 +208,18 @@ def prune_backups(backup_dir, keep=None):
     except OSError:
         return []
     deleted = []
+
+    def _mtime_key(name):
+        try:
+            return (os.path.getmtime(os.path.join(backup_dir, name)), name)
+        except OSError:
+            return (0.0, name)
+
     for prefix in ("hospital_", "auto_"):
         group = sorted(
             (n for n in names
              if n.startswith(prefix) and n.endswith(".db")),
+            key=_mtime_key,
             reverse=True,
         )
         for old in group[keep:]:
@@ -233,20 +244,16 @@ def create_auto_backup(backup_dir=None, retention=None):
     """
     import os
     import sqlite3
-    import sys
     from datetime import datetime as _dt
 
     src = _sqlite_db_path()
     if not src:
         return None
     if backup_dir is None:
-        if getattr(sys, "frozen", False):
-            # نسخة سطح المكتب (PyInstaller): النسخ بجانب الملف التنفيذي
-            backup_dir = os.path.join(os.path.dirname(sys.executable), "backups")
-        else:
-            # مجلد backups/ بجانب main.py (نفس منطق app/backup.py)
-            backup_dir = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backups")
+        # مصدر واحد للمجلد يشترك مع الراوتر — كانا يحسبان بعمقٍ مختلف
+        # (tasks ⇐ الجذر، routers/backup ⇐ app/) فتذهب النسخ إلى مجلدَين
+        from app import backup_sync
+        backup_dir = backup_sync.default_backup_dir()
     if retention is None:
         retention = int(os.getenv("BACKUP_RETENTION", "7"))
     os.makedirs(backup_dir, exist_ok=True)
@@ -268,6 +275,191 @@ def create_auto_backup(backup_dir=None, retention=None):
     prune_backups(backup_dir, retention)
     backup_logger.info("نسخة تلقائية محفوظة: %s", dest)
     return dest
+
+
+# ============================ الجدولة المستقلة: يومية/أسبوعية/شهرية/سنوية ==
+def _prune_prefix(backup_dir, prefix, keep):
+    """يبقى آخر ``keep`` ملفات تبدأ بـprefix داخل المجلد — يرجع أسماء المحذوفة.
+
+    مختلف عن prune_backups: تلك تنظّف بادئتي hospital_ وauto_ وحدهما، أما
+    sched{id}_ فالخطة وحدها تُنظّف نسخها فلا تزاحم خطةً احتفاظها مختلف.
+    """
+    import os
+    if not os.path.isdir(backup_dir):
+        return []
+    try:
+        names = os.listdir(backup_dir)
+    except OSError:
+        return []
+
+    def _mtime_key(name):
+        try:
+            return (os.path.getmtime(os.path.join(backup_dir, name)), name)
+        except OSError:
+            return (0.0, name)
+
+    group = sorted((n for n in names
+                    if n.startswith(prefix) and n.endswith(".db")),
+                   key=_mtime_key, reverse=True)
+    deleted = []
+    for old in group[max(int(keep), 1):]:
+        try:
+            os.remove(os.path.join(backup_dir, old))
+            deleted.append(old)
+        except OSError:
+            pass
+    return deleted
+
+
+def compute_next_run(row, now=None):
+    """لحظة التنفيذ التالية لجدول نسخ — تُعاد حسابها عند كل تعديل وفي كل دقيقة.
+
+    التقويم بالأسبوع يبدأ الأحد (0=الأحد..6=السبت) فيُحوَّل إلى تقويم
+    بايثون (0=الاثنين). تُقيَّد الشهور وأيامها إلى مدى الشهر الحالي
+    (31 في شهرٍ 30 يومًا ⇐ آخر يوم منه) فلا ينعقد الجدول أبدًا.
+    """
+    import calendar
+    now = now or datetime.now()
+    h = int(row.hour or 0)
+    m = int(row.minute or 0)
+
+    def at(day):
+        return datetime(day.year, day.month, day.day, h, m)
+
+    freq = row.frequency or "daily"
+
+    if freq == "daily":
+        cand = at(now.date())
+        return cand if cand > now else at(now.date() + timedelta(days=1))
+
+    if freq == "weekly":
+        target = (int(row.weekday or 0) + 6) % 7   # الأحد=0 ⇐ بايثون=6
+        for i in range(8):                          # 8 أيام تغطي اليوم نفسه وثاني أسبوعه
+            d = now.date() + timedelta(days=i)
+            if d.weekday() == target:
+                cand = at(d)
+                if cand > now:
+                    return cand
+        return None
+
+    if freq == "monthly":
+        y, mo = now.year, now.month
+        for _ in range(14):                         # 13 شهرًا يكفيان لتجاوز 31→28/29/30
+            dim = calendar.monthrange(y, mo)[1]
+            cand = datetime(y, mo, min(int(row.monthday or 1), dim), h, m)
+            if cand > now:
+                return cand
+            mo += 1
+            if mo > 12:
+                mo, y = 1, y + 1
+        return None
+
+    if freq == "yearly":
+        y = now.year
+        for _ in range(3):                          # يتجاوز 29 فبراير إلى السنة التالية
+            mo = min(max(int(row.year_month or 1), 1), 12)
+            dim = calendar.monthrange(y, mo)[1]
+            cand = datetime(y, mo, min(int(row.year_day or 1), dim), h, m)
+            if cand > now:
+                return cand
+            y += 1
+        return None
+
+    return None
+
+
+def run_schedule_now(row, db, now=None, backup_dir=None):
+    """ينشئ نسخة الخطة ``sched{id}_*`` ويُبقي آخر ``row.keep`` ويُرفعها للوجهات.
+
+    يحدّث آخر تشغيل على الصفّ ويُرجع تقريرًا؛ الالتزام يتم على المعامل نفسه
+    فينعكس التحديث على الصفّ عند commit من الناطق. ``backup_dir`` اختياري
+    لعزل الاختبارات عن مجلد backups/ الحقيقي.
+    """
+    import os
+    import sqlite3
+    now = now or datetime.now()
+    row.last_run_at = now
+
+    src = _sqlite_db_path()
+    if not src:
+        row.last_result = "النسخ المجدول متاح لـSQLite فقط"
+        return {"file": None, "deleted": [], "push": []}
+
+    if backup_dir is None:
+        from app import backup_sync
+        backup_dir = backup_sync.default_backup_dir()
+    os.makedirs(backup_dir, exist_ok=True)
+
+    dest = os.path.join(backup_dir, f"sched{row.id}_{now:%Y%m%d_%H%M%S}.db")
+    src_con = sqlite3.connect(src, timeout=10)
+    try:
+        dst_con = sqlite3.connect(dest)
+        try:
+            src_con.backup(dst_con)   # لقطة متزامنة وصالحة حتى أثناء الكتابة
+        finally:
+            dst_con.close()
+    finally:
+        src_con.close()
+
+    deleted = _prune_prefix(backup_dir, f"sched{row.id}_", row.keep)
+
+    push = []
+    try:
+        from app import backup_sync
+        push = backup_sync.push_to_destinations(db, dest)
+    except Exception:  # noqa: BLE001 — خطة لا تُسقط حلقة الجدولة كلها
+        backup_logger.exception("فشل رفع نسخة الخطة #%s إلى الوجهات", row.id)
+
+    ok = sum(1 for p in push if p["ok"])
+    row.last_file = os.path.basename(dest)
+    row.last_result = (f"أُنشئت · حُذف {len(deleted)} زائدًا · "
+                       f"{ok}/{len(push)} وجهة")
+    return {"file": dest, "deleted": deleted, "push": push}
+
+
+async def _run_due_schedules():
+    """يشغّل كل خطة حلّ موعدها ثم يحسب لها الموعد التالي — يُستدعى كل دقيقة."""
+    from app.database import SessionLocal
+    from app.models import BackupSchedule
+
+    db = SessionLocal()
+    try:
+        now = datetime.now()
+        for row in (db.query(BackupSchedule)
+                    .filter(BackupSchedule.enabled.is_(True)).all()):
+            if row.next_run_at is None:
+                row.next_run_at = compute_next_run(row, now)
+                db.commit()
+                continue
+            if row.next_run_at > now:
+                continue
+            try:
+                await asyncio.to_thread(run_schedule_now, row, db)
+                backup_logger.info("جدولة «%s»: %s", row.name, row.last_result)
+            except Exception:  # noqa: BLE001
+                backup_logger.exception("فشل تشغيل الجدول «%s»", row.name)
+                row.last_result = "فشل غير متوقع — راجع سجلات الخادم"
+            # موعدها التالي يُحسب من الحاضر لا من الموعد الفائت، فلا تتراكم
+            row.next_run_at = compute_next_run(row, now)
+            db.commit()
+    finally:
+        db.close()
+
+
+async def backup_scheduler_loop():
+    """فحص كل دقيقة: تشغيل ما حلّ وقته من جداول النسخ — SQLite فقط."""
+    import os  # noqa: F401 — للوضوح إن أُعيد استخدامها هنا لاحقًا
+    if _sqlite_db_path() is None:
+        backup_logger.info(
+            "جدولة النسخ متاحة لـSQLite — على PostgreSQL استخدم pg_dump مجدولًا")
+        return
+    backup_logger.info("بدء حلقة جدولة النسخ — فحص كل دقيقة")
+    while True:
+        try:
+            await _run_due_schedules()
+        except Exception:  # noqa: BLE001 — حلقة الخلفية لا تنهار أبدًا
+            backup_logger.exception("فشل دورة فحص جداول النسخ")
+        await asyncio.sleep(60)
 
 
 async def backup_loop():

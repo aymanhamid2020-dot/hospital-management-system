@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, Integer, String, Text, DateTime, Float, Boolean, Time, ForeignKey,
-    Enum as SAEnum, Index, UniqueConstraint
+    Enum as SAEnum, Index, UniqueConstraint, JSON
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -2001,3 +2001,66 @@ class UserPermission(Base):
 
     user = relationship("User", back_populates="permission_overrides")
     permission = relationship("Permission")
+
+
+# ===== النسخ الاحتياطي: الجدولة المستقلة والوجهات =====
+BACKUP_FREQUENCIES = ("daily", "weekly", "monthly", "yearly")
+BACKUP_KINDS = ("local", "onedrive", "gdrive", "webdav", "http")
+FREQUENCY_AR = {"daily": "يومية", "weekly": "أسبوعية",
+                "monthly": "شهرية", "yearly": "سنوية"}
+
+
+class BackupSchedule(Base):
+    """جدولة نسخ احتياطية: يومية/أسبوعية/شهرية/سنوية باحتفاظ مستقل لكل خطة.
+
+    كل خطة تُنتج نسخة ``sched{id}_*.db`` فتُحصى وتقعَّر وحدها، فلا تزاحم
+    خطةً أخرى احتفاظها مختلف. الفحص يجري كل دقيقة (backup_scheduler_loop).
+    """
+    __tablename__ = "backup_schedules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    frequency = Column(String, nullable=False, default="daily")  # daily|weekly|monthly|yearly
+    enabled = Column(Boolean, nullable=False, default=True)
+
+    # نافذة التنفيذ
+    hour = Column(Integer, nullable=False, default=3)        # 0-23
+    minute = Column(Integer, nullable=False, default=0)      # 0-59
+    weekday = Column(Integer, nullable=False, default=0)     # 0=الأحد (للأسبوعية)
+    monthday = Column(Integer, nullable=False, default=1)    # 1-31 (للشهرية)
+    year_month = Column(Integer, nullable=False, default=1)  # 1-12 (للسنوية)
+    year_day = Column(Integer, nullable=False, default=1)    # 1-31 (للسنوية)
+
+    # سياسة الاحتفاظ الخاصة بهذه الخطة وحدها
+    keep = Column(Integer, nullable=False, default=12)
+
+    last_run_at = Column(DateTime, nullable=True)
+    last_file = Column(String, nullable=True)
+    last_result = Column(String, nullable=True)
+    next_run_at = Column(DateTime, nullable=True, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class BackupDestination(Base):
+    """وجهة تخزين: مجلد محلي أو سحابة — يُرفع إليها كل نسخة تُنشأ.
+
+    مفاتيح ``config`` حسب النوع:
+      local    ⇒ ``path`` (مجلد النسخ)
+      gdrive   ⇒ ``refresh_token`` + اختياريًّا ``folder_id``
+      onedrive ⇒ ``refresh_token`` + اختياريًّا ``folder`` (مسار داخل OneDrive)
+      webdav   ⇒ ``url`` + ``username`` + ``password``
+      http     ⇒ ``url`` + اختياريًّا ``token`` (ترويسة Authorization)
+    """
+    __tablename__ = "backup_destinations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    kind = Column(String, nullable=False, default="local")
+    enabled = Column(Boolean, nullable=False, default=True)
+    config = Column(JSON, nullable=False, default=dict)
+    keep = Column(Integer, nullable=True)   # احتفاظ مستقل على الوجهة (اختياري)
+
+    last_sync_at = Column(DateTime, nullable=True)
+    last_file = Column(String, nullable=True)
+    last_error = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())

@@ -128,15 +128,20 @@ async def lifespan(app: FastAPI):
 
     # مهمة التذكير والنسخ التلقائي — لعامل واحد فقط (قفل قيادة)
     import asyncio
-    from app.tasks import backup_loop, reminder_loop
+    from app.tasks import backup_loop, backup_scheduler_loop, reminder_loop
     release_leader = acquire_leader_lease()
     task = asyncio.create_task(reminder_loop()) if release_leader else None
     backup_task = asyncio.create_task(backup_loop()) if release_leader else None
+    # جدولة يومية/أسبوعية/شهرية/سنوية — فحص كل دقيقة لما حلّ وقته
+    sched_task = (asyncio.create_task(backup_scheduler_loop())
+                  if release_leader else None)
     yield
     if task:
         task.cancel()
     if backup_task:
         backup_task.cancel()
+    if sched_task:
+        sched_task.cancel()
     if release_leader:
         release_leader()
 
@@ -282,7 +287,11 @@ def system_status(db: Session = Depends(get_db)):
         }
 
     # إحصاءة مجلد النسخ الفعلية (SQLite — للوحة المراقبة /status)
-    _bdir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app", "backups")
+    # مصدر واحد للمجلد: كان يُحسب هنا بـapp/backups بينما docker-compose
+    # يركّب hospital_backups على /app/backups (جذر المشروع) — مجلدان مختلفان
+    # فتعرض لوحة المراقبة سجلات لا تقرأها الواجهة ولا تراها الحاويات.
+    from app.backup_sync import default_backup_dir
+    _bdir = default_backup_dir()
     try:
         _bfiles = [f for f in os.listdir(_bdir) if f.endswith(".db")]
         _bbytes = sum(os.path.getsize(os.path.join(_bdir, f)) for f in _bfiles)
