@@ -18,7 +18,8 @@ import sys
 
 # بصمات حسابات الاختبار المعروفة في هذا المستودع (لا تُسند أبدًا لـ demo_*)
 DEFAULT_PATTERNS = (
-    r"^uadm",                 # tests/e2e/users-admin.spec.ts
+    r"^uadm",                 # tests/e2e/users-admin.spec.ts (إنشاء)
+    r"^off[0-9A-Z]{5}$",      # tests/e2e/users-admin.spec.ts (حامل الدور المعطّل — بنفس TAG)
     r"^livedel",              # فحص الحذف الحيّ
     r"^del[A-C]_",            # tests/test_user_admin.py
     r"^livemgr",              # فحص تغيير الأدوار حيًّا

@@ -200,9 +200,12 @@ def test_cleanup_tool_collects_only_test_accounts():
         {"id": 6, "username": "livedel2_9"},
         {"id": 7, "username": "cash_fff"},
         {"id": 8, "username": "delA_77"},
+        {"id": 9, "username": "off4WC2H"},       # بصمة الدور المعطّل (TAG = 5 رموز)
+        {"id": 10, "username": "offline_manager"},  # حساب حقيقي محتمل: لا يُلتقط
     ]
     got = {v["username"] for v in collect_temp_users(rows)}
-    assert got == {"uadmABC", "recph_P123", "livedel2_9", "cash_fff", "delA_77"}
+    assert got == {"uadmABC", "recph_P123", "livedel2_9", "cash_fff",
+                   "delA_77", "off4WC2H"}
     assert all(v["id"] for v in collect_temp_users(rows)), "المعرّف مطلوب للحذف"
 
     # محميّ حتى لو طابقت بصمة صريحة
