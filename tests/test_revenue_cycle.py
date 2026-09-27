@@ -103,6 +103,16 @@ def test_quotation_lifecycle_and_convert(client, admin):
     conv = client.post(f"/revenue/quotations/{q['id']}/convert", headers=admin)
     assert conv.status_code == 200, conv.text
     assert conv.json()["status"] == "converted" and conv.json()["invoice_id"]
+    # الفاتورة الناتجة عن التحويل تُرحَّل تلقائيًّا كأي فاتورة من شاشة
+    # الفواتير — وإلا بقيت الإيرادات خارج الدفتر عند أطول مسار بيع.
+    inv_id = conv.json()["invoice_id"]
+    entries = client.get("/accounts/ledger/entries", headers=admin).json()
+    posted = [e for e in entries
+              if e["reference_type"] == "patient_invoice" and e["reference_id"] == inv_id]
+    assert len(posted) == 1, f"قيود الفاتورة المحوّلة: {len(posted)} (المتوقع 1)"
+    assert sum(l["debit"] for l in posted[0]["lines"]) == \
+        sum(l["credit"] for l in posted[0]["lines"]) == 3450.0
+    assert {l["account_code"] for l in posted[0]["lines"]} == {"1100", "4000"}
     assert client.post(f"/revenue/quotations/{q['id']}/convert",
                        headers=admin).status_code == 409
     assert client.put(f"/revenue/quotations/{q['id']}/status", headers=admin,

@@ -1,4 +1,5 @@
 """المحاسبة المؤسسية: دليل حسابات، قيود مزدوجة، ذمم، وميزان مراجعة."""
+import logging
 from datetime import datetime
 from typing import List, Optional
 
@@ -29,6 +30,7 @@ DEFAULT_ACCOUNTS = (
     ("4000", "إيرادات الخدمات", "revenue", None),
     ("5000", "المصروفات التشغيلية", "expense", None),
     ("5100", "المستلزمات الطبية", "expense", "5000"),
+    ("5200", "مصروف الرواتب والأجور", "expense", "5000"),
     ("2100", "مستحقات رواتب الموظفين", "liability", None),
     ("2110", "سلف الموظفين", "liability", None),
     ("2120", "مستحقات نهاية الخدمة", "liability", None),
@@ -79,6 +81,15 @@ def _new_entry(db: Session, date: datetime, description: str,
         ))
     db.flush()
     return row
+
+
+def _posted_entry(db: Session, ref_type: str, ref_id: int):
+    """القيد المرحّل المرتبط بمرجع — إن وُجد كان مُرحَّلًا سابقًا."""
+    return db.query(JournalEntry).filter(
+        JournalEntry.reference_type == ref_type,
+        JournalEntry.reference_id == ref_id,
+        JournalEntry.is_posted.is_(True),
+    ).first()
 
 
 def _entry_out(row: JournalEntry) -> JournalEntryOut:
@@ -132,28 +143,13 @@ def create_entry(payload: JournalEntryCreate, db: Session = Depends(get_db), use
 
 @router.post("/invoices/{invoice_id}/post", response_model=JournalEntryOut, summary="ترحيل فاتورة مريض")
 def post_invoice(invoice_id: int, db: Session = Depends(get_db), user=Depends(require_admin)):
-    _ensure_chart(db)
+    """ترحيل يدوي — للقيد الفاشل في الترحيل التلقائي أو للتصحيح."""
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
         raise HTTPException(404, "الفاتورة غير موجودة")
-    existing = db.query(JournalEntry).filter(
-        JournalEntry.reference_type == "patient_invoice",
-        JournalEntry.reference_id == invoice_id,
-        JournalEntry.is_posted.is_(True),
-    ).first()
-    if existing:
-        raise HTTPException(409, "تم ترحيل الفاتورة محاسبيًا مسبقًا")
-    amount = _money(invoice.total)
-    if amount <= 0:
-        raise HTTPException(400, "لا يمكن ترحيل فاتورة بقيمة صفر")
-    debit_code = "1110" if invoice.insurer else "1100"
-    row = _new_entry(
-        db, invoice.created_at or datetime.now(), invoice.description or f"فاتورة مريض #{invoice.id}",
-        "patient_invoice", invoice.id,
-        [{"code": debit_code, "debit": amount, "description": "ذمم من فاتورة مريض"},
-         {"code": "4000", "credit": amount, "description": "إيراد خدمات"}], user.username,
-    )
-    db.commit(); db.refresh(row)
+    row = build_invoice_entry(db, invoice, user.username)
+    db.commit()
+    db.refresh(row)
     return _entry_out(row)
 
 
@@ -210,6 +206,220 @@ def post_invoice_payment(
     }
 
 
+# ==================== القيود التلقائية ====================
+# الفكرة: القيد يُنشأ لحظة وقوع الحدث (إنشاء الفاتورة/تحصيلها) لا حين
+# يطلب المستخدم أمر «ترحيل» من شاشة المحاسبة. الترحيل اليدوي من هذا المسار
+# يبقى متاحًا للتصحيح والقيد المركّب.
+logger = logging.getLogger("hms.accounting")
+
+
+def build_invoice_entry(db: Session, invoice, username: str) -> JournalEntry:
+    """يصنع قيد الفاتورة دون التزام — يرمي إن كان مرحّلًا أو بقيمة صفر."""
+    if _posted_entry(db, "patient_invoice", invoice.id):
+        raise HTTPException(409, "تم ترحيل الفاتورة محاسبيًا مسبقًا")
+    amount = _money(invoice.total)
+    if amount <= 0:
+        raise HTTPException(400, "لا يمكن ترحيل فاتورة بقيمة صفر")
+    _ensure_chart(db)
+    debit_code = "1110" if invoice.insurer else "1100"
+    return _new_entry(
+        db, invoice.created_at or datetime.now(),
+        invoice.description or f"فاتورة مريض #{invoice.id}",
+        "patient_invoice", invoice.id,
+        [{"code": debit_code, "debit": amount, "description": "ذمم من فاتورة مريض"},
+         {"code": "4000", "credit": amount, "description": "إيراد خدمات"}],
+        username,
+    )
+
+
+def build_payment_entry(db: Session, invoice, amount: float, method: str,
+                         username: str, paid_at: datetime) -> JournalEntry:
+    """يصنع قيد التحصيل دون التزام — يضمن قيد الفاتورة أولًا."""
+    if not _posted_entry(db, "patient_invoice", invoice.id):
+        build_invoice_entry(db, invoice, username)   # أمانة: الفاتورة لابد أن تسبق
+    amount = _money(amount)
+    if amount <= 0:
+        raise HTTPException(400, "مبلغ الدفعة يجب أن يكون موجبًا")
+    if amount > _money(invoice.total) - _money(invoice.paid_amount) + .01:
+        raise HTTPException(400, "مبلغ الدفعة يتجاوز رصيد الفاتورة")
+    _ensure_chart(db)
+    cash_code = "1000" if (method or "").lower() in ("cash", "نقدي") else "1010"
+    receivable_code = ("1110" if (method or "").lower() == "insurance"
+                       or invoice.insurer else "1100")
+    return _new_entry(
+        db, paid_at or datetime.now(), f"تحصيل فاتورة مريض #{invoice.id}",
+        "patient_invoice_payment", invoice.id,
+        [{"code": cash_code, "debit": amount, "description": "تحصيل نقدية/بنكي"},
+         {"code": receivable_code, "credit": amount, "description": "سداد ذمم مريض"}],
+        username,
+    )
+
+
+def _auto_commit(db: Session, maker, what: str):
+    """يُلزم قيدًا تلقائيًا وحده — الفشل يُسجَّل ولا يسقط العملية الأصلية.
+
+    شرط السلامة: ما يُلزم هنا قد سبقه التزامٌ منفصل من ناطق آخر (فاتورة
+    مُلتزمة قبل ترحيلها)، فلا يمسّ رجوعه ذلك. ومنعه أن يُستعمل قبل التزام
+    تغييراتٍ أخرى في المعاملة نفسها.
+    """
+    try:
+        row = maker()
+        db.commit()
+        logger.info("قيد تلقائي %s — %s", row.entry_no, what)
+        return row, None
+    except HTTPException as e:
+        db.rollback()
+        logger.warning("ترحيل تلقائي (%s): %s", what, e.detail)
+        return None, str(e.detail)
+    except Exception as e:  # noqa: BLE001 — الترحيل التلقائي لا يسقط صاحبه
+        db.rollback()
+        logger.exception("ترحيل تلقائي (%s) فشل", what)
+        return None, f"{type(e).__name__}: {e}"
+
+
+def auto_post_invoice(db: Session, invoice, username: str):
+    """ترحيل فاتورة مريض لحظة إنشائها — يُرجع (القيد أو None، الخطأ أو None).
+
+    دوميّ: إن كانت مرحّلًا يعيدها دون قيد ثانٍ. ولأنها تُستدعى بعد التزام
+    الفاتورة في معاملة مستقلة، فشله لا يُسقط إنشاءها — يبقى الترحيل
+    اليدوي من شاشة المحاسبة بديلًا للتصحيح.
+    """
+    if invoice is None or getattr(invoice, "id", None) is None:
+        return None, "فاتورة غير محددة"
+    existing = _posted_entry(db, "patient_invoice", invoice.id)
+    if existing:
+        return existing, None
+    return _auto_commit(db, lambda: build_invoice_entry(db, invoice, username),
+                        f"فاتورة #{invoice.id}")
+
+
+# --------------------------------------------------------- الرواتب
+def _payroll_amount(row) -> float:
+    amount = _money(row.net)
+    if amount <= 0:
+        raise HTTPException(400, "لا يُرحَّل قيد راتب بصافي صفر أو سالب")
+    return amount
+
+
+def build_payroll_accrual(db: Session, row, username: str) -> JournalEntry:
+    """إثبات استحقاق الراتب عند إنشائه — مصروف مقابل مستحقات — دون التزام.
+
+    الصافي هو المستحق الفعلي (أساسي + بدلات − استقطاعات) فتُثبت القيود
+    عليه؛ الاستقطاع محسوب سلفًا في الصافي ولا نفترض طبيعته (سلفة أو
+    تأمين) إذ لا يحمل النموذج بيانًا بذلك.
+    """
+    if _posted_entry(db, "payroll", row.id):
+        raise HTTPException(409, "تم ترحيل قيد الراتب محاسبيًا مسبقًا")
+    amount = _payroll_amount(row)
+    _ensure_chart(db)
+    staff_name = getattr(getattr(row, "staff", None), "full_name", None)
+    return _new_entry(
+        db, row.created_at or datetime.now(),
+        f"إثبات راتب {staff_name or 'موظف'} — {row.period}",
+        "payroll", row.id,
+        [{"code": "5200", "debit": amount, "description": "مصروف رواتب وأجور"},
+         {"code": "2100", "credit": amount, "description": "مستحقات رواتب"}],
+        username,
+    )
+
+
+def build_payroll_disbursement(db: Session, row, username: str) -> JournalEntry:
+    """ترحيل صرف الراتب — إقفال المستحق مقابل النقدية — دون التزام.
+
+    الاستحقاق يسبق الصرف قطعًا، فإن كان الراتب قديمًا (أُنشئ قبل هذا
+    المسار) يُثبَّت أولًا فلا تظهر ذمة معلّقة.
+    """
+    if not _posted_entry(db, "payroll", row.id):
+        build_payroll_accrual(db, row, username)
+    if _posted_entry(db, "payroll_payment", row.id):
+        raise HTTPException(409, "تم ترحيل صرف هذا الراتب مسبقًا")
+    amount = _payroll_amount(row)
+    _ensure_chart(db)
+    return _new_entry(
+        db, row.paid_at or datetime.now(), f"صرف راتب — {row.period}",
+        "payroll_payment", row.id,
+        [{"code": "2100", "debit": amount, "description": "إقفال مستحق رواتب"},
+         {"code": "1000", "credit": amount, "description": "نقدية مصروفة"}],
+        username,
+    )
+
+
+def auto_post_payroll(db: Session, row, username: str, kind: str = "accrual"):
+    """ترحيل راتب تلقائيًّا — يُرجع (القيد أو None، الخطأ أو None) لا يرمي.
+
+    ``kind``: ``accrual`` عند الإنشاء أو ``disbursement`` عند الصرف.
+    """
+    if row is None or getattr(row, "id", None) is None:
+        return None, "قيد راتب غير محدد"
+    maker = (build_payroll_disbursement if kind == "disbursement"
+             else build_payroll_accrual)
+    what = f"{'صرف' if kind == 'disbursement' else 'استحقاق'} راتب #{row.id}"
+    return _auto_commit(db, lambda: maker(db, row, username), what)
+
+
+def build_payroll_adjustment(db: Session, row, username: str,
+                             accrued: float) -> JournalEntry:
+    """موازنة استحقاق راتب عُدِّل صافيّه بعد إثباته.
+
+    لولوَن الفرق وحده في المصروف والذمة: يزيد المبلغان معًا أو ينقصان،
+    فيبقى القيد متوازنًا ولا تنحرف ذمة الموظف عن ما سيُصرف لاحقًا. لولا
+    هذا لظلّت الذمة بالمبلغ القديم فتبدو سالبة أو فائضة بلا سبب.
+    """
+    delta = _money(_money(row.net) - _money(accrued))
+    if abs(delta) < .01:
+        raise HTTPException(409, "لا فرق في الصافي — لا حاجة لقيد تعديل")
+    _ensure_chart(db)
+    up = delta > 0
+    magnitude = abs(delta)
+    lines = [
+        {"code": "5200", "debit": magnitude if up else 0,
+         "credit": 0 if up else magnitude, "description": "تعديل مصروف رواتب"},
+        {"code": "2100", "debit": 0 if up else magnitude,
+         "credit": magnitude if up else 0, "description": "تعديل مستحق رواتب"},
+    ]
+    return _new_entry(
+        db, datetime.now(), f"تعديل استحقاق راتب — {row.period}",
+        "payroll_adjustment", row.id, lines, username,
+    )
+
+
+def _accrued_liability(db: Session, row) -> float:
+    """إجمالي مستحق هذا الراتب المثبَّت في 2100 حتى الآن.
+
+    يجمع الاستحقاق الأصلي وكل قيود التعديل اللاحقة؛ لو نظر إلى الأصلي
+    وحده لعاد بفرقٍ مكرّر في كل تعديل تالٍ فتضاعف القيد ولا تنعكس
+    الحركة على الميزان كما ينبغي.
+    """
+    rows = db.query(JournalEntry).filter(
+        JournalEntry.reference_id == row.id,
+        JournalEntry.reference_type.in_(("payroll", "payroll_adjustment")),
+        JournalEntry.is_posted.is_(True),
+    ).all()
+    total = 0.0
+    for entry in rows:
+        for line in entry.lines:
+            if line.account is not None and line.account.code == "2100":
+                total += _money(line.credit) - _money(line.debit)
+    return total
+
+
+def auto_post_payroll_adjustment(db: Session, row, username: str):
+    """يوزّن استحقاق راتب عُدِّل بعد إثباته — (القيد أو None، الخطأ أو None).
+
+    لا يعود قيدًا حين لا فرق أو حين لم يُثبَّت الاستحقاق بعد؛ فالصرف
+    سيثبّته حين يأتي بآخر صافي له.
+    """
+    if row is None or getattr(row, "id", None) is None:
+        return None, "قيد راتب غير محدد"
+    if _posted_entry(db, "payroll", row.id) is None:
+        return None, None
+    accrued = _accrued_liability(db, row)
+    if abs(_money(row.net) - accrued) < .01:
+        return None, None
+    return _auto_commit(
+        db, lambda: build_payroll_adjustment(db, row, username, accrued),
+        f"تعديل استحقاق راتب #{row.id}",
+    )
 
 
 @router.get("/vendors", response_model=List[VendorOut], summary="الموردون")

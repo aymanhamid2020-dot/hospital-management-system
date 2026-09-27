@@ -125,7 +125,8 @@ async def get_invoice(invoice_id: int, db = Depends(get_db), _ = Depends(get_cur
 
 
 @router.post("/", response_model=InvoiceInDB, summary="إنشاء فاتورة جديدة")
-async def create_invoice(invoice: InvoiceCreate, db = Depends(get_db), _ = Depends(get_current_user)):
+async def create_invoice(invoice: InvoiceCreate, db = Depends(get_db),
+                         user = Depends(get_current_user)):
     """إنشاء فاتورة جديدة"""
     # التحقق من وجود المريض
     patient = db.query(Patient).filter(Patient.id == invoice.patient_id).first()
@@ -157,6 +158,12 @@ async def create_invoice(invoice: InvoiceCreate, db = Depends(get_db), _ = Depen
     db.add(db_invoice)
     db.commit()
     db.refresh(db_invoice)
+    # قيد تلقائي لحظة الإنشاء: ذمم المريض/التأمين مقابل إيراد الخدمات.
+    # يلتزم وحده بعد التزام الفاتورة، فالفشل لا يُسقط الإنشاء — يبقى
+    # الترحيل اليدوي من شاشة المحاسبة متاحًا للتصحيح.
+    from app.routers.accounting import auto_post_invoice
+    auto_post_invoice(db, db_invoice, user.username)
+    db.refresh(db_invoice)
     return db_invoice
 
 
@@ -165,7 +172,7 @@ async def pay_invoice(
     invoice_id: int,
     payment: InvoicePayment,
     db = Depends(get_db),
-    _ = Depends(get_current_user),
+    user = Depends(get_current_user),
 ):
     """دفع الفاتورة كاملًا أو دفعة جزئية مع تسجيل طريقة الدفع والوقت"""
     inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
@@ -195,14 +202,32 @@ async def pay_invoice(
             detail=f"مبلغ الدفع ({pay_amount:.2f}) يتجاوز المتبقي ({remaining:.2f})",
         )
 
+    # قيد التحصيل في معاملة واحدة مع تطبيق الدفعة: إن تعذّر الترحيل
+    # تُرفض الدفعة برسالة صريحة بدل ترك ثغرة في الدفتر المحاسبي.
+    from app.models import InvoiceLedgerPayment
+    from app.routers.accounting import build_payment_entry
+
+    paid_at = datetime.now()
+    try:
+        entry = build_payment_entry(db, inv, pay_amount, payment.method,
+                                    user.username, paid_at)
+    except HTTPException:
+        db.rollback()
+        raise
+
     inv.paid_amount = round((inv.paid_amount or 0) + pay_amount, 2)
     inv.payment_method = payment.method
-    inv.paid_at = datetime.now()
+    inv.paid_at = paid_at
     if inv.paid_amount >= total - 1e-6:
         inv.paid_amount = total
         inv.status = InvoiceStatus.PAID
     else:
         inv.status = InvoiceStatus.PARTIAL
+    # صفّ سجل التحصيل حتى تراه شاشة المحاسبة كما هو — ربطه بالقيد
+    db.add(InvoiceLedgerPayment(
+        invoice_id=inv.id, amount=pay_amount, method=payment.method,
+        paid_at=paid_at, reference=None, journal_entry_id=entry.id,
+        created_by=user.username))
     db.commit()
     db.refresh(inv)
     return inv

@@ -42,7 +42,7 @@ async def list_payroll(
 async def create_payroll(
     entry: PayrollCreate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    user: User = Depends(require_admin),
 ):
     """إنشاء قيد راتب شهري — الصافي = أساسي + بدلات − استقطاعات"""
     staff = db.query(Staff).filter(Staff.id == entry.staff_id).first()
@@ -72,6 +72,11 @@ async def create_payroll(
     db.add(db_entry)
     db.commit()
     db.refresh(db_entry)
+    # إثبات استحقاق تلقائي: مصروف الرواتب مقابل مستحقات الموظفين — الفشل
+    # لا يُسقط إنشاء القيد؛ يبقى الترحيل اليدوي من شاشة المحاسبة بديلًا.
+    from app.routers.accounting import auto_post_payroll
+    auto_post_payroll(db, db_entry, user.username, kind="accrual")
+    db.refresh(db_entry)
     return db_entry
 
 
@@ -80,7 +85,7 @@ async def update_payroll(
     entry_id: int,
     update: PayrollUpdate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    user: User = Depends(require_admin),
 ):
     entry = db.query(Payroll).filter(Payroll.id == entry_id).first()
     if not entry:
@@ -94,6 +99,11 @@ async def update_payroll(
         raise HTTPException(status_code=400, detail="الصافي لا يمكن أن يكون سالبًا")
     db.commit()
     db.refresh(entry)
+    # إن كان الاستحقاق قد أُثبِّت قبل التعديل ⇒ قيد تعديل يوازن الفرق،
+    # فلا تبقى الذمة بالمبلغ القديم وينحرف الصرف لاحقًا عنها.
+    from app.routers.accounting import auto_post_payroll_adjustment
+    auto_post_payroll_adjustment(db, entry, user.username)
+    db.refresh(entry)
     return entry
 
 
@@ -101,7 +111,7 @@ async def update_payroll(
 async def pay_payroll(
     entry_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    user: User = Depends(require_admin),
 ):
     entry = db.query(Payroll).filter(Payroll.id == entry_id).first()
     if not entry:
@@ -111,6 +121,11 @@ async def pay_payroll(
     entry.status = PayrollStatus.PAID
     entry.paid_at = datetime.now()
     db.commit()
+    db.refresh(entry)
+    # قيد الصرف لحظة الصرف: إقفال المستحق مقابل النقدية (يُثبِّت
+    # الاستحقاق أولًا إن كان الراتب أُنشئ قبل هذا المسار)
+    from app.routers.accounting import auto_post_payroll
+    auto_post_payroll(db, entry, user.username, kind="disbursement")
     db.refresh(entry)
     return entry
 

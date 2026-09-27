@@ -335,6 +335,12 @@ def convert_quotation(quote_id: int, db: Session = Depends(get_db),
     q.invoice_id, q.status = inv.id, "converted"
     db.commit()
     db.refresh(q)
+    # قيد تلقائي لحظة التحويل: التحويل يفترض قبول العرض فتدخل الفاتورة
+    # الدفتر مباشرة كما لو أُنشئت من شاشة الفواتير. الفشل لا يُسقط
+    # التحويل — يبقى الترحيل اليدوي من شاشة المحاسبة بديلًا.
+    from app.routers.accounting import auto_post_invoice
+    auto_post_invoice(db, inv, user.username)
+    db.refresh(q)
     return _quote_out(db, q)
 
 # ================================================================
