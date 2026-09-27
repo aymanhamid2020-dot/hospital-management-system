@@ -3,6 +3,8 @@ const API = '';
 // "تذكرني" وحده ينقل الجلسة إلى localStorage لتُستأنف بعد إعادة التشغيل.
 let TOKEN = '';
 let USER = null;
+/* آخر قائمة جُلبت لشاشة إدارة المستخدمين — يقرأها زر الحذف اسم من يحذف */
+const USR = { list: [] };
 try {
   if (localStorage.getItem('hms_remember') === '1') {
     TOKEN = localStorage.getItem('hms_token') || '';
@@ -233,6 +235,7 @@ const AR2EN = {
   'المرافق والمخزون': 'Facilities & Inventory',
   'المالية والفوترة': 'Finance & Billing',
   'الموارد البشرية والإدارة': 'HR & Administration',
+  'إدارة المستخدمين': 'User Management',
   'النظام والحوكمة': 'System & Governance',
   'لوحة التحكم': 'Dashboard',
   'المرضى': 'Patients',
@@ -6724,21 +6727,42 @@ const VIEWS = {
       </div>`;
   },
 
-  /* --- إدارة المستخدمين --- */
+  /* --- إدارة المستخدمين: أدوارها تُقرأ من مصفوفة الأدوار والصلاحيات لا قائمة ثابتة --- */
   async users(main) {
     if (!isAdmin()) { main.innerHTML = '<div class="empty">🔒 هذه الصفحة متاحة للمدير فقط</div>'; return; }
-    const users = await api('/auth/users');
-    const roles = [['admin', 'مدير النظام'], ['doctor', 'طبيب'], ['موظف استقبال', 'موظف استقبال']];
+    const [users, roleRows] = await Promise.all([
+      api('/auth/users'),
+      api('/permissions/roles').catch(() => []),
+    ]);
+    const roles = (roleRows || []).filter(r => r && r.key).map(r => ({
+      key: r.key, name: r.name_ar, perms: (r.permissions || []).length,
+    }));
+    if (!roles.length) roles.push({ key: 'receptionist', name: 'موظف استقبال', perms: 0 });
+    /* دور يحمله مستخدم لكن شرحه غاب من الكتالوج ⇒ نعرضه باسمه الخام ولا نُسقطه */
+    users.forEach(u => {
+      if (u.role && !roles.some(r => r.key === u.role)) roles.push({ key: u.role, name: u.role, perms: 0 });
+    });
+    USR.list = users;
+    const roleName = k => (roles.find(r => r.key === k) || {}).name || k;
+    /* دور المدير لا يُمنح عند الإنشاء (تسجيل عام مفتوح) — يُرفع لاحقًا من صف المستخدم */
+    const opts = (sel, withAdmin) => roles.filter(r => withAdmin || r.key !== 'admin')
+      .map(r => `<option value="${esc(r.key)}" ${sel === r.key ? 'selected' : ''}>${
+        esc(r.name)}${r.perms ? ` · ${r.perms} صلاحية` : ''}</option>`).join('');
+    const me = (USER || {}).id;
     main.innerHTML = `
       <div class="card">
         <h3>المستخدمون (${users.length})</h3>
+        <p style="margin:0 0 10px;color:#64748b">قائمة الصلاحيات هنا مربوطة بـ
+          <b>مصفوفة الأدوار والصلاحيات</b> (${roles.length} دورًا) — أي دور جديد
+          يُنشأ هناك يظهر فورًا في الشاشتين دون إعادة تشغيل.</p>
         <details class="addbox"><summary>➕ إضافة مستخدم جديد</summary>
         <div class="form-grid">
           <div class="field"><label>اسم المستخدم</label><input id="u-username"></div>
           <div class="field"><label>الاسم الكامل</label><input id="u-fullname"></div>
           <div class="field"><label>البريد الإلكتروني</label><input id="u-email" type="email"></div>
           <div class="field"><label>الصلاحية</label><select id="u-role">
-            ${roles.map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join('')}</select></div>
+            ${opts('receptionist', false)}</select>
+            <small class="muted">دور المدير لا يُمنح عند الإنشاء — فوِّضه من صف المستخدم.</small></div>
           <div class="field"><label>كلمة المرور</label><input id="u-pass" type="password"></div>
         </div>
         <button class="btn success" style="margin-top:12px" onclick="saveUser()">إنشاء الحساب</button>
@@ -6750,13 +6774,14 @@ const VIEWS = {
             <td>${u.id}</td><td>${esc(u.username)}</td><td>${esc(u.full_name)}</td>
             <td style="direction:ltr;text-align:left">${esc(u.email)}</td>
             <td>
-              <select onchange="setRole(${u.id}, this.value)" ${u.id === USER.id ? 'disabled' : ''}>
-                ${roles.map(([v, t]) => `<option value="${esc(v)}" ${u.role === v ? 'selected' : ''}>${esc(t)}</option>`).join('')}
-              </select>
+              <select onchange="setRole(${u.id}, this.value)" ${u.id === me ? 'disabled' : ''}
+                title="دور حالي: ${esc(roleName(u.role))}">${opts(u.role, true)}</select>
             </td>
             <td>${u.is_active ? '<span class="pill completed">نشط</span>' : '<span class="pill cancelled">معطّل</span>'}</td>
             <td class="actions">
               <button class="btn sm ${u.is_active ? 'danger' : 'success'}" onclick="toggleUser(${u.id})">${u.is_active ? 'تعطيل' : 'تفعيل'}</button>
+              <button class="btn sm danger" onclick="deleteUser(${u.id})"
+                ${u.id === me ? 'disabled title="لا يمكنك حذف حسابك"' : ''}>حذف</button>
             </td>
           </tr>`).join('')}</tbody>
         </table></div>
@@ -7670,7 +7695,7 @@ async function saveUser() {
   const g = id => ((document.getElementById(id) || {}).value || '').trim();
   const payload = {
     username: g('u-username'), full_name: g('u-fullname'), email: g('u-email'),
-    role: ((document.getElementById('u-role') || {}).value || 'موظف استقبال'),
+    role: ((document.getElementById('u-role') || {}).value || 'receptionist'),
     password: ((document.getElementById('u-pass') || {}).value || ''),
   };
   if (!payload.username || !payload.full_name || !payload.email || !payload.password) {
@@ -7688,6 +7713,18 @@ async function toggleUser(id) {
   try {
     await api('/auth/users/' + id + '/toggle', { method: 'PUT' });
     toast('تم تحديث الحساب ✅');
+    await navigate('users');
+  } catch (e) { toast(e.message, true); }
+}
+
+/** حذف حساب نهائيًا — يرفض الخادم الذات وآخر مدير نشط، والواجهة تسأل أولًا. */
+async function deleteUser(id) {
+  const u = (USR.list || []).find(x => x.id === id);
+  const name = u ? u.username : '#' + id;
+  if (!confirm(`حذف حساب «${name}» نهائيًا؟\nسيُحذف ارتباطه بصلاحياته ولا يمكن التراجع.`)) return;
+  try {
+    await api('/auth/users/' + id, { method: 'DELETE' });
+    toast('تم حذف المستخدم ✅');
     await navigate('users');
   } catch (e) { toast(e.message, true); }
 }

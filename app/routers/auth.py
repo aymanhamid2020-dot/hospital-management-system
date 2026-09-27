@@ -255,6 +255,31 @@ async def change_user_role(
     return _user_out(db, target)
 
 
+@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT,
+               summary="حذف مستخدم")
+async def delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current: User = Depends(require_admin),
+):
+    """حذف حساب نهائيًا — يرفض الذات ويحمي آخر مدير نشط.
+
+    آمن بالمراجع: `user_permissions` تُحذف بـ`cascade="all, delete-orphan"`
+    في الطبقة العلوية، و`Doctor.user_id` و`AuditLog.user_id` بـ`SET NULL`
+    على مستوى القاعدة (`PRAGMA foreign_keys=ON`) — فلا صف يتيم ولا خطأ 500.
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="المستخدم غير موجود")
+    if user.id == current.id:
+        raise HTTPException(status_code=400, detail="لا يمكنك حذف حسابك")
+    if user.is_active and get_user_role(user) == "admin":
+        _guard_last_admin(db, user, "حذف")
+    db.delete(user)
+    db.commit()
+    return None
+
+
 # ===== تغيير كلمة المرور الذاتي =====
 @router.post("/change-password", summary="تغيير كلمة المرور")
 async def change_password(
