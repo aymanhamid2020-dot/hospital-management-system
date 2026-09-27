@@ -76,8 +76,11 @@ test.describe('شؤون الموظفين 🗂️', () => {
     await expect(page.locator('#hr-roster summary')).toContainText('إضافة موظف');
 
     const firstRow = page.locator('#hr-roster tbody tr').first();
-    const phone = (await firstRow.locator('td').nth(3).innerText()).trim();
-    const email = (await firstRow.locator('td').nth(4).innerText()).trim();
+    // الأعمدة: # · الرقم الوظيفي · الاسم · المنصب · الهاتف · البريد …
+    await expect(page.locator('#hr-roster thead th', { hasText: 'الرقم الوظيفي' }))
+      .toHaveCount(1);
+    const phone = (await firstRow.locator('td').nth(4).innerText()).trim();
+    const email = (await firstRow.locator('td').nth(5).innerText()).trim();
     test.skip(!phone, 'الموظف الأول بلا هاتف مسجّل');
 
     // اختيار الموظف يفتح تبويب بياناته — والحقلان معروضان من عموديه بلا طلب إدخال جديد

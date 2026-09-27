@@ -24,7 +24,8 @@ test.describe('قائمة المرضى 🧑‍🤝‍🧑', () => {
   test('البحث يمرّ على الخادم ويرشّح الجدول', async ({ page }) => {
     await openPatients(page);
 
-    const firstName = (await page.locator('#tbl tbody tr td:nth-child(2) strong').first().innerText()).trim();
+    // الأعمدة: # · رقم الملف · المريض · العمر · الهاتف · الدم …
+    const firstName = (await page.locator('#tbl tbody tr td:nth-child(3) strong').first().innerText()).trim();
 
     // بحث باسم مريض موجود ⇒ يصبح هو النتيجة الوحيدة
     await page.fill('#q', firstName);
@@ -55,7 +56,7 @@ test.describe('قائمة المرضى 🧑‍🤝‍🧑', () => {
       const rows = page.locator('#tbl tbody tr');
       const n = await rows.count();
       if (n === 0) return false;
-      const cells = await rows.locator('td:nth-child(5)').allInnerTexts();
+      const cells = await rows.locator('td:nth-child(6)').allInnerTexts();
       return cells.every(c => c.trim() === 'O+');
     }, { timeout: 10_000 }).toBe(true);
 
@@ -101,7 +102,7 @@ test.describe('قائمة المرضى 🧑‍🤝‍🧑', () => {
 
   test('النقر على صف مريض يفتح ملفه', async ({ page }) => {
     await openPatients(page);
-    await page.locator('#tbl tbody tr').first().locator('td:nth-child(2)').click();
+    await page.locator('#tbl tbody tr').first().locator('td:nth-child(3)').click();
     // الملف داخل الشاشة: تبويب «الملف الشخصي» مفعّل بدل النافذة المنبثقة
     await expect(page.locator('#pat-tabs .tab.active')).toContainText('الملف الشخصي');
     await expect(page.locator('#modal-back')).not.toHaveClass(/show/);
@@ -118,13 +119,13 @@ test.describe('قائمة المرضى 🧑‍🤝‍🧑', () => {
 
   test('أعمدة العمر والتأمين معروضة', async ({ page }) => {
     await openPatients(page);
-    for (const h of ['المريض', 'العمر', 'الهاتف', 'الدم', 'التأمين',
+    for (const h of ['رقم الملف', 'المريض', 'العمر', 'الهاتف', 'الدم', 'التأمين',
                      'آخر زيارة', 'الموعد القادم', 'المتبقي']) {
       await expect(page.locator('#tbl thead th', { hasText: h })).toHaveCount(1);
     }
     // عمود العمر يحمل «سنة» لصف واحد على الأقل
     await expect.poll(async () =>
-      (await page.locator('#tbl tbody td:nth-child(3)').allInnerTexts())
+      (await page.locator('#tbl tbody td:nth-child(4)').allInnerTexts())
         .filter(t => t.includes('سنة')).length, { timeout: 10_000 }).toBeGreaterThan(0);
     await expectNoUiError(page);
   });
