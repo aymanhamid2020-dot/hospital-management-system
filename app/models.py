@@ -186,6 +186,7 @@ class DepartmentSchedule(Base):
     open_time = Column(String, nullable=False, default="08:00")
     close_time = Column(String, nullable=False, default="14:00")
     room_name = Column(String, nullable=True)          # العيادة/الغرفة داخل القسم
+    max_patients = Column(Integer, nullable=False, default=0)  # سعة الوردية (0 = بلا حد)
     created_at = Column(DateTime, server_default=func.now())
 
     department = relationship("Department", back_populates="schedules")
@@ -1610,3 +1611,305 @@ class HousekeepingTask(Base):
     completed_at = Column(DateTime, nullable=True)
     cancelled_at = Column(DateTime, nullable=True)
 
+
+
+# ================================================================
+# دورة الإيراد: التسعير · العروض والباقات · الودائع · إغلاق الصندوق
+#              الموافقات المسبقة · حزم المطالبات · إشعارات الدائن
+# ================================================================
+class PriceList(Base):
+    """قائمة أسعار — افتراضية أو خاصة بشركة تأمين/فئة مرضى."""
+    __tablename__ = "price_lists"
+    __table_args__ = (UniqueConstraint("code", name="uq_price_list_code"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    insurer = Column(String, nullable=True, index=True)      # شركة التأمين (اختياري)
+    patient_category = Column(String, nullable=True)         # فئة المرضى (اختياري)
+    is_default = Column(Boolean, nullable=False, default=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    notes = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    items = relationship("PriceListItem", back_populates="price_list",
+                         cascade="all, delete-orphan")
+
+
+class PriceListItem(Base):
+    """سعر خدمة/صنف داخل قائمة أسعار."""
+    __tablename__ = "price_list_items"
+    __table_args__ = (UniqueConstraint("price_list_id", "service_code",
+                                       name="uq_price_item_service"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    price_list_id = Column(Integer, ForeignKey("price_lists.id", ondelete="CASCADE"),
+                           nullable=False, index=True)
+    service_code = Column(String, nullable=False)
+    service_name = Column(String, nullable=False)
+    unit_price = Column(Float, nullable=False, default=0)
+    is_active = Column(Boolean, nullable=False, default=True)
+
+    price_list = relationship("PriceList", back_populates="items")
+
+
+class DiscountRule(Base):
+    """سياسة خصم: سقف النسبة، وهل تحتاج موافقة الإدارة المالية."""
+    __tablename__ = "discount_rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    max_percent = Column(Float, nullable=False, default=0)    # السقف المسموح %
+    scope = Column(String, nullable=False, default="all")     # all|invoice|pharmacy|package
+    requires_approval = Column(Boolean, nullable=False, default=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    notes = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class ServicePackage(Base):
+    """باقة خدمات (فحص شامل، متابعة حمل…) بسعر مجمّع."""
+    __tablename__ = "service_packages"
+    __table_args__ = (UniqueConstraint("code", name="uq_service_package_code"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    package_price = Column(Float, nullable=False, default=0)   # سعر الباقة
+    list_total = Column(Float, nullable=False, default=0)     # مجموع أسعار البنود (قبل الخصم)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    items = relationship("PackageItem", back_populates="package",
+                         cascade="all, delete-orphan")
+
+
+class PackageItem(Base):
+    """بند داخل الباقة مع سعره من قائمة الأسعار."""
+    __tablename__ = "package_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    package_id = Column(Integer, ForeignKey("service_packages.id", ondelete="CASCADE"),
+                        nullable=False, index=True)
+    service_code = Column(String, nullable=False)
+    service_name = Column(String, nullable=False)
+    quantity = Column(Integer, nullable=False, default=1)
+    unit_price = Column(Float, nullable=False, default=0)
+
+    package = relationship("ServicePackage", back_populates="items")
+
+
+class Quotation(Base):
+    """عرض سعر تكليفي قبل إجراء جراحي أو برنامج علاجي طويل."""
+    __tablename__ = "quotations"
+    __table_args__ = (UniqueConstraint("quote_no", name="uq_quotation_no"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    quote_no = Column(String, nullable=False, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"),
+                        nullable=False, index=True)
+    package_id = Column(Integer, ForeignKey("service_packages.id", ondelete="SET NULL"),
+                        nullable=True)
+    title = Column(String, nullable=False)
+    # draft | sent | accepted | rejected | expired | converted
+    status = Column(String, nullable=False, default="draft", index=True)
+    subtotal = Column(Float, nullable=False, default=0)
+    discount = Column(Float, nullable=False, default=0)
+    tax_rate = Column(Float, nullable=False, default=0)
+    total = Column(Float, nullable=False, default=0)
+    valid_until = Column(DateTime, nullable=True)
+    notes = Column(String, nullable=True)
+    invoice_id = Column(Integer, ForeignKey("invoices.id", ondelete="SET NULL"), nullable=True)
+    created_by = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+
+    patient = relationship("Patient")
+    package = relationship("ServicePackage")
+    invoice = relationship("Invoice")
+    lines = relationship("QuotationItem", back_populates="quotation",
+                         cascade="all, delete-orphan")
+
+
+class QuotationItem(Base):
+    """بند في عرض السعر."""
+    __tablename__ = "quotation_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    quotation_id = Column(Integer, ForeignKey("quotations.id", ondelete="CASCADE"),
+                          nullable=False, index=True)
+    service_code = Column(String, nullable=True)
+    description = Column(String, nullable=False)
+    quantity = Column(Integer, nullable=False, default=1)
+    unit_price = Column(Float, nullable=False, default=0)
+    line_total = Column(Float, nullable=False, default=0)
+
+    quotation = relationship("Quotation", back_populates="lines")
+
+
+class PatientDeposit(Base):
+    """دفعة مقدمة/وديعة لمريض (تنويم أو عملية) قابلة للخصم من الفاتورة."""
+    __tablename__ = "patient_deposits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"),
+                        nullable=False, index=True)
+    invoice_id = Column(Integer, ForeignKey("invoices.id", ondelete="SET NULL"), nullable=True)
+    admission_id = Column(Integer, ForeignKey("admissions.id", ondelete="SET NULL"), nullable=True)
+    amount = Column(Float, nullable=False)
+    applied_amount = Column(Float, nullable=False, default=0)
+    # active | applied | refunded
+    status = Column(String, nullable=False, default="active", index=True)
+    method = Column(String, nullable=False, default="cash")
+    reference = Column(String, nullable=True)
+    received_at = Column(DateTime, nullable=False, index=True)
+    notes = Column(String, nullable=True)
+    created_by = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    patient = relationship("Patient")
+
+
+class CashierShift(Base):
+    """وردية كاشير: افتتاح/إغلاق بمطابقة الصندوق مع المبيعات المسجّلة."""
+    __tablename__ = "cashier_shifts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, nullable=False, index=True)
+    opened_at = Column(DateTime, nullable=False, index=True)
+    opening_cash = Column(Float, nullable=False, default=0)
+    closed_at = Column(DateTime, nullable=True)
+    expected_cash = Column(Float, nullable=True)   # المحسوب من مبيعات النقد
+    counted_cash = Column(Float, nullable=True)    # المعدّ فعليًا
+    difference = Column(Float, nullable=True)     # الفروق (موجب = زيادة)
+    # open | balanced | unbalanced | closed
+    status = Column(String, nullable=False, default="open", index=True)
+    sales_count = Column(Integer, nullable=False, default=0)
+    collected_total = Column(Float, nullable=False, default=0)
+    notes = Column(String, nullable=True)
+    closed_by = Column(String, nullable=True)
+
+
+class PriorAuthorization(Base):
+    """موافقة مسبقة من شركة التأمين قبل تقديم الخدمة."""
+    __tablename__ = "prior_authorizations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    auth_number = Column(String, nullable=False, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"),
+                        nullable=False, index=True)
+    insurer = Column(String, nullable=True, index=True)
+    service_description = Column(String, nullable=False)
+    icd10_code = Column(String, nullable=True)   # تشخيص ICD-10
+    cpt_code = Column(String, nullable=True)     # إجراء CPT
+    requested_amount = Column(Float, nullable=False, default=0)
+    approved_amount = Column(Float, nullable=True)
+    # pending | approved | partially_approved | denied | expired
+    status = Column(String, nullable=False, default="pending", index=True)
+    requested_at = Column(DateTime, nullable=False, index=True)
+    decided_at = Column(DateTime, nullable=True)
+    valid_until = Column(DateTime, nullable=True)
+    decision_notes = Column(String, nullable=True)
+    created_by = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    patient = relationship("Patient")
+
+
+class ClaimBatch(Base):
+    """حزمة مطالبات مُجمَّعة لإرسالها لشركة تأمين دفعة واحدة."""
+    __tablename__ = "claim_batches"
+    __table_args__ = (UniqueConstraint("batch_no", name="uq_claim_batch_no"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    batch_no = Column(String, nullable=False, index=True)
+    insurer = Column(String, nullable=False, index=True)
+    period_from = Column(DateTime, nullable=False)
+    period_to = Column(DateTime, nullable=False)
+    # draft | submitted | settled | rejected
+    status = Column(String, nullable=False, default="draft", index=True)
+    total_claims = Column(Integer, nullable=False, default=0)
+    total_amount = Column(Float, nullable=False, default=0)
+    approved_amount = Column(Float, nullable=False, default=0)
+    submitted_at = Column(DateTime, nullable=True)
+    notes = Column(String, nullable=True)
+    created_by = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    items = relationship("ClaimBatchItem", back_populates="batch",
+                         cascade="all, delete-orphan")
+
+
+class ClaimBatchItem(Base):
+    """مطالبة ضمن حزمة."""
+    __tablename__ = "claim_batch_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    batch_id = Column(Integer, ForeignKey("claim_batches.id", ondelete="CASCADE"),
+                      nullable=False, index=True)
+    claim_id = Column(Integer, ForeignKey("insurance_claims.id", ondelete="CASCADE"),
+                      nullable=False, index=True)
+    amount = Column(Float, nullable=False, default=0)
+    approved_amount = Column(Float, nullable=True)
+
+    batch = relationship("ClaimBatch", back_populates="items")
+    claim = relationship("InsuranceClaim")
+
+
+class CreditNote(Base):
+    """إشعار دائن/استرداد مالي لفاتورة أو عملية بيع."""
+    __tablename__ = "credit_notes"
+    __table_args__ = (UniqueConstraint("note_no", name="uq_credit_note_no"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    note_no = Column(String, nullable=False, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"),
+                        nullable=False, index=True)
+    invoice_id = Column(Integer, ForeignKey("invoices.id", ondelete="SET NULL"), nullable=True)
+    dispense_id = Column(Integer, ForeignKey("dispenses.id", ondelete="SET NULL"), nullable=True)
+    amount = Column(Float, nullable=False)
+    method = Column(String, nullable=False, default="cash")
+    reason = Column(String, nullable=False)
+    # issued | refunded
+    status = Column(String, nullable=False, default="issued", index=True)
+    refunded_at = Column(DateTime, nullable=True)
+    created_by = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+
+    patient = relationship("Patient")
+    invoice = relationship("Invoice")
+    dispense = relationship("Dispense")
+
+
+# ================================================================
+# العيادات: سجل نقاط الخدمة outpatient المرتبط بمركز الأقسام
+# ================================================================
+# ملاحظة تصميم (إزالة التكرار): العيادة **سجل** يعرّف نقطة الخدمة أمام
+# المريض (كود · تخصص · موقع · طبيب مسؤول · رسوم كشف · حالة). أما الخدمات
+# وجداول الدوام فهي بيانات تشغيلية، فهي معرّفة أصلًا في مركز الأقسام
+# (DepartmentService / DepartmentSchedule) ولا تُنسخ هنا: العيادة ترتبط
+# بقسم عبر department_id وتقرأ وتكتب من نفس الجداول.
+class Clinic(Base):
+    """عيادة outpatient لها تخصص وموقع وطبيب مسؤول."""
+    __tablename__ = "clinics"
+    __table_args__ = (UniqueConstraint("code", name="uq_clinic_code"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    specialty = Column(String, nullable=True, index=True)   # باطنية · أطفال · أسنان
+    department_id = Column(Integer, ForeignKey("departments.id", ondelete="SET NULL"),
+                           nullable=True, index=True)       # القسم الذي تُدار عبره الخدمات والدوام
+    lead_doctor_id = Column(Integer, ForeignKey("doctors.id", ondelete="SET NULL"),
+                            nullable=True)                   # الطبيب المسؤول
+    location = Column(String, nullable=True)                # المبنى/الطابق/الغرفة
+    phone = Column(String, nullable=True)
+    consultation_fee = Column(Float, nullable=False, default=0)
+    default_duration = Column(Integer, nullable=False, default=20)  # دقائق الكشف
+    # active | closed
+    status = Column(String, nullable=False, default="active", index=True)
+    notes = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    doctor = relationship("Doctor")
+    department = relationship("Department")

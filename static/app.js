@@ -30,8 +30,23 @@ async function api(path, opts = {}) {
   if (res.status === 204) return null;
   const ct = res.headers.get('content-type') || '';
   const data = ct.includes('application/json') ? await res.json() : await res.text();
-  if (!res.ok) throw new Error((data && data.detail) || 'خطأ غير متوقع');
+  if (!res.ok) throw new Error(errorText(data));
   return data;
+}
+
+/** تحويل خطأ FastAPI (نص أو قائمة تحقق) إلى رسالة عربية مقروءة */
+function errorText(data) {
+  const d = data && data.detail !== undefined ? data.detail : data;
+  if (typeof d === 'string') return d;
+  if (Array.isArray(d)) {
+    return d.map(x => {
+      if (typeof x === 'string') return x;
+      const field = Array.isArray(x.loc) ? x.loc[x.loc.length - 1] : '';
+      const msg = x.msg || 'قيمة غير صحيحة';
+      return field ? `${field}: ${msg}` : msg;
+    }).join(' · ');
+  }
+  return 'خطأ غير متوقع';
 }
 
 async function apiBlob(path) {
@@ -3497,7 +3512,7 @@ const TITLES = {
   staff: 'الموظفون', hr: 'شؤون الموظفين', users: 'المستخدمون', backup: 'النسخ الاحتياطي', notifications: 'الإشعارات',
   lab: 'المختبر والأشعة', pharmacy: 'الصيدلية', inventory: 'المخزون', payroll: 'الرواتب',
   clinical: 'الرعاية والتشغيل', support: 'الصيانة والتعقيم', governance: 'الجودة والموارد',
-  audit: 'سجل التدقيق', quickops: 'العمليات السريعة', sales: 'المبيعات', accounts: 'الحسابات', accounting: 'المحاسبة'
+  audit: 'سجل التدقيق', clinics: 'العيادات', quickops: 'العمليات السريعة', sales: 'المبيعات', accounts: 'الحسابات', accounting: 'المحاسبة'
 };
 
 async function refreshBell() {
@@ -4618,7 +4633,1045 @@ document.addEventListener('keydown', (e) => {
   qoGo(tab);
 });
 
+/* ============================================================
+   🧾 دورة الإيراد — تبويبات شاشة المبيعات
+   ------------------------------------------------------------
+   1) البيع والفواتير  2) السندات والودائع  3) التأمين
+   4) العروض والباقات  5) التسعير والخصومات  6) تقارير المبيعات
+   ============================================================ */
+const RC_TABS = [['pos', '💳 البيع والفواتير'], ['collect', '💵 السندات والودائع'],
+                 ['insure', '🛡️ التأمين'], ['quotes', '📝 العروض والباقات'],
+                 ['pricing', '🏷️ التسعير والخصومات'], ['reports', '📊 تقارير المبيعات']];
+const RC = { tab: 'pos', data: {}, busy: false, loaded: false,
+  filters: { period: '', method: '', status: '', patient: '', staff: '' } };
+const rcMoney = (n) => (Number(n) || 0).toLocaleString('en-US',
+  { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ر.س';
+const rcDate = (d) => d ? new Date(d).toLocaleDateString('en-GB') : '—';
+const rcDateTime = (d) => d ? new Date(d).toLocaleString('en-GB',
+  { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+const RC_ST = { draft: 'مسودّة', sent: 'مُرسل', accepted: 'مقبول', rejected: 'مرفوض',
+  expired: 'منتهي', converted: 'محوَّل لفاتورة', pending: 'قيد الطلب',
+  approved: 'موافق عليه', partially_approved: 'موافقة جزئية', denied: 'مرفوض',
+  open: 'مفتوحة', balanced: 'متوازنة', unbalanced: 'غير متوازنة',
+  active: 'نشطة', applied: 'مستنفقة', refunded: 'مستردّة', issued: 'صادرة',
+  submitted: 'مُرسلة', settled: 'مُسوّاة' };
+
+async function rcLoad() {
+  const [pos, dep, shifts, auths, batches, denials, quotes, pkgs, pls, rules, cn, rep] =
+    await Promise.all([
+      Promise.allSettled([api('/accounts/sales'), api('/invoices/')]),
+      api('/revenue/deposits').catch(() => []),
+      api('/revenue/shifts').catch(() => []),
+      api('/revenue/prior-authorizations').catch(() => []),
+      api('/revenue/claim-batches').catch(() => []),
+      api('/revenue/denials').catch(() => []),
+      api('/revenue/quotations').catch(() => []),
+      api('/revenue/packages').catch(() => []),
+      api('/revenue/price-lists').catch(() => []),
+      api('/revenue/discount-rules').catch(() => []),
+      api('/revenue/credit-notes').catch(() => []),
+      api('/revenue/reports/sales').catch(() => ({})),
+    ]);
+  const ok = (r) => (r.status === 'fulfilled' ? r.value : null);
+  RC.data = {
+    sales: ok(pos[0]) || [], invoices: ok(pos[1]) || [],
+    deposits: dep, shifts, auths, batches, denials, quotes, packages: pkgs,
+    priceLists: pls, rules, creditNotes: cn, report: rep,
+  };
+}
+
+/* ===== شاشة المبيعات: التبويبات + المحتوى ===== */
+async function sales(main) {
+  main.innerHTML = `
+    <div class="tabbar" id="rc-tabs" role="tablist">
+      ${RC_TABS.map(([k, l]) => `<button type="button" role="tab"
+        class="tab${k === RC.tab ? ' active' : ''}" data-tab="${k}"
+        aria-selected="${k === RC.tab}" onclick="rcTab('${k}')">${l}</button>`).join('')}
+    </div>
+    <div id="rc-body"><div class="empty">جارٍ التحميل…</div></div>`;
+  await rcLoad();
+  RC.loaded = true;
+  rcRender();
+  applyI18n(main);
+}
+
+function rcTab(tab) {
+  RC.tab = tab;
+  document.querySelectorAll('#rc-tabs .tab').forEach(b =>
+    b.classList.toggle('active', b.dataset.tab === tab));
+  rcRender();
+}
+function rcRender() {
+  const body = document.getElementById('rc-body');
+  if (!body) return;
+  /* قبل اكتمال التحميل نعرض مؤشّرًا فقط: النقر على التبويب لا يبني نموذجًا
+     بنصافير ثم يمسحه إعادة الرسم بعد وصول البيانات */
+  if (!RC.loaded) {
+    body.innerHTML = '<div class="empty">جارٍ تحميل بيانات دورة الإيراد…</div>';
+    return;
+  }
+  const map = { pos: rcPos, collect: rcCollect, insure: rcInsure,
+    quotes: rcQuotes, pricing: rcPricing, reports: rcReports };
+  body.innerHTML = (map[RC.tab] || rcPos)();
+  applyI18n(body);
+}
+
+/* ===== 1) البيع والفواتير (السجل + الفواتير + إشعارات الدائن) ===== */
+function rcPos() {
+  const { sales, invoices, creditNotes } = RC.data;
+  const inv = invoices.slice(0, 25);
+  return `
+  <div class="card">
+    <div class="toolbar"><h3 style="margin:0">💳 نقطة البيع والفواتير</h3>
+      <button class="btn sm" onclick="qoGo('sale')">⚡ بيع سريع</button>
+      <button class="btn ghost sm" onclick="navigate('invoices')">💳 كل الفواتير</button>
+      <input id="f-acc-period" placeholder="YYYY-MM (كل الفترات)" value="${esc(ACC.period || '')}"
+        style="max-width:170px" oninput="RC.filters.period=this.value; rcApplyFilters()">
+      <select id="f-acc-method" onchange="RC.filters.method=this.value; rcApplyFilters()">
+        <option value="">كل طرق الدفع</option>
+        <option value="cash"${ACC.method === 'cash' ? ' selected' : ''}>نقدًا</option>
+        <option value="card"${ACC.method === 'card' ? ' selected' : ''}>بطاقة</option>
+        <option value="insurance"${ACC.method === 'insurance' ? ' selected' : ''}>تأمين</option>
+      </select>
+      <select id="f-acc-status" onchange="RC.filters.status=this.value; rcApplyFilters()">
+        <option value="">كل الحالات</option>
+        <option value="PAID"${ACC.status === 'PAID' ? ' selected' : ''}>مدفوعة</option>
+        <option value="PARTIAL"${ACC.status === 'PARTIAL' ? ' selected' : ''}>جزئية</option>
+        <option value="UNPAID"${ACC.status === 'UNPAID' ? ' selected' : ''}>غير مدفوعة</option>
+      </select>
+      <input id="f-acc-patient" placeholder="رقم المريض" value="${esc(ACC.patient || '')}"
+        style="max-width:120px" oninput="RC.filters.patient=this.value; rcApplyFilters()">
+      <input id="f-acc-staff" placeholder="الموظف" value="${esc(ACC.staff || '')}"
+        style="max-width:130px" oninput="RC.filters.staff=this.value; rcApplyFilters()">
+      <button class="btn ghost sm" onclick="rcClearFilters()">مسح</button></div>
+    <p style="font-size:13px;opacity:.8;margin:4px 0 10px">سجل المبيعات (الصيدلية) مع الدفع والتسديد،
+       وفواتير الخدمات الطبية (الكشافات والعمليات والفحوصات) للمرضى النقديين والتأمين.</p>
+    <table><thead><tr><th>#</th><th>التاريخ</th><th>المريض</th><th>البيان</th>
+      <th>الإجمالي</th><th>المدفوع</th><th>المتبقي</th><th>الحالة</th><th></th></tr></thead>
+    <tbody>${sales.length ? sales.slice(0, 20).map(s => `<tr>
+      <td>${s.id}</td><td>${rcDateTime(s.created_at)}</td>
+      <td>${esc((s.patient && s.patient.full_name) || '—')}</td>
+      <td>${esc((s.medication && s.medication.name) || '—')} × ${s.quantity}</td>
+      <td>${rcMoney(s.total_price)}</td><td>${rcMoney(s.paid_amount)}</td>
+      <td>${rcMoney(Math.max(0, s.total_price - s.paid_amount))}</td>
+      <td><span class="pill ${s.status === 'PAID' ? 'paid' : (s.status === 'PARTIAL' ? 'partial' : 'pending')}">${s.status}</span></td>
+      <td>${s.status !== 'PAID' ? `<button class="btn sm" onclick="rcPaySale(${s.id})">تحصيل</button>` : ''}</td>
+    </tr>`).join('') : `<tr><td colspan="9" class="empty">${
+      (RC.filters.period || RC.filters.method || RC.filters.status ||
+       RC.filters.patient || RC.filters.staff)
+        ? 'لا مبيعات في هذه الفترة'
+        : 'لا مبيعات بعد'}</td></tr>`}
+    </tbody></table>
+  </div>
+  <div class="card">
+    <h3>🧾 فواتير الخدمات الطبية</h3>
+    <table><thead><tr><th>#</th><th>المريض</th><th>الوصف</th><th>الإجمالي</th><th>الحالة</th>
+      <th>التأمين</th><th></th></tr></thead>
+    <tbody>${inv.length ? inv.map(i => `<tr>
+      <td>${i.id}</td><td>${esc(i.patient_name || '—')}</td><td>${esc(i.description || '—')}</td>
+      <td>${rcMoney((i.amount - i.discount) + (i.amount - i.discount) * (i.tax_rate || 0) / 100)}</td>
+      <td><span class="pill ${i.status === 'paid' ? 'paid' : (i.status === 'partial' ? 'partial' : 'pending')}">${i.status}</span></td>
+      <td>${esc(i.insurer || '—')}</td>
+      <td><button class="btn sm ghost" onclick="rcPrintInvoice(${i.id})">🧾 طباعة</button></td>
+    </tr>`).join('') : '<tr><td colspan="7" class="empty">لا فواتير</td></tr>'}
+    </tbody></table>
+  </div>
+  <div class="card">
+    <h3>↩️ إشعارات الدائن والاستردادات</h3>
+    <div class="qo-money">
+      <div class="field"><label>نوع السجل</label>
+        <select id="cn-kind"><option value="invoice">فاتورة خدمات</option>
+        <option value="dispense">عملية بيع صيدلية</option></select></div>
+      <div class="field" style="min-width:190px"><label>رقم السجل</label>
+        <input id="cn-target" placeholder="رقم الفاتورة"></div>
+      <div class="field"><label>المبلغ</label><input id="cn-amount" type="number" min="0" step="0.5"></div>
+      <div class="field" style="min-width:200px"><label>السبب</label>
+        <input id="cn-reason" placeholder="خدمة لم تُقدَّم / دواء مرتجع"></div>
+      <div class="field"><label>طريقة الاسترداد</label>
+        <select id="cn-method"><option value="cash">نقدًا</option><option value="card">بطاقة</option>
+        <option value="bank">بنك</option></select></div>
+      <button class="btn" onclick="rcCreditNote()">↩️ إصدار إشعار دائن</button>
+    </div>
+    <table><thead><tr><th>رقم الإشعار</th><th>المريض</th><th>المبلغ</th><th>السبب</th><th>الحالة</th><th>التاريخ</th></tr></thead>
+    <tbody>${creditNotes.length ? creditNotes.slice(0, 15).map(n => `<tr>
+      <td>${esc(n.note_no)}</td><td>${esc(n.patient_name || '—')}</td><td>${rcMoney(n.amount)}</td>
+      <td>${esc(n.reason)}</td><td><span class="pill ${n.status === 'refunded' ? 'paid' : 'partial'}">${RC_ST[n.status] || n.status}</span></td>
+      <td>${rcDate(n.created_at)}</td></tr>`).join('')
+      : '<tr><td colspan="6" class="empty">لا إشعارات دائن</td></tr>'}</tbody></table>
+    <p style="font-size:12px;opacity:.75">الاسترداد لا يتجاوز المبلغ المدفوع فعلًا على الفاتورة أو عملية البيع.</p>
+  </div>`;
+}
+
+async function rcPaySale(id) {
+  const rows = await api('/patients/?limit=1');
+  const amount = prompt('المبلغ المحصّل (ر.س)');
+  if (amount === null) return;
+  const method = prompt('طريقة الدفع: cash أو card أو insurance', 'cash');
+  if (!method) return;
+  try {
+    await api(`/accounts/sales/${id}/payment`, { method: 'PUT',
+      body: JSON.stringify({ paid_amount: Number(amount), payment_method: method }) });
+    toast('تم تسجيل الدفع ✅');
+    await rcLoad(); rcRender();
+  } catch (e) { toast(e.message, true); }
+}
+async function rcPrintInvoice(id) {
+  try { await openPrint(`/invoices/${id}/print?lang=ar`); }
+  catch (e) { toast(e.message, true); }
+}
+async function rcCreditNote() {
+  const target = document.getElementById('cn-target').value.trim();
+  const amount = Number(document.getElementById('cn-amount').value || 0);
+  const reason = document.getElementById('cn-reason').value.trim();
+  const method = document.getElementById('cn-method').value;
+  const kind = document.getElementById('cn-kind').value;   // فاتورة أم عملية بيع
+  if (!target || !amount || !reason) { toast('أكمل رقم السجل والمبلغ والسبب', true); return; }
+  const id = Number(target);
+  const list = kind === 'invoice' ? RC.data.invoices : RC.data.sales;
+  let row = list.find(x => x.id === id);
+  /* السجل قد يكون أُنشئ بعد تحميل الشاشة ⇒ نسأل الخادم قبل الرفض */
+  if (!row) {
+    row = kind === 'invoice'
+      ? await api('/invoices/' + id).catch(() => null)
+      : await api('/accounts/sales/' + id).catch(() => null);
+  }
+  if (!row || !row.patient_id) { toast('لا يوجد سجل مطابق لهذا الرقم', true); return; }
+  try {
+    const body = { patient_id: row.patient_id, amount, reason, method, refund_now: true };
+    if (kind === 'invoice') body.invoice_id = id; else body.dispense_id = id;
+    await api('/revenue/credit-notes', { method: 'POST', body: JSON.stringify(body) });
+    toast('تم إصدار إشعار الدائن والاسترداد ✅');
+    await rcLoad(); rcRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ===== فلاتر سجل المبيعات (نفس فلاتر الشاشة السابقة) ===== */
+async function rcApplyFilters() {
+  const f = RC.filters;
+  ACC.period = f.period; ACC.method = f.method; ACC.status = f.status;
+  ACC.patient = f.patient; ACC.staff = f.staff;
+  const pr = periodRange(f.period);
+  const q = new URLSearchParams();
+  if (pr.from) { q.set('from_date', pr.from); q.set('to_date', pr.to); }
+  if (f.method) q.set('payment_method', f.method);
+  if (f.status) q.set('status', f.status);
+  if (f.patient) q.set('patient_id', f.patient);
+  if (f.staff) q.set('staff', f.staff);
+  try {
+    const [sales, invoices] = await Promise.all([
+      api('/accounts/sales' + (q.toString() ? '?' + q.toString() : '')),
+      api('/invoices/'),
+    ]);
+    RC.data.sales = sales; RC.data.invoices = invoices;
+    rcRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+function rcClearFilters() {
+  RC.filters = { period: '', method: '', status: '', patient: '', staff: '' };
+  Object.assign(ACC, { period: '', method: '', status: '', patient: '', staff: '' });
+  rcApplyFilters();
+}
+
+/* ===== 2) السندات والودائع وإغلاق الصندوق ===== */
+function rcCollect() {
+  const { deposits, shifts } = RC.data;
+  const open = shifts.find(s => s.status === 'open');
+  return `
+  <div class="card">
+    <h3>💵 السندات والتحصيل</h3>
+    <div class="qo-money">
+      <div class="field" style="min-width:230px"><label>المريض *</label>
+        <input id="dep-patient" placeholder="رقم المريض"></div>
+      <div class="field"><label>المبلغ (ر.س)</label><input id="dep-amount" type="number" min="0" step="0.5"></div>
+      <div class="field"><label>طريقة الدفع</label>
+        <select id="dep-method"><option value="cash">نقدًا</option><option value="card">بطاقة</option>
+        <option value="bank">بنك</option><option value="insurance">تأمين</option></select></div>
+      <div class="field" style="min-width:170px"><label>المرجع</label>
+        <input id="dep-ref" placeholder="رقم وصل/تحويل"></div>
+      <div class="field" style="min-width:170px"><label>ملاحظة</label>
+        <input id="dep-notes" placeholder="دفعة تنويم"></div>
+      <button class="btn" onclick="rcCreateDeposit()">💵 تسجيل دفعة مقدمة</button>
+    </div>
+    <p style="font-size:12px;opacity:.75">المقدّمات تُقيَّد في الدفتر كقبض نقدي/بنكي مقابل رصيد المريض،
+       وتُخصم لاحقًا من فاتورة التنويم أو العملية.</p>
+  </div>
+  <div class="card">
+    <h3>💰 الدفعات المقدمة (الودائع)</h3>
+    <table><thead><tr><th>#</th><th>المريض</th><th>المبلغ</th><th>المخصوم</th><th>الرصيد</th>
+      <th>الطريقة</th><th>الحالة</th><th>التاريخ</th><th>الإجراء</th></tr></thead>
+    <tbody>${deposits.length ? deposits.slice(0, 20).map(d => `<tr>
+      <td>${d.id}</td><td>${esc(d.patient_name || '—')}</td><td>${rcMoney(d.amount)}</td>
+      <td>${rcMoney(d.applied_amount)}</td><td>${rcMoney(d.balance)}</td>
+      <td>${esc(d.method)}</td>
+      <td><span class="pill ${d.status === 'active' ? 'partial' : 'paid'}">${RC_ST[d.status] || d.status}</span></td>
+      <td>${rcDate(d.received_at)}</td>
+      <td>${d.status === 'active' ? `<button class="btn sm" onclick="rcApplyDeposit(${d.id})">خصم على فاتورة</button>` : '—'}</td>
+    </tr>`).join('') : '<tr><td colspan="9" class="empty">لا ودائع</td></tr>'}</tbody></table>
+  </div>
+  <div class="card">
+    <h3>🧾 إغلاق الصندوق اليومي (وردية الكاشير)</h3>
+    ${open ? `<div class="qo-money">
+        <div>وردية مفتوحة منذ <b>${rcDateTime(open.opened_at)}</b> — رصيد افتتاحي ${rcMoney(open.opening_cash)}</div>
+        <div class="field"><label>النقد المعدّ فعليًا (ر.س)</label>
+          <input id="shift-counted" type="number" min="0" step="0.5" value="${open.opening_cash}"></div>
+        <button class="btn" onclick="rcCloseShift()">🔒 إغلاق ومطابقة</button>
+      </div>`
+      : `<div class="qo-money">
+          <div class="field"><label>الرصيد الافتتاحي (ر.س)</label>
+            <input id="shift-opening" type="number" min="0" step="0.5" value="0"></div>
+          <button class="btn" onclick="rcOpenShift()">▶️ فتح وردية</button>
+        </div>`}
+    <table><thead><tr><th>#</th><th>الكاشير</th><th>فُتحت</th><th>أُغلقت</th><th>المتوقَّع</th>
+      <th>المعدّ</th><th>الفرق</th><th>الحالة</th><th>عمليات</th></tr></thead>
+    <tbody>${shifts.length ? shifts.slice(0, 15).map(s => `<tr>
+      <td>${s.id}</td><td>${esc(s.username)}</td><td>${rcDateTime(s.opened_at)}</td>
+      <td>${rcDateTime(s.closed_at)}</td><td>${rcMoney(s.expected_cash || 0)}</td>
+      <td>${rcMoney(s.counted_cash || 0)}</td>
+      <td><b style="color:${(s.difference || 0) === 0 ? '#28a745' : '#dc3545'}">${rcMoney(s.difference || 0)}</b></td>
+      <td><span class="pill ${s.status === 'balanced' ? 'paid' : (s.status === 'open' ? 'partial' : 'pending')}">${RC_ST[s.status] || s.status}</span></td>
+      <td>${s.sales_count || 0}</td></tr>`).join('')
+      : '<tr><td colspan="9" class="empty">لا ورديات</td></tr>'}</tbody></table>
+    <p style="font-size:12px;opacity:.75">المطابقة تقارن النقد المعدّ بما سجّله النظام من نقد
+       (فواتير + صرف أدوية + ودائع) خلال الوردية، وتُظهر الفرق زيادة أو عجزًا.</p>
+  </div>`;
+}
+
+async function rcCreateDeposit() {
+  const pid = Number(document.getElementById('dep-patient').value.trim());
+  const amount = Number(document.getElementById('dep-amount').value || 0);
+  if (!pid || !amount) { toast('أدخل رقم المريض والمبلغ', true); return; }
+  try {
+    await api('/revenue/deposits', { method: 'POST', body: JSON.stringify({
+      patient_id: pid, amount,
+      method: document.getElementById('dep-method').value,
+      reference: document.getElementById('dep-ref').value.trim() || null,
+      notes: document.getElementById('dep-notes').value.trim() || null }) });
+    toast('تم تسجيل الدفعة المقدمة ✅');
+    await rcLoad(); rcRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function rcApplyDeposit(id) {
+  const invId = prompt('رقم الفاتورة المراد تحصيلها من هذه الدفعة');
+  if (!invId) return;
+  try {
+    const r = await api('/revenue/deposits/' + id + '/apply', { method: 'POST',
+      body: JSON.stringify({ invoice_id: Number(invId) }) });
+    toast('تم الخصم — رصيد الوديعة ' + rcMoney(r.balance) + ' ✅');
+    await rcLoad(); rcRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function rcOpenShift() {
+  try {
+    await api('/revenue/shifts/open', { method: 'POST', body: JSON.stringify({
+      opening_cash: Number(document.getElementById('shift-opening').value || 0) }) });
+    toast('فُتحت الوردية ✅');
+    await rcLoad(); rcRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function rcCloseShift() {
+  try {
+    const r = await api('/revenue/shifts/close', { method: 'POST', body: JSON.stringify({
+      counted_cash: Number(document.getElementById('shift-counted').value || 0) }) });
+    const diff = r.difference || 0;
+    toast(diff === 0 ? 'الصندوق متوازن ✅' : 'فرق ' + rcMoney(diff) + ' — راجع日报',
+      diff !== 0);
+    await rcLoad(); rcRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ===== 3) التأمين: الموافقات المسبقة والحزم والرفوض ===== */
+function rcInsure() {
+  const { auths, batches, denials } = RC.data;
+  return `
+  <div class="card">
+    <h3>🛡️ الموافقات المسبقة (Prior Authorizations)</h3>
+    <div class="qo-money">
+      <div class="field" style="min-width:170px"><label>المريض *</label>
+        <input id="pa-patient" placeholder="رقم المريض"></div>
+      <div class="field" style="min-width:160px"><label>شركة التأمين</label>
+        <input id="pa-insurer" placeholder="شركة أ"></div>
+      <div class="field" style="min-width:210px"><label>الخدمة *</label>
+        <input id="pa-service" placeholder="عملية قلب مفتوح"></div>
+      <div class="field"><label>ICD-10</label><input id="pa-icd" placeholder="I21.4"></div>
+      <div class="field"><label>CPT</label><input id="pa-cpt" placeholder="33510"></div>
+      <div class="field"><label>المبلغ المطلوب</label>
+        <input id="pa-amount" type="number" min="0" step="1"></div>
+      <button class="btn" onclick="rcPriorAuth()">📄 تسجيل طلب موافقة</button>
+    </div>
+    <table><thead><tr><th>الرقم</th><th>المريض</th><th>التأمين</th><th>الخدمة</th><th>ICD/CPT</th>
+      <th>المطلوب</th><th>المعتمد</th><th>الحالة</th><th>القرار</th></tr></thead>
+    <tbody>${auths.length ? auths.slice(0, 15).map(a => `<tr>
+      <td>${esc(a.auth_number)}</td><td>${esc(a.patient_name || '—')}</td><td>${esc(a.insurer || '—')}</td>
+      <td>${esc(a.service_description)}</td>
+      <td>${esc(a.icd10_code || '—')} / ${esc(a.cpt_code || '—')}</td>
+      <td>${rcMoney(a.requested_amount)}</td><td>${a.approved_amount == null ? '—' : rcMoney(a.approved_amount)}</td>
+      <td><span class="pill ${a.status === 'approved' ? 'paid' : (a.status === 'denied' ? 'pending' : 'partial')}">${RC_ST[a.status] || a.status}</span></td>
+      <td>${a.status === 'pending'
+        ? `<button class="btn sm" onclick="rcAuthDecision(${a.id},'approved',${a.requested_amount})">موافقة</button>
+           <button class="btn sm ghost" onclick="rcAuthDecision(${a.id},'denied',0)">رفض</button>` : '—'}</td>
+    </tr>`).join('') : '<tr><td colspan="9" class="empty">لا موافقات مسبقة</td></tr>'}</tbody></table>
+  </div>
+  <div class="card">
+    <h3>📦 حزم المطالبات (Batch Claims)</h3>
+    <div class="qo-money">
+      <div class="field" style="min-width:170px"><label>شركة التأمين *</label>
+        <input id="cb-insurer" placeholder="شركة أ"></div>
+      <div class="field"><label>من تاريخ</label><input id="cb-from" type="date"></div>
+      <div class="field"><label>إلى تاريخ</label><input id="cb-to" type="date"></div>
+      <button class="btn" onclick="rcBuildBatch()">🧮 تجميع حزمة</button>
+    </div>
+    <table><thead><tr><th>رقم الحزمة</th><th>التأمين</th><th>الفترة</th><th>المطالبات</th>
+      <th>الإجمالي</th><th>المعتمد</th><th>الحالة</th><th>الإجراء</th></tr></thead>
+    <tbody>${batches.length ? batches.slice(0, 12).map(b => `<tr>
+      <td>${esc(b.batch_no)}</td><td>${esc(b.insurer)}</td>
+      <td>${rcDate(b.period_from)} ← ${rcDate(b.period_to)}</td><td>${b.total_claims}</td>
+      <td>${rcMoney(b.total_amount)}</td><td>${rcMoney(b.approved_amount)}</td>
+      <td><span class="pill ${b.status === 'settled' ? 'paid' : 'partial'}">${RC_ST[b.status] || b.status}</span></td>
+      <td>${b.status === 'draft' ? `<button class="btn sm" onclick="rcSubmitBatch(${b.id})">إرسال للتأمين</button>` : '—'}</td>
+    </tr>`).join('') : '<tr><td colspan="8" class="empty">لا حزم مطالبات</td></tr>'}</tbody></table>
+    <p style="font-size:12px;opacity:.75">تُبنى الحزمة من مطالبات «مُرسلة» لتلك الشركة في الفترة،
+       ولا تُجمَّع المطالبة مرتين (409)، والحزمة تُرسَل مرة واحدة.</p>
+  </div>
+  <div class="card">
+    <h3>🚫 الرفوضات — تسوية وإعادة إرسال</h3>
+    <table><thead><tr><th>النوع</th><th>المرجع</th><th>التأمين</th><th>المبلغ</th><th>السبب</th><th>الإجراء</th></tr></thead>
+    <tbody>${denials.length ? denials.slice(0, 15).map(d => `<tr>
+      <td>${d.kind === 'claim' ? 'مطالبة' : 'موافقة مسبقة'}</td><td>${esc(d.reference || '—')}</td>
+      <td>${esc(d.insurer || '—')}</td><td>${rcMoney(d.amount)}</td><td>${esc(d.reason || '—')}</td>
+      <td>${d.kind === 'claim' ? `<button class="btn sm" onclick="rcTransferDenial(${d.id})">تحميل على حساب المريض</button>` : '—'}</td>
+    </tr>`).join('') : '<tr><td colspan="6" class="empty">لا رفوضات ✅</td></tr>'}</tbody></table>
+    <p style="font-size:12px;opacity:.75">المطالبة المرفوضة تظهر هنا تلقائيًا، ويمكن تحميل قيمتها
+       على حساب المريض (لا تُسقط حق المستشفى من التحصيل).</p>
+  </div>`;
+}
+
+async function rcPriorAuth() {
+  const pid = Number(document.getElementById('pa-patient').value.trim());
+  const svc = document.getElementById('pa-service').value.trim();
+  if (!pid || !svc) { toast('أدخل رقم المريض ووصف الخدمة', true); return; }
+  try {
+    await api('/revenue/prior-authorizations', { method: 'POST', body: JSON.stringify({
+      patient_id: pid, insurer: document.getElementById('pa-insurer').value.trim() || null,
+      service_description: svc, icd10_code: document.getElementById('pa-icd').value.trim() || null,
+      cpt_code: document.getElementById('pa-cpt').value.trim() || null,
+      requested_amount: Number(document.getElementById('pa-amount').value || 0) }) });
+    toast('تم تسجيل طلب الموافقة ✅');
+    await rcLoad(); rcRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function rcAuthDecision(id, status, amount) {
+  try {
+    await api('/revenue/prior-authorizations/' + id + '/decision', { method: 'POST',
+      body: JSON.stringify({ status, approved_amount: amount }) });
+    toast('تم تسجيل قرار التأمين ✅');
+    await rcLoad(); rcRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function rcBuildBatch() {
+  const insurer = document.getElementById('cb-insurer').value.trim();
+  if (!insurer) { toast('أدخل شركة التأمين', true); return; }
+  const from = document.getElementById('cb-from').value ||
+    new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+  const to = document.getElementById('cb-to').value || new Date().toISOString().slice(0, 10);
+  try {
+    const r = await api('/revenue/claim-batches', { method: 'POST', body: JSON.stringify({
+      insurer, period_from: from + 'T00:00:00', period_to: to + 'T23:59:59' }) });
+    toast('حزمة ' + r.batch_no + ': ' + r.total_claims + ' مطالبة بإجمالي ' + rcMoney(r.total_amount) + ' ✅');
+    await rcLoad(); rcRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function rcSubmitBatch(id) {
+  try {
+    await api('/revenue/claim-batches/' + id + '/submit', { method: 'POST', body: JSON.stringify({}) });
+    toast('تم إرسال الحزمة لشركة التأمين ✅');
+    await rcLoad(); rcRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function rcTransferDenial(id) {
+  if (!confirm('تحميل قيمة المطالبة المرفوضة على حساب المريض؟')) return;
+  try {
+    const r = await api('/revenue/denials/claims/' + id + '/transfer', { method: 'POST' });
+    toast('تم التحميل — المتبقي على المريض ' + rcMoney(r.outstanding) + ' ✅');
+    await rcLoad(); rcRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ===== 4) عروض الأسعار والباقات ===== */
+function rcQuotes() {
+  const { quotes, packages } = RC.data;
+  return `
+  <div class="card">
+    <h3>📝 عروض الأسعار (Sales Quotations)</h3>
+    <div class="qo-money">
+      <div class="field" style="min-width:170px"><label>المريض *</label>
+        <input id="qt-patient" placeholder="رقم المريض"></div>
+      <div class="field" style="min-width:220px"><label>عنوان العرض *</label>
+        <input id="qt-title" placeholder="برنامج علاجي / عملية تجميل"></div>
+      <div class="field" style="min-width:200px"><label>من باقة</label>
+        <select id="qt-package"><option value="">— بدون باقة (بنود يدوية) —</option>
+          ${packages.filter(p => p.is_active).map(p => `<option value="${p.id}">${esc(p.name)} — ${rcMoney(p.package_price)}</option>`).join('')}
+        </select></div>
+      <div class="field" style="min-width:220px"><label>أو بند يدوي</label>
+        <input id="qt-line" placeholder="وصف البند"></div>
+      <div class="field"><label>سعر الوحدة</label>
+        <input id="qt-price" type="number" min="0" step="1" value="0"></div>
+      <div class="field"><label>الكمية</label>
+        <input id="qty" type="number" min="1" value="1"></div>
+      <div class="field"><label>الخصم</label><input id="qt-disc" type="number" min="0" value="0"></div>
+      <div class="field"><label>الضريبة %</label><input id="qt-tax" type="number" min="0" value="15"></div>
+      <button class="btn" onclick="rcCreateQuote()">➕ إنشاء عرض سعر</button>
+    </div>
+    <table><thead><tr><th>الرقم</th><th>المريض</th><th>العنوان</th><th>الإجمالي</th>
+      <th>الصلاحية</th><th>الحالة</th><th>الإجراءات</th></tr></thead>
+    <tbody>${quotes.length ? quotes.slice(0, 20).map(q => `<tr>
+      <td>${esc(q.quote_no)}</td><td>${esc(q.patient_name || '—')}</td><td>${esc(q.title)}</td>
+      <td>${rcMoney(q.total)}</td><td>${rcDate(q.valid_until)}</td>
+      <td><span class="pill ${q.status === 'converted' ? 'paid' : (q.status === 'accepted' ? 'partial' : 'pending')}">${RC_ST[q.status] || q.status}</span></td>
+      <td>${q.status !== 'converted' ? `
+        <button class="btn sm" onclick="rcQuoteStatus(${q.id},'sent')">إرسال</button>
+        <button class="btn sm" onclick="rcQuoteStatus(${q.id},'accepted')">قبول</button>
+        <button class="btn sm" onclick="rcQuoteStatus(${q.id},'rejected')">رفض</button>
+        ${q.status === 'accepted' ? `<button class="btn sm ghost" onclick="rcConvertQuote(${q.id})">تحويل لفاتورة</button>` : ''}`
+        : `<span class="pill paid">فاتورة #${q.invoice_id}</span>`}</td>
+    </tr>`).join('') : '<tr><td colspan="7" class="empty">لا عروض أسعار</td></tr>'}</tbody></table>
+  </div>
+  <div class="card">
+    <h3>🎁 باقات الخدمات (Packages &amp; Bundles)</h3>
+    <table><thead><tr><th>الكود</th><th>الباقة</th><th>سعر الباقة</th><th>قيمة البنود</th>
+      <th>التوفير</th><th>الحالة</th><th>البنود</th></tr></thead>
+    <tbody>${packages.length ? packages.map(p => `<tr>
+      <td>${esc(p.code)}</td><td>${esc(p.name)}</td><td>${rcMoney(p.package_price)}</td>
+      <td>${rcMoney(p.list_total)}</td>
+      <td><b style="color:#28a745">${rcMoney(p.saving)}</b></td>
+      <td><span class="pill ${p.is_active ? 'paid' : 'pending'}">${p.is_active ? 'نشطة' : 'معطّلة'}</span></td>
+      <td style="font-size:12px">${p.lines.map(l => esc(l.service_name) + ' ×' + l.quantity).join(' · ') || '—'}</td>
+    </tr>`).join('') : '<tr><td colspan="7" class="empty">لا باقات</td></tr>'}</tbody></table>
+  </div>`;
+}
+
+async function rcCreateQuote() {
+  const pid = Number(document.getElementById('qt-patient').value.trim());
+  const title = document.getElementById('qt-title').value.trim();
+  if (!pid || !title) { toast('أدخل رقم المريض وعنوان العرض', true); return; }
+  const body = {
+    patient_id: pid, title,
+    package_id: Number(document.getElementById('qt-package').value) || null,
+    discount: Number(document.getElementById('qt-disc').value || 0),
+    tax_rate: Number(document.getElementById('qt-tax').value || 0),
+    lines: [],
+  };
+  const desc = document.getElementById('qt-line').value.trim();
+  if (!body.package_id && desc) {
+    body.lines = [{ description: desc,
+      quantity: Number(document.getElementById('qty').value || 1),
+      unit_price: Number(document.getElementById('qt-price').value || 0) }];
+  }
+  try {
+    const r = await api('/revenue/quotations', { method: 'POST', body: JSON.stringify(body) });
+    toast('عرض السعر ' + r.quote_no + ' بإجمالي ' + rcMoney(r.total) + ' ✅');
+    await rcLoad(); rcRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function rcQuoteStatus(id, status) {
+  try {
+    await api('/revenue/quotations/' + id + '/status', { method: 'PUT',
+      body: JSON.stringify({ status }) });
+    toast('تم تحديث حالة العرض ✅');
+    await rcLoad(); rcRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function rcConvertQuote(id) {
+  try {
+    const r = await api('/revenue/quotations/' + id + '/convert', { method: 'POST' });
+    toast('تم التحويل إلى فاتورة #' + r.invoice_id + ' ✅');
+    await rcLoad(); rcRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ===== 5) التسعير وسياسات الخصم ===== */
+function rcPricing() {
+  const { priceLists, rules } = RC.data;
+  return `
+  <div class="card">
+    <h3>🏷️ قوائم الأسعار (Price Lists / Tariffs)</h3>
+    <div class="qo-money">
+      <div class="field"><label>كود القائمة *</label><input id="pl-code" placeholder="TARIF-01"></div>
+      <div class="field" style="min-width:170px"><label>الاسم *</label>
+        <input id="pl-name" placeholder="أسعار شركة أ"></div>
+      <div class="field" style="min-width:140px"><label>شركة التأمين</label>
+        <input id="pl-insurer" placeholder="شركة أ"></div>
+      <div class="field" style="min-width:130px"><label>فئة المرضى</label>
+        <input id="pl-category" placeholder="VIP"></div>
+      <label class="field"><input type="checkbox" id="pl-default"> قائمة افتراضية</label>
+      <div class="field" style="min-width:130px"><label>كود الخدمة</label>
+        <input id="pl-svc" placeholder="CONS"></div>
+      <div class="field" style="min-width:150px"><label>اسم الخدمة</label>
+        <input id="pl-svcname" placeholder="استشارة"></div>
+      <div class="field"><label>السعر</label>
+        <input id="pl-price" type="number" min="0" step="1" value="0"></div>
+      <button class="btn" onclick="rcCreatePriceList()">➕ إنشاء قائمة</button>
+    </div>
+    <table><thead><tr><th>الكود</th><th>الاسم</th><th>التأمين</th><th>الفئة</th><th>افتراضية</th>
+      <th>البنود</th><th>عيّنة الأسعار</th></tr></thead>
+    <tbody>${priceLists.length ? priceLists.map(p => `<tr>
+      <td>${esc(p.code)}</td><td>${esc(p.name)}</td><td>${esc(p.insurer || '—')}</td>
+      <td>${esc(p.patient_category || '—')}</td>
+      <td>${p.is_default ? '<span class="pill paid">افتراضية</span>' : '—'}</td>
+      <td>${p.items_count}</td>
+      <td style="font-size:12px">${p.items.slice(0, 3).map(i =>
+        esc(i.service_name) + ': ' + rcMoney(i.unit_price)).join(' · ') || '—'}</td>
+    </tr>`).join('') : '<tr><td colspan="7" class="empty">لا قوائم أسعار</td></tr>'}</tbody></table>
+    <p style="font-size:12px;opacity:.75">أولوية السعر: قائمة شركة التأمين ← قائمة فئة المريض ← القائمة الافتراضية.</p>
+  </div>
+  <div class="card">
+    <h3>🎯 سياسات الخصم (Discount Rules)</h3>
+    <div class="qo-money">
+      <div class="field" style="min-width:170px"><label>اسم السياسة *</label>
+        <input id="dr-name" placeholder="سقف موظف الاستقبال"></div>
+      <div class="field"><label>أقصى نسبة %</label>
+        <input id="dr-max" type="number" min="0" max="100" value="10"></div>
+      <div class="field"><label>النطاق</label>
+        <select id="dr-scope"><option value="all">الكل</option><option value="invoice">فواتير</option>
+        <option value="pharmacy">صيدلية</option><option value="package">باقات</option></select></div>
+      <label class="field"><input type="checkbox" id="dr-approval" checked> تحتاج موافقة الإدارة</label>
+      <button class="btn" onclick="rcCreateRule()">➕ إضافة سياسة</button>
+      <div class="field" style="min-width:120px"><label>فحص نسبة</label>
+        <input id="dr-check" type="number" min="0" max="100" value="5"></div>
+      <button class="btn ghost" onclick="rcCheckDiscount()">🔍 فحص</button>
+    </div>
+    <table><thead><tr><th>السياسة</th><th>السقف %</th><th>النطاق</th><th>موافقة</th><th>الحالة</th></tr></thead>
+    <tbody>${rules.length ? rules.map(r => `<tr>
+      <td>${esc(r.name)}</td><td>${r.max_percent}</td><td>${esc(r.scope)}</td>
+      <td>${r.requires_approval ? 'نعم' : 'لا'}</td>
+      <td><span class="pill ${r.is_active ? 'paid' : 'pending'}">${r.is_active ? 'سارية' : 'موقوفة'}</span></td>
+    </tr>`).join('') : '<tr><td colspan="5" class="empty">لا سياسات خصم</td></tr>'}</tbody></table>
+  </div>`;
+}
+
+async function rcCreatePriceList() {
+  const code = document.getElementById('pl-code').value.trim();
+  const name = document.getElementById('pl-name').value.trim();
+  if (!code || !name) { toast('أدخل كود القائمة واسمها', true); return; }
+  const lines = [];
+  const svc = document.getElementById('pl-svc').value.trim();
+  if (svc) lines.push({ service_code: svc,
+    service_name: document.getElementById('pl-svcname').value.trim() || svc,
+    unit_price: Number(document.getElementById('pl-price').value || 0) });
+  try {
+    await api('/revenue/price-lists', { method: 'POST', body: JSON.stringify({
+      code, name, lines,
+      insurer: document.getElementById('pl-insurer').value.trim() || null,
+      patient_category: document.getElementById('pl-category').value.trim() || null,
+      is_default: document.getElementById('pl-default').checked }) });
+    toast('تم إنشاء قائمة الأسعار ✅');
+    await rcLoad(); rcRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function rcCreateRule() {
+  const name = document.getElementById('dr-name').value.trim();
+  if (!name) { toast('أدخل اسم السياسة', true); return; }
+  try {
+    await api('/revenue/discount-rules', { method: 'POST', body: JSON.stringify({
+      name, max_percent: Number(document.getElementById('dr-max').value || 0),
+      scope: document.getElementById('dr-scope').value,
+      requires_approval: document.getElementById('dr-approval').checked }) });
+    toast('تمت إضافة سياسة الخصم ✅');
+    await rcLoad(); rcRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function rcCheckDiscount() {
+  const percent = Number(document.getElementById('dr-check').value || 0);
+  try {
+    const r = await api('/revenue/discount-rules/check?percent=' + percent +
+      '&scope=' + document.getElementById('dr-scope').value);
+    toast(r.allowed
+      ? '✅ ' + percent + '% ضمن السقف (' + r.max_percent + '%)' +
+        (r.requires_approval ? ' — يحتاج موافقة الإدارة' : '')
+      : '⛔ ' + percent + '% يتجاوز سقف «' + r.rule_name + '» (' + r.max_percent + '%)', !r.allowed);
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ===== 6) تقارير المبيعات والإيرادات ===== */
+function rcReports() {
+  const r = RC.data.report || {};
+  const tbl = (title, rows) => `<div class="card"><h3>${title}</h3>
+    <table><thead><tr><th>البيان</th><th>العدد</th><th>الإجمالي</th><th>المحصّل</th>
+      <th>المتبقي</th></tr></thead>
+    <tbody>${rows && rows.length ? rows.map(x => `<tr>
+      <td>${esc(x.label)}</td><td>${x.count}</td><td>${rcMoney(x.total)}</td><td>${rcMoney(x.paid)}</td>
+      <td>${rcMoney(x.outstanding)}</td></tr>`).join('')
+      : '<tr><td colspan="5" class="empty">لا بيانات</td></tr>'}</tbody></table></div>`;
+  return `
+  <div class="card">
+    <h3>📊 ملخص المبيعات</h3>
+    <div class="stats">
+      <div class="stat green"><div class="num">${rcMoney(r.invoices_total)}</div>
+        <div class="lbl">فواتير الخدمات</div></div>
+      <div class="stat"><div class="num">${rcMoney(r.pharmacy_total)}</div>
+        <div class="lbl">مبيعات الصيدلية</div></div>
+      <div class="stat amber"><div class="num">${rcMoney(r.grand_total)}</div>
+        <div class="lbl">الإجمالي العام</div></div>
+    </div>
+    <div class="qo-money">
+      <div class="field"><label>من تاريخ</label><input id="rp-from" type="date"></div>
+      <div class="field"><label>إلى تاريخ</label><input id="rp-to" type="date"></div>
+      <button class="btn" onclick="rcRunReport()">🔍 تحديث التقرير</button>
+      <button class="btn ghost" onclick="navigate('accounting'); setAccTab('reports')">📄 تقارير المحاسبة</button>
+    </div>
+  </div>
+  ${tbl('💳 المبيعات حسب طريقة الدفع', r.by_payment)}
+  ${tbl('🩺 إيرادات الأطباء (لحساب العمولات)', r.by_doctor)}
+  ${tbl('🛡️ المبيعات حسب شركة التأمين', r.by_insurer)}
+  ${tbl('📌 حالة التحصيل', r.by_status)}`;
+}
+
+async function rcRunReport() {
+  const from = document.getElementById('rp-from').value;
+  const to = document.getElementById('rp-to').value;
+  const q = [];
+  if (from) q.push('from_date=' + from + 'T00:00:00');
+  if (to) q.push('to_date=' + to + 'T23:59:59');
+  try {
+    RC.data.report = await api('/revenue/reports/sales' + (q.length ? '?' + q.join('&') : ''));
+    rcRender();
+    toast('تم تحديث التقرير ✅');
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ============================================================
+   🏥 العيادات — سجل العيادات وخدماتها وأسعارها وجداول دوامها
+   ============================================================ */
+const CL = { tab: 'list', clinics: [], summary: null, loaded: false, q: '', status: '' };
+const CL_DAYS = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+const clMoney = (n) => (Number(n) || 0).toLocaleString('en-US',
+  { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ر.س';
+const CL_TABS = [['list', '🏥 العيادات'], ['services', '💊 الخدمات والأسعار'],
+                 ['schedule', '🕐 جدول الدوام'], ['summary', '📊 الملخص']];
+let CL_DEPTS = [];   // الأقسام المتاحة للربط (تُحمّل مرة عند فتح الشاشة)
+
+async function clinics(main) {
+  main.innerHTML = `
+    <div class="tabbar" id="cl-tabs" role="tablist">
+      ${CL_TABS.map(([k, l]) => `<button type="button" role="tab"
+        class="tab${k === CL.tab ? ' active' : ''}" data-tab="${k}"
+        aria-selected="${k === CL.tab}" onclick="clTab('${k}')">${l}</button>`).join('')}
+    </div>
+    <div id="cl-body"><div class="empty">جارٍ التحميل…</div></div>`;
+  await clLoad();
+  clRender();
+  applyI18n(main);
+}
+
+async function clLoad() {
+  const [rows, sum, depts] = await Promise.all([
+    api('/clinics/').catch(() => []),
+    api('/clinics/summary').catch(() => null),
+    api('/departments/').catch(() => []),
+  ]);
+  CL.clinics = rows || [];
+  CL.summary = sum;
+  CL_DEPTS = (depts || []).filter(d => d.is_active !== false);
+  CL.loaded = true;
+}
+
+function clTab(tab) {
+  CL.tab = tab;
+  document.querySelectorAll('#cl-tabs .tab').forEach(b =>
+    b.classList.toggle('active', b.dataset.tab === tab));
+  clRender();
+}
+
+function clRender() {
+  const body = document.getElementById('cl-body');
+  if (!body) return;
+  if (!CL.loaded) {
+    body.innerHTML = '<div class="empty">جارٍ تحميل بيانات العيادات…</div>';
+    return;
+  }
+  const map = { list: clListTab, services: clServicesTab,
+    schedule: clScheduleTab, summary: clSummaryTab };
+  body.innerHTML = (map[CL.tab] || clListTab)();
+  applyI18n(body);
+}
+
+function clListTab() {
+  let rows = CL.clinics;
+  if (CL.q) {
+    const q = CL.q.trim();
+    rows = rows.filter(c => (c.name || '').includes(q) || (c.code || '').includes(q));
+  }
+  if (CL.status) rows = rows.filter(c => c.status === CL.status);
+  return `
+  <div class="card">
+    <div class="toolbar">
+      <h3 style="margin:0">🏥 العيادات (${CL.clinics.length})</h3>
+      <input id="cl-q" value="${esc(CL.q)}" placeholder="ابحث بالاسم أو الرمز…"
+        oninput="CL.q=this.value; clRender();">
+      <select id="cl-status" onchange="CL.status=this.value; clRender();">
+        <option value="">كل الحالات</option>
+        <option value="active"${CL.status === 'active' ? ' selected' : ''}>نشطة</option>
+        <option value="closed"${CL.status === 'closed' ? ' selected' : ''}>مغلقة</option>
+      </select>
+    </div>
+    <div class="qo-money">
+      <div class="field"><label>كود العيادة *</label><input id="cl-code" placeholder="CL-01"></div>
+      <div class="field" style="min-width:160px"><label>اسم العيادة *</label>
+        <input id="cl-name" placeholder="عيادة الباطنية"></div>
+      <div class="field" style="min-width:140px"><label>التخصص</label>
+        <input id="cl-specialty" placeholder="باطنية"></div>
+      <div class="field" style="min-width:160px"><label>القسم المرتبط</label>
+        <select id="cl-dept"><option value="">— بلا قسم —</option>
+          ${CL_DEPTS.map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join('')}</select></div>
+      <div class="field" style="min-width:140px"><label>الموقع</label>
+        <input id="cl-location" placeholder="مبنى أ – الطابق 2"></div>
+      <div class="field"><label>رسوم الكشف</label>
+        <input id="cl-fee" type="number" min="0" step="10" value="0"></div>
+      <div class="field"><label>مدة الكشف (دقيقة)</label>
+        <input id="cl-duration" type="number" min="5" max="480" value="20"></div>
+      <button class="btn" onclick="clCreate()">➕ إنشاء عيادة</button>
+    </div>
+    <table><thead><tr><th>الكود</th><th>العيادة</th><th>التخصص</th><th>الموقع</th>
+      <th>الطبيب المسؤول</th><th>القسم المرتبط</th><th>رسوم الكشف</th><th>خدمات</th><th>الدوام</th>
+      <th>الحالة</th><th></th></tr></thead>
+    <tbody>${rows.length ? rows.map(c => `<tr>
+      <td>${esc(c.code)}</td><td><b>${esc(c.name)}</b></td>
+      <td>${esc(c.specialty || '—')}</td><td>${esc(c.location || '—')}</td>
+      <td>${esc(c.lead_doctor_name || '—')}</td>
+      <td>${c.department_name ? esc(c.department_name)
+        : '<small class="muted">غير مرتبطة</small>'}</td>
+      <td>${clMoney(c.consultation_fee)}</td><td>${c.services_count}</td>
+      <td>${c.schedule_count} وردية · ${c.weekly_capacity}/أسبوع</td>
+      <td><span class="pill ${c.status === 'active' ? 'paid' : 'pending'}">${c.status === 'active' ? 'نشطة' : 'مغلقة'}</span></td>
+      <td><select class="sm" onchange="clLinkDept(${c.id}, this.value)"
+          title="ربط العيادة بقسم">
+          <option value="">— قسم —</option>
+          ${CL_DEPTS.map(d => `<option value="${d.id}"${String(c.department_id) === String(d.id) ? ' selected' : ''}>${esc(d.name)}</option>`).join('')}
+        </select>
+        <button class="btn sm ghost" onclick="clToggle(${c.id},'${c.status}')">${c.status === 'active' ? 'إغلاق' : 'تنشيط'}</button>
+        <button class="btn sm danger" onclick="clDelete(${c.id},'${esc(c.name)}')">حذف</button></td>
+    </tr>`).join('') : `<tr><td colspan="11" class="empty">${
+      CL.clinics.length ? 'لا عيادة مطابقة للبحث' : 'لا توجد عيادات بعد — أنشئ أول عيادة'}</td></tr>`}
+    </tbody></table>
+    <small class="muted">💡 الخدمات وجداول الدوام ملك القسم المرتبط — تُدار من هنا ومن «مركز الأقسام» دون تكرار.</small>
+  </div>`;
+}
+
+function clServicesTab() {
+  if (!CL.clinics.length) {
+    return '<div class="card"><div class="empty">أضف عيادة أولًا من تبويب «العيادات»</div></div>';
+  }
+  const pick = CL.clinics.map(c =>
+    `<option value="${c.id}">${esc(c.name)}${c.department_name ? ' (' + esc(c.department_name) + ')' : ' — غير مرتبطة'}</option>`).join('');
+  return `
+  <div class="card">
+    <h3>💊 خدمات العيادات وأسعارها</h3>
+    <small class="muted">الخدمات تُحفظ في كتالوج القسم المرتبط بالعيادة — مصدر واحد لا نسخ.</small>
+    <div class="qo-money">
+      <div class="field" style="min-width:200px"><label>العيادة *</label>
+        <select id="cs-clinic">${pick}</select></div>
+      <div class="field"><label>كود الخدمة</label><input id="cs-code" placeholder="CONS"></div>
+      <div class="field" style="min-width:160px"><label>اسم الخدمة *</label>
+        <input id="cs-name" placeholder="كشفية"></div>
+      <div class="field"><label>السعر</label>
+        <input id="cs-price" type="number" min="0" step="10" value="0"></div>
+      <div class="field"><label>حصة الطبيب %</label>
+        <input id="cs-doc" type="number" min="0" max="100" value="0"></div>
+      <div class="field"><label>تغطية التأمين %</label>
+        <input id="cs-ins" type="number" min="0" max="100" value="0"></div>
+      <button class="btn" onclick="clAddService()">➕ إضافة خدمة</button>
+    </div>
+    <table><thead><tr><th>العيادة</th><th>القسم</th><th>الكود</th><th>الخدمة</th><th>السعر</th>
+      <th>حصة الطبيب</th><th>التأمين</th><th>الحالة</th><th></th></tr></thead>
+    <tbody>${CL.clinics.flatMap(c => c.services.map(s => `<tr>
+      <td>${esc(c.name)}</td><td>${esc(c.department_name || '—')}</td>
+      <td>${esc(s.code || '—')}</td><td>${esc(s.name)}</td>
+      <td>${clMoney(s.price)}</td><td>${s.doctor_share_pct}%</td><td>${s.insurance_pct}%</td>
+      <td><span class="pill ${s.is_active ? 'paid' : 'pending'}">${s.is_active ? 'نشطة' : 'موقوفة'}</span></td>
+      <td><button class="btn sm danger" onclick="clDeleteService(${c.id},${s.id})">حذف</button></td>
+    </tr>`)).join('') || '<tr><td colspan="9" class="empty">لا خدمات</td></tr>'}</tbody></table>
+  </div>`;
+}
+
+function clScheduleTab() {
+  if (!CL.clinics.length) {
+    return '<div class="card"><div class="empty">أضف عيادة أولًا من تبويب «العيادات»</div></div>';
+  }
+  const pick = CL.clinics.map(c =>
+    `<option value="${c.id}">${esc(c.name)}${c.department_name ? ' (' + esc(c.department_name) + ')' : ' — غير مرتبطة'}</option>`).join('');
+  const days = DAYS_AR.map((d, i) => `<option value="${i}">${d}</option>`).join('');
+  return `
+  <div class="card">
+    <h3>🕐 جدول الدوام الأسبوعي</h3>
+    <small class="muted">الورديات تُحفظ في جدول القسم المرتبط — سعة الوردية تُغذّي السعة الأسبوعية.</small>
+    <div class="qo-money">
+      <div class="field" style="min-width:200px"><label>العيادة *</label>
+        <select id="csh-clinic">${pick}</select></div>
+      <div class="field"><label>اليوم</label><select id="csh-day">${days}</select></div>
+      <div class="field"><label>الفترة</label><select id="csh-session">
+        <option value="morning">صباحية</option><option value="evening">مسائية</option></select></div>
+      <div class="field"><label>من</label><input id="csh-from" type="time" value="08:00"></div>
+      <div class="field"><label>إلى</label><input id="csh-to" type="time" value="14:00"></div>
+      <div class="field"><label>الغرفة</label><input id="csh-room" placeholder="عيادة 3"></div>
+      <div class="field"><label>السعة (مريض)</label>
+        <input id="csh-max" type="number" min="0" value="10"></div>
+      <button class="btn" onclick="clAddSlot()">➕ إضافة وردية</button>
+    </div>
+    ${CL.clinics.map(c => `
+      <h3 style="margin-top:14px">${esc(c.name)} — السعة الأسبوعية ${c.weekly_capacity} مريض</h3>
+      <table><thead><tr><th>اليوم</th><th>الفترة</th><th>من</th><th>إلى</th><th>الغرفة</th>
+        <th>السعة</th><th></th></tr></thead>
+      <tbody>${c.schedule.length ? c.schedule.map(s => `<tr>
+        <td>${esc(s.day_name || DAYS_AR[s.day_of_week])}</td>
+        <td><span class="pill ${s.session === 'morning' ? 'paid' : 'partial'}">${esc(s.session_name)}</span></td>
+        <td>${esc(s.open_time)}</td><td>${esc(s.close_time)}</td>
+        <td>${esc(s.room_name || '—')}</td><td>${s.max_patients || 'بلا حد'}</td>
+        <td><button class="btn sm danger" onclick="clDeleteSlot(${c.id},${s.id})">حذف</button></td>
+      </tr>`).join('') : '<tr><td colspan="7" class="empty">لا دوام مسجّل</td></tr>'}</tbody></table>
+    `).join('')}
+  </div>`;
+}
+
+function clSummaryTab() {
+  const s = CL.summary || {};
+  const active = CL.clinics.filter(c => c.status === 'active');
+  const capacity = CL.clinics.reduce((a, c) => a + (c.weekly_capacity || 0), 0);
+  const fees = CL.clinics.reduce((a, c) => a + Number(c.consultation_fee || 0), 0);
+  return `
+  <div class="card">
+    <h3>📊 ملخص العيادات</h3>
+    <div class="stats">
+      <div class="stat"><div class="num">${s.clinics || 0}</div>
+        <div class="lbl">إجمالي العيادات (${s.active || 0} نشطة)</div></div>
+      <div class="stat green"><div class="num">${s.services || 0}</div><div class="lbl">خدمات في الأقسام</div></div>
+      <div class="stat amber"><div class="num">${s.schedule_slots || 0}</div><div class="lbl">ورديات دوام</div></div>
+      <div class="stat blue"><div class="num">${capacity}</div><div class="lbl">السعة الأسبوعية (مريض)</div></div>
+      <div class="stat"><div class="num">${clMoney(fees)}</div><div class="lbl">إجمالي رسوم الكشف</div></div>
+      <div class="stat ${(s.unlinked || 0) ? 'red' : ''}"><div class="num">${s.unlinked || 0}</div>
+        <div class="lbl">عيادات بلا قسم مرتبط</div></div>
+    </div>
+    <table><thead><tr><th>العيادة</th><th>الحالة</th><th>القسم</th><th>الخدمات</th>
+      <th>سعة/أسبوع</th><th>متوسط سعر الخدمة</th></tr></thead>
+    <tbody>${active.length ? active.map(c => {
+      const prices = c.services.map(x => Number(x.price || 0));
+      const avg = prices.length ? (prices.reduce((a, b) => a + b, 0) / prices.length) : 0;
+      return `<tr><td>${esc(c.name)}</td><td><span class="pill paid">نشطة</span></td>
+        <td>${esc(c.department_name || '—')}</td><td>${c.services_count}</td>
+        <td>${c.weekly_capacity}</td><td>${clMoney(avg)}</td></tr>`;
+    }).join('') : '<tr><td colspan="6" class="empty">لا عيادات نشطة</td></tr>'}</tbody></table>
+  </div>`;
+}
+
+async function clCreate() {
+  const code = document.getElementById('cl-code').value.trim();
+  const name = document.getElementById('cl-name').value.trim();
+  if (!code || !name) { toast('أدخل كود العيادة واسمها', true); return; }
+  const dept = document.getElementById('cl-dept')?.value || '';
+  try {
+    await api('/clinics/', { method: 'POST', body: JSON.stringify({
+      code, name,
+      specialty: document.getElementById('cl-specialty').value.trim() || null,
+      department_id: dept ? Number(dept) : null,
+      location: document.getElementById('cl-location').value.trim() || null,
+      consultation_fee: Number(document.getElementById('cl-fee').value || 0),
+      default_duration: Number(document.getElementById('cl-duration').value || 20) }) });
+    toast('تم إنشاء العيادة ✅');
+    await clLoad(); clRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function clLinkDept(id, value) {
+  try {
+    await api('/clinics/' + id, { method: 'PUT',
+      body: JSON.stringify({ department_id: value ? Number(value) : null }) });
+    toast(value ? 'تم ربط العيادة بالقسم ✅' : 'تم فكّ الربط');
+    await clLoad(); clRender();
+  } catch (e) { toast(e.message, true); await clRender(); }
+}
+
+async function clToggle(id, status) {
+  try {
+    await api('/clinics/' + id, { method: 'PUT',
+      body: JSON.stringify({ status: status === 'active' ? 'closed' : 'active' }) });
+    toast('تم تحديث حالة العيادة ✅');
+    await clLoad(); clRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function clDelete(id, name) {
+  if (!confirm('حذف العيادة «' + name + '» وكل خدماتها ودوامها؟')) return;
+  try {
+    await api('/clinics/' + id, { method: 'DELETE' });
+    toast('تم حذف العيادة ✅');
+    await clLoad(); clRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function clAddService() {
+  const clinic = Number(document.getElementById('cs-clinic').value);
+  const name = document.getElementById('cs-name').value.trim();
+  if (!clinic || !name) { toast('اختر العيادة واكتب اسم الخدمة', true); return; }
+  try {
+    await api('/clinics/' + clinic + '/services', { method: 'POST', body: JSON.stringify({
+      code: document.getElementById('cs-code').value.trim() || null,
+      name,
+      price: Number(document.getElementById('cs-price').value || 0),
+      doctor_share_pct: Number(document.getElementById('cs-doc').value || 0),
+      insurance_pct: Number(document.getElementById('cs-ins').value || 0) }) });
+    toast('تمت إضافة الخدمة ✅');
+    await clLoad(); clRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function clDeleteService(clinicId, serviceId) {
+  if (!confirm('حذف الخدمة؟')) return;
+  try {
+    await api('/clinics/' + clinicId + '/services/' + serviceId, { method: 'DELETE' });
+    toast('تم حذف الخدمة ✅');
+    await clLoad(); clRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function clAddSlot() {
+  const clinic = Number(document.getElementById('csh-clinic').value);
+  const room = document.getElementById('csh-room').value.trim();
+  try {
+    await api('/clinics/' + clinic + '/schedule', { method: 'POST', body: JSON.stringify({
+      day_of_week: Number(document.getElementById('csh-day').value),
+      session: document.getElementById('csh-session').value,
+      open_time: document.getElementById('csh-from').value,
+      close_time: document.getElementById('csh-to').value,
+      room_name: room || null,
+      max_patients: Number(document.getElementById('csh-max').value || 0) }) });
+    toast('تمت إضافة الوردية ✅');
+    await clLoad(); clRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function clDeleteSlot(clinicId, slotId) {
+  if (!confirm('حذف فترة الدوام؟')) return;
+  try {
+    await api('/clinics/' + clinicId + '/schedule/' + slotId, { method: 'DELETE' });
+    toast('تم حذف الفترة ✅');
+    await clLoad(); clRender();
+  } catch (e) { toast(e.message, true); }
+}
+
 const VIEWS = {
+  /* 🏥 العيادات (دالة معرّفة أعلها) */
+  clinics,
+  /* 🧾 المبيعات + دورة الإيراد (screen معرَّف أعلاه) */
   /* ⚡ مركز العمليات السريعة — بيع/شراء/ترحيل (الدالة معرَّفة أعلاه) */
   quickops,
   /* --- شاشة شؤون الموظفين: ملف موظف بتبويبات متكاملة --- */
@@ -5001,117 +6054,12 @@ const VIEWS = {
 
   /* --- المخزون: ملخص + أصناف بحالة + دفتر الحركات --- */
   async inventory(main) {
-function saveHR() {
-  const s = currentHR(); if (!s) return;
-  const profile = hrProfile();
-  document.querySelectorAll('#hr-editor [data-hr]').forEach(el => {
-    const [group, key] = el.dataset.hr.split('.');
-    profile[group][key] = el.type === 'number' ? Number(el.value || 0) : el.value;
-  });
-  const personal = profile.personal, employment = profile.employment;
-  const body = {
-    full_name: s.full_name, position: employment.job_title || s.position, phone: personal.phone,
-    email: personal.email, hire_date: s.hire_date, salary: profile.salary.basic_salary,
-    hr_profile: profile
-  };
-  api('/staff/' + s.id, { method: 'PUT', body: JSON.stringify(body) }).then(r => {
-    Object.assign(s, r); toast('تم حفظ ملف الموظف ✅'); navigate('hr');
-  }).catch(e => toast(e.message, true));
-}
-function setHRTab(tab) { HR_TAB = tab; const b = document.getElementById('hr-editor'); if (b) b.innerHTML = hrEditorHTML(); }
-function selectHR(id) { HR_SELECTED = id; HR_TAB = 'personal'; document.getElementById('hr-list').innerHTML = hrDirectoryHTML(); const b = document.getElementById('hr-editor'); if (b) b.innerHTML = hrEditorHTML(); }
-function filterHR(value) { const b = document.getElementById('hr-list'); if (b) b.innerHTML = hrDirectoryHTML(value); }
-async function uploadHRDocument(staffId) {
-  const file = document.getElementById('hr-doc-file').files[0];
-  if (!file) return toast('اختر ملف المستند أولًا', true);
-  const form = new FormData(); form.append('staff_id', staffId); form.append('doc_type', document.getElementById('hr-doc-type').value); form.append('file', file);
-  try {
-    await api('/staff-documents/', { method: 'POST', body: form });
-    const docs = await api('/staff-documents/?staff_id=' + staffId);
-    const s = currentHR(); if (s) s.documents = docs; toast('تم رفع المستند ✅'); navigate('hr');
-  } catch(e) { toast(e.message, true); }
-}
-async function deleteStaffDoc(id) {
-  if (!confirm('حذف هذا المستند؟')) return;
-  try { await api('/staff-documents/' + id, { method: 'DELETE' }); toast('تم حذف المستند'); navigate('hr'); } catch(e) { toast(e.message, true); }
-}
-
     main.innerHTML = `${invBarsHTML()}<div id="inv-ops"><div class="empty">جارٍ التحميل…</div></div>`;
     await renderInvOps();
   },
 
-  /* --- المبيعات: شاشة مستقلة في القائمة (ليست تبويبًا في المحاسبة) --- */
-  async sales(main) {
-    const f = ACC;
-    const p = periodRange(f.period);
-    const q = new URLSearchParams();
-    if (p.from) { q.set('from_date', p.from); q.set('to_date', p.to); }
-    if (f.method) q.set('payment_method', f.method);
-    if (f.status) q.set('status', f.status);
-    if (f.patient) q.set('patient_id', f.patient);
-    if (f.staff) q.set('staff', f.staff);
-    /* جدول المبيعات فقط — الملخّص والمنحنى في تبويب «نظرة عامة» */
-    const sales = await api('/accounts/sales' + (q.toString() ? '?' + q.toString() : ''));
-    ACC_ROWS = sales;
-    const unpaidCount = sales.filter(x => x.status !== 'PAID').length;
-    main.innerHTML = `
-      <div class="card" style="background:#f8fafc">
-        <div class="toolbar" style="border:0;padding:0">
-          <h3 style="margin:0">🛒 المبيعات</h3>
-          <span class="pill partial">شاشة مستقلة — خارج تبويبات المحاسبة</span>
-          <span style="flex:1"></span>
-          <button class="btn ghost" onclick="navigate('accounting')">💰 الذهاب للمحاسبة</button>
-        </div>
-      </div>
-      <div class="card">
-        <div class="toolbar"><h3 style="margin:0">سجل المبيعات (${sales.length})</h3>
-          <input id="f-acc-period" placeholder="YYYY-MM (كل الفترات)" value="${esc(f.period || '')}" style="max-width:170px">
-          <select id="f-acc-method">
-            <option value="">كل طرق الدفع</option>
-            <option value="cash" ${f.method === 'cash' ? 'selected' : ''}>نقدًا</option>
-            <option value="card" ${f.method === 'card' ? 'selected' : ''}>بطاقة</option>
-            <option value="insurance" ${f.method === 'insurance' ? 'selected' : ''}>تأمين</option>
-          </select>
-          <select id="f-acc-status">
-            <option value="">كل الحالات</option>
-            <option value="UNPAID" ${f.status === 'UNPAID' ? 'selected' : ''}>غير مدفوع</option>
-            <option value="PARTIAL" ${f.status === 'PARTIAL' ? 'selected' : ''}>مدفوع جزئيًا</option>
-            <option value="PAID" ${f.status === 'PAID' ? 'selected' : ''}>مدفوع</option>
-          </select>
-          <input id="f-acc-patient" type="number" min="1" placeholder="رقم المريض" value="${esc(f.patient || '')}" style="max-width:130px">
-          <input id="f-acc-staff" placeholder="صرفه…" value="${esc(f.staff || '')}" style="max-width:140px">
-          <button class="btn" onclick="loadAccounts()">تطبيق</button>
-          <button class="btn ghost" onclick="clearAccounts()">مسح</button>
-          ${unpaidCount ? `<button class="btn success" onclick="payAll()">💰 سدّد الكل (${unpaidCount})</button>` : ''}
-        </div>
-        <div style="overflow-x:auto"><table>
-          <thead><tr><th>#</th><th>التاريخ</th><th>المريض</th><th>الدواء</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th><th>المدفوع</th><th>المتبقي</th><th>الطريقة</th><th>الحالة</th><th></th></tr></thead>
-          <tbody>${sales.map(s => {
-            const rest = Math.max(0, Math.round((s.total_price - s.paid_amount) * 100) / 100);
-            return `<tr>
-            <td>${s.id}</td><td>${fmtDate(s.created_at)}</td>
-            <td>${esc(s.patient ? s.patient.full_name : '#' + s.patient_id)}</td>
-            <td>${esc(s.medication ? s.medication.name : '#' + s.medication_id)}</td>
-            <td>${s.quantity}</td>
-            <td>${s.unit_price.toLocaleString()} ر.س</td>
-            <td><strong>${s.total_price.toLocaleString()} ر.س</strong></td>
-            <td>${s.paid_amount.toLocaleString()} ر.س</td>
-            <td style="color:${rest > 0 ? '#dc3545' : '#28a745'}">${rest.toLocaleString()} ر.س</td>
-            <td>${s.payment_method === 'card' ? 'بطاقة' : (s.payment_method === 'insurance' ? 'تأمين' : 'نقدًا')}</td>
-            <td>${s.status === 'PAID'
-              ? `<span class="pill paid">مدفوع</span>`
-              : (s.status === 'PARTIAL'
-                ? `<span class="pill partial">مدفوع جزئيًا</span>`
-                : `<span class="pill unpaid">غير مدفوع</span>`)}</td>
-            <td class="actions">
-              ${s.status !== 'PAID'
-                ? `<button class="btn sm success" onclick="pay(${s.id})">💰 تسديد</button> ` : ''}
-              <button class="btn sm ghost" onclick="openReceipt(${s.id})">🧾 إيصال</button>
-            </td>
-          </tr>`; }).join('') || '<tr><td colspan="12" class="empty">لا توجد مبيعات في هذه الفترة</td></tr>'}</tbody>
-        </table></div>
-      </div>`;
-  },
+  /* --- المبيعات: شاشة مستقلة بتبويبات دورة الإيراد الستّة --- */
+  sales: async function (main) { return sales(main); },
 
   /* --- تبويب «نظرة عامة» (قسم الحسابات): الملخّص المالي + المنحنى + طرق الدفع --- */
   async accounts(main) {

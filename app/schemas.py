@@ -2039,3 +2039,474 @@ class QuickOpsOverview(BaseModel):
     expiring_soon_count: int
     top_items: List[QuickCatalogItem] = []
     recent: List[QuickRecentOp] = []
+
+
+# ================================================================
+# دورة الإيراد — مخططات الإدخال والإخراج
+# ================================================================
+# ===== 1) التسعير والخصومات =====
+class PriceListItemIn(BaseModel):
+    service_code: str = Field(..., min_length=1, max_length=40)
+    service_name: str = Field(..., min_length=1, max_length=150)
+    unit_price: float = Field(..., ge=0)
+    is_active: bool = True
+
+
+class PriceListIn(BaseModel):
+    code: str = Field(..., min_length=1, max_length=30)
+    name: str = Field(..., min_length=2, max_length=150)
+    insurer: Optional[str] = Field(None, max_length=120)
+    patient_category: Optional[str] = Field(None, max_length=60)
+    is_default: bool = False
+    is_active: bool = True
+    notes: Optional[str] = None
+    lines: List[PriceListItemIn] = Field(default_factory=list)
+
+
+class PriceListItemOut(BaseModel):
+    id: int
+    service_code: str
+    service_name: str
+    unit_price: float
+    is_active: bool
+
+
+class PriceListOut(BaseModel):
+    id: int
+    code: str
+    name: str
+    insurer: Optional[str] = None
+    patient_category: Optional[str] = None
+    is_default: bool
+    is_active: bool
+    notes: Optional[str] = None
+    created_at: datetime
+    items: List[PriceListItemOut] = []
+    items_count: int = 0
+
+
+class DiscountRuleIn(BaseModel):
+    name: str = Field(..., min_length=2, max_length=120)
+    max_percent: float = Field(..., ge=0, le=100)
+    scope: str = Field("all", description="all|invoice|pharmacy|package")
+    requires_approval: bool = True
+    is_active: bool = True
+    notes: Optional[str] = None
+
+
+class DiscountRuleOut(ORMModel):
+    id: int
+    name: str
+    max_percent: float
+    scope: str
+    requires_approval: bool
+    is_active: bool
+    notes: Optional[str] = None
+    created_at: datetime
+
+
+class PriceCheckOut(BaseModel):
+    """نتيجة فحص خصم مقابل سياسة سارية."""
+    allowed: bool
+    max_percent: float
+    requested_percent: float
+    requires_approval: bool
+    rule_name: Optional[str] = None
+
+
+# ===== 4) العروض والباقات =====
+class PackageItemIn(BaseModel):
+    service_code: str = Field(..., min_length=1, max_length=40)
+    service_name: str = Field(..., min_length=1, max_length=150)
+    quantity: int = Field(1, ge=1)
+    unit_price: float = Field(0, ge=0)
+
+
+class ServicePackageIn(BaseModel):
+    code: str = Field(..., min_length=1, max_length=30)
+    name: str = Field(..., min_length=2, max_length=150)
+    description: Optional[str] = None
+    package_price: float = Field(0, ge=0)
+    is_active: bool = True
+    lines: List[PackageItemIn] = Field(default_factory=list)
+
+
+class PackageItemOut(BaseModel):
+    id: int
+    service_code: str
+    service_name: str
+    quantity: int
+    unit_price: float
+    line_total: float = 0.0
+
+
+class ServicePackageOut(BaseModel):
+    id: int
+    code: str
+    name: str
+    description: Optional[str] = None
+    package_price: float
+    list_total: float
+    saving: float = 0.0
+    is_active: bool
+    created_at: datetime
+    lines: List[PackageItemOut] = []
+
+
+class QuotationLineIn(BaseModel):
+    service_code: Optional[str] = Field(None, max_length=40)
+    description: str = Field(..., min_length=1, max_length=200)
+    quantity: int = Field(1, gt=0)
+    unit_price: float = Field(0, ge=0)
+
+
+class QuotationIn(BaseModel):
+    patient_id: int = Field(..., gt=0)
+    package_id: Optional[int] = Field(None, gt=0)
+    title: str = Field(..., min_length=2, max_length=200)
+    discount: float = Field(0, ge=0)
+    tax_rate: float = Field(0, ge=0, le=100)
+    valid_days: int = Field(30, ge=1, le=365)
+    notes: Optional[str] = None
+    lines: List[QuotationLineIn] = Field(default_factory=list,
+                                         description="بنود يدوية — تُؤخذ من الباقة إن تُركت فارغة")
+
+
+class QuotationLineOut(BaseModel):
+    id: int
+    service_code: Optional[str] = None
+    description: str
+    quantity: int
+    unit_price: float
+    line_total: float
+
+
+class QuotationOut(BaseModel):
+    id: int
+    quote_no: str
+    patient_id: int
+    patient_name: Optional[str] = None
+    package_id: Optional[int] = None
+    title: str
+    status: str
+    subtotal: float
+    discount: float
+    tax_rate: float
+    total: float
+    valid_until: Optional[datetime] = None
+    notes: Optional[str] = None
+    invoice_id: Optional[int] = None
+    created_by: Optional[str] = None
+    created_at: datetime
+    lines: List[QuotationLineOut] = []
+
+
+class QuotationStatusIn(BaseModel):
+    """تغيير حالة العرض: sent · accepted · rejected · expired."""
+    status: str = Field(..., description="sent|accepted|rejected|expired")
+
+
+# ===== 2) السندات والودائع وإغلاق الصندوق =====
+class DepositIn(BaseModel):
+    patient_id: int = Field(..., gt=0)
+    invoice_id: Optional[int] = Field(None, gt=0)
+    admission_id: Optional[int] = Field(None, gt=0)
+    amount: float = Field(..., gt=0)
+    method: str = Field("cash", description="cash|card|bank|insurance")
+    reference: Optional[str] = Field(None, max_length=60)
+    notes: Optional[str] = None
+
+
+class DepositApplyIn(BaseModel):
+    """خصم دفعة مقدمة على فاتورة."""
+    invoice_id: int = Field(..., gt=0)
+    amount: Optional[float] = Field(None, gt=0, description="الخصم — كامل الرصيد عند تركه فارغًا")
+
+
+class DepositOut(ORMModel):
+    id: int
+    patient_id: int
+    patient_name: Optional[str] = None
+    invoice_id: Optional[int] = None
+    admission_id: Optional[int] = None
+    amount: float
+    applied_amount: float
+    balance: float = 0.0
+    status: str
+    method: str
+    reference: Optional[str] = None
+    received_at: datetime
+    notes: Optional[str] = None
+    created_by: Optional[str] = None
+    created_at: datetime
+
+
+class ShiftOpenIn(BaseModel):
+    opening_cash: float = Field(0, ge=0)
+    notes: Optional[str] = None
+
+
+class ShiftCloseIn(BaseModel):
+    counted_cash: float = Field(..., ge=0)
+    notes: Optional[str] = None
+
+
+class ShiftOut(ORMModel):
+    id: int
+    username: str
+    opened_at: datetime
+    opening_cash: float
+    closed_at: Optional[datetime] = None
+    expected_cash: Optional[float] = None
+    counted_cash: Optional[float] = None
+    difference: Optional[float] = None
+    status: str
+    sales_count: int
+    collected_total: float
+    notes: Optional[str] = None
+    closed_by: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+
+# ===== 3) التأمين: الموافقات المسبقة وحزم المطالبات =====
+class PriorAuthIn(BaseModel):
+    patient_id: int = Field(..., gt=0)
+    insurer: Optional[str] = Field(None, max_length=120)
+    service_description: str = Field(..., min_length=2, max_length=250)
+    icd10_code: Optional[str] = Field(None, max_length=20)
+    cpt_code: Optional[str] = Field(None, max_length=20)
+    requested_amount: float = Field(0, ge=0)
+    valid_days: int = Field(30, ge=1, le=365)
+    auth_number: Optional[str] = Field(None, max_length=40, description="يُولَّد تلقائيًا")
+    notes: Optional[str] = None
+
+
+class PriorAuthDecisionIn(BaseModel):
+    """قرار شركة التأمين على الموافقة المسبقة."""
+    status: str = Field(..., description="approved|partially_approved|denied")
+    approved_amount: Optional[float] = Field(None, ge=0)
+    decision_notes: Optional[str] = None
+
+
+class PriorAuthOut(ORMModel):
+    id: int
+    auth_number: str
+    patient_id: int
+    patient_name: Optional[str] = None
+    insurer: Optional[str] = None
+    service_description: str
+    icd10_code: Optional[str] = None
+    cpt_code: Optional[str] = None
+    requested_amount: float
+    approved_amount: Optional[float] = None
+    status: str
+    requested_at: datetime
+    decided_at: Optional[datetime] = None
+    valid_until: Optional[datetime] = None
+    decision_notes: Optional[str] = None
+    created_by: Optional[str] = None
+    created_at: datetime
+
+
+class ClaimBatchBuildIn(BaseModel):
+    """بناء حزمة مطالبات من مطالبات مُرسَلة لشركة تأمين في فترة."""
+    insurer: str = Field(..., min_length=2, max_length=120)
+    period_from: datetime
+    period_to: datetime
+    notes: Optional[str] = None
+
+
+class ClaimBatchSubmitIn(BaseModel):
+    notes: Optional[str] = None
+
+
+class ClaimBatchItemOut(BaseModel):
+    id: int
+    claim_id: int
+    claim_number: Optional[str] = None
+    patient_name: Optional[str] = None
+    amount: float
+    approved_amount: Optional[float] = None
+    claim_status: Optional[str] = None
+
+
+class ClaimBatchOut(BaseModel):
+    id: int
+    batch_no: str
+    insurer: str
+    period_from: datetime
+    period_to: datetime
+    status: str
+    total_claims: int
+    total_amount: float
+    approved_amount: float
+    submitted_at: Optional[datetime] = None
+    notes: Optional[str] = None
+    created_by: Optional[str] = None
+    created_at: datetime
+    lines: List[ClaimBatchItemOut] = []
+
+
+# ===== 1) إشعارات الدائن والاسترداد =====
+class CreditNoteIn(BaseModel):
+    patient_id: int = Field(..., gt=0)
+    invoice_id: Optional[int] = Field(None, gt=0)
+    dispense_id: Optional[int] = Field(None, gt=0)
+    amount: float = Field(..., gt=0)
+    method: str = Field("cash", description="cash|card|bank")
+    reason: str = Field(..., min_length=2, max_length=250)
+    refund_now: bool = Field(True, description="تسليم المبلغ فورًا وتسجيله كدفعة")
+
+
+class CreditNoteOut(ORMModel):
+    id: int
+    note_no: str
+    patient_id: int
+    patient_name: Optional[str] = None
+    invoice_id: Optional[int] = None
+    dispense_id: Optional[int] = None
+    amount: float
+    method: str
+    reason: str
+    status: str
+    refunded_at: Optional[datetime] = None
+    created_by: Optional[str] = None
+    created_at: datetime
+
+
+# ===== 6) تقارير المبيعات =====
+class SalesReportRow(BaseModel):
+    """سطر تقرير: مفتاح + مبالغ."""
+    key: str
+    label: str
+    count: int = 0
+    total: float = 0.0
+    paid: float = 0.0
+    outstanding: float = 0.0
+
+
+class SalesReportOut(BaseModel):
+    """تقرير مبيعات مجمّع: مفاتيح متعدّدة + إجماليات."""
+    period_from: Optional[datetime] = None
+    period_to: Optional[datetime] = None
+    invoices_total: float = 0.0
+    pharmacy_total: float = 0.0
+    grand_total: float = 0.0
+    by_payment: List[SalesReportRow] = []
+    by_doctor: List[SalesReportRow] = []
+    by_status: List[SalesReportRow] = []
+    by_insurer: List[SalesReportRow] = []
+
+
+
+
+# ===== العيادات: مخططات الإدخال والإخراج =====
+# ملاحظة: خدمات العيادة وجداول دوامها هي نفسها خدمات القسم وجداوله
+# (DepartmentService / DepartmentSchedule) — لا نسخ ولا جداول موازية.
+class ClinicServiceOut(ORMModel):
+    """خدمة القسم المرتبط بالعيادة، معرّفة بمعرّف القسم لا بمعرّف العيادة."""
+    id: int
+    department_id: int
+    code: Optional[str] = None
+    name: str
+    price: float
+    doctor_share_pct: float
+    insurance_pct: float
+    is_active: bool
+
+
+class ClinicScheduleOut(ORMModel):
+    """وردية دوام القسم المرتبط بالعيادة، مع اسم اليوم وسعتها."""
+    id: int
+    department_id: int
+    day_of_week: int
+    day_name: str
+    session: str
+    session_name: str
+    open_time: str
+    close_time: str
+    room_name: Optional[str] = None
+    max_patients: int
+
+
+class ClinicServiceIn(BaseModel):
+    code: Optional[str] = Field(None, max_length=40)
+    name: str = Field(..., min_length=1, max_length=150)
+    price: float = Field(0, ge=0)
+    doctor_share_pct: float = Field(0, ge=0, le=100)
+    insurance_pct: float = Field(0, ge=0, le=100)
+    procedure_note: Optional[str] = None
+    is_active: bool = True
+
+
+class ClinicScheduleIn(BaseModel):
+    day_of_week: int = Field(..., ge=0, le=6)
+    session: str = Field("morning", description="morning|evening")
+    open_time: str = Field("08:00", pattern=r"^\d{2}:\d{2}$")
+    close_time: str = Field("14:00", pattern=r"^\d{2}:\d{2}$")
+    room_name: Optional[str] = Field(None, max_length=80)
+    max_patients: int = Field(0, ge=0, le=999)
+
+
+class ClinicIn(BaseModel):
+    code: str = Field(..., min_length=1, max_length=30)
+    name: str = Field(..., min_length=2, max_length=150)
+    specialty: Optional[str] = Field(None, max_length=100)
+    department_id: Optional[int] = Field(None, gt=0)
+    lead_doctor_id: Optional[int] = Field(None, gt=0)
+    location: Optional[str] = Field(None, max_length=150)
+    phone: Optional[str] = Field(None, max_length=40)
+    consultation_fee: float = Field(0, ge=0)
+    default_duration: int = Field(20, ge=5, le=480)
+    status: str = Field("active", description="active|closed")
+    notes: Optional[str] = None
+
+
+class ClinicUpdate(BaseModel):
+    """تحديث جزئي — الحقول غير المرسلة تبقى كما هي."""
+    name: Optional[str] = Field(None, min_length=2, max_length=150)
+    specialty: Optional[str] = Field(None, max_length=100)
+    department_id: Optional[int] = Field(None, gt=0)
+    lead_doctor_id: Optional[int] = Field(None, gt=0)
+    location: Optional[str] = Field(None, max_length=150)
+    phone: Optional[str] = Field(None, max_length=40)
+    consultation_fee: Optional[float] = Field(None, ge=0)
+    default_duration: Optional[int] = Field(None, ge=5, le=480)
+    status: Optional[str] = Field(None, description="active|closed")
+    notes: Optional[str] = None
+
+
+class ClinicOut(BaseModel):
+    id: int
+    code: str
+    name: str
+    specialty: Optional[str] = None
+    department_id: Optional[int] = None
+    department_name: Optional[str] = None
+    lead_doctor_id: Optional[int] = None
+    lead_doctor_name: Optional[str] = None
+    location: Optional[str] = None
+    phone: Optional[str] = None
+    consultation_fee: float
+    default_duration: int
+    status: str
+    notes: Optional[str] = None
+    created_at: datetime
+    services: List[ClinicServiceOut] = []
+    schedule: List[ClinicScheduleOut] = []
+    services_count: int = 0
+    schedule_count: int = 0
+    weekly_capacity: int = 0
+
+
+class ClinicSummaryOut(BaseModel):
+    """ملخّص تشغيل العيادات: عيادات · خدمات · دوام · مواعيد اليوم."""
+    clinics: int
+    active: int
+    closed: int
+    unlinked: int                      # عيادات بلا قسم مرتبط (لا خدمات ولا دوام)
+    services: int
+    schedule_slots: int
+    weekly_capacity: int
+    appointments_today: int
+    consultation_fees_total: float

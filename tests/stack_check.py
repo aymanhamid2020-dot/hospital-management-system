@@ -110,8 +110,19 @@ def main():
           and "if (!p.personal.email) p.personal.email = s?.email" in ui_all)
     check("القائمة تفصل المبيعات عن الحسابات",
           'data-view="sales"' in ui_all and 'data-view="accounts"' in ui_all
-          and "async sales(main)" in ui_all
+          and "async function sales(main)" in ui_all
           and "async accounts(main)" in ui_all)
+    check("شاشة المبيعات بتبويبات دورة الإيراد الستة",
+          "const RC_TABS = [['pos'," in ui_all
+          and all(f"'{k}'" in ui_all for k in
+                  ("pos", "collect", "insure", "quotes", "pricing", "reports"))
+          and "async function sales(main)" in ui_all)
+    check("لا تكرار: شاشة العيادات مستقلة بأربعة تبويبات",
+          'data-view="clinics"' in ui_all
+          and "async function clinics(main)" in ui_all
+          and all(f in ui_all for f in ("function clListTab()", "function clServicesTab()",
+                                       "function clScheduleTab()", "function clSummaryTab()"))
+          and "clinics: 'العيادات'" in ui_all)
     check("قسم المخزون في القائمة والعرض",
           'data-view="inventory"' in ui_all
           and "async inventory(main)" in ui_all

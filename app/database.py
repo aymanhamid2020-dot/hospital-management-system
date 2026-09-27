@@ -167,6 +167,10 @@ PENDING_COLUMNS = {
         "is_active": "BOOLEAN NOT NULL DEFAULT 1",
         "monthly_operating_cost": "FLOAT NOT NULL DEFAULT 0",
     },
+    "department_schedules": {
+        # سعة الوردية (عدد المرضى) — تستخدمها شاشة العيادات لحساب السعة الأسبوعية
+        "max_patients": "INTEGER NOT NULL DEFAULT 0",
+    },
     "beds": {
         # مركز الأقسام: السرير داخل غرفة/جناح
         "room_id": "INTEGER",
