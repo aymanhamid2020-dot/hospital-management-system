@@ -214,6 +214,13 @@ def main():
     ensure_columns()  # ترحيل الأعمدة الجديدة قبل الإدخال
     db = SessionLocal()
     try:
+        # --- كتالوج RBAC قبل أي مستخدم ---
+        # users.role يشير إلى roles.key بقيد FK، وتهيئة الأدوار تجري عند إقلاع
+        # الخادم (main.seed_rbac_data) بينما يُسبقه هذا السكربت في CI، فتُزرع هنا.
+        from app.permissions import seed_rbac
+        seed_rbac(db)
+        db.commit()
+
         # --- حماية من التكرار ---
         if db.query(Patient).filter(
             Patient.email.like(f"%{DEMO_DOMAIN}")
