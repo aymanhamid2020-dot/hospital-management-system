@@ -2,7 +2,7 @@ from fastapi import (
     APIRouter, Depends, HTTPException, status, Query, File, UploadFile, Response,
 )
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import String, cast, func
 from datetime import date
 from typing import List, Optional
 
@@ -10,7 +10,7 @@ from app.database import get_db
 from app.models import (
     Patient, User, Attachment, Appointment, MedicalRecord, LabOrder,
     Prescription, Invoice, Dispense, VitalSign, InsuranceClaim, ClaimStatus,
-    InvoiceStatus,
+    InvoiceStatus, patient_no_for,
 )
 from app.schemas import (
     PatientCreate, PatientUpdate, PatientInDB, PatientProfileUpdate,
@@ -20,6 +20,18 @@ from app.schemas import (
 from app.auth import get_current_user, require_admin, get_user_role
 
 router = APIRouter(prefix="/patients", tags=["Patients"])
+
+
+def _fill_missing_file_nos(db: Session) -> int:
+    """يمنح أي مريض بلا رقم ملف رقمه المشتقّ من المعرّف (1000 فما فوق).
+
+    يُستدعى بعد المسارات التي تنشئ مرضى دفعةً واحدة (الاستيراد)،
+    ويشغّل أيضًا الترحيل عند الإقلاع. يعيد عدد الصفوف المُرقَّمة.
+    """
+    rows = db.query(Patient).filter(Patient.file_no.is_(None)).all()
+    for p in rows:
+        p.file_no = patient_no_for(p.id)
+    return len(rows)
 
 
 def _age_at(dob, today=None) -> Optional[int]:
@@ -33,7 +45,7 @@ def _age_at(dob, today=None) -> Optional[int]:
 
 @router.get("/", response_model=List[PatientListItem], summary="عرض قائمة المرضى")
 def list_patients(
-    search: Optional[str] = Query(None, description="بحث بالاسم/الهاتف/الهوية/البريد"),
+    search: Optional[str] = Query(None, description="بحث بالاسم/الهاتف/الهوية/البريد/رقم الملف"),
     blood_type: Optional[str] = Query(None, description="فلترة حسب مجموعة الدم"),
     alert: Optional[str] = Query(None, description="has = من له حساسية أو تحذير طبي"),
     sort: Optional[str] = Query("created", description="created | name | age"),
@@ -58,6 +70,8 @@ def list_patients(
             | Patient.phone.ilike(like)
             | Patient.national_id.ilike(like)
             | Patient.email.ilike(like)
+            # رقم الملف يتسلسل من 1000 — مطابقة جزئية ورقمية معًا
+            | cast(Patient.file_no, String).ilike(like)
         )
     if blood_type:
         q = q.filter(Patient.blood_type == blood_type)
@@ -329,6 +343,9 @@ async def import_patients_csv(
         seen.add(email_key)
         created += 1
     db.commit()
+    # أرقام الملفات الناتجة عن الاستيراد — تُشتقّ من المعرّف بعد إسنادها
+    _fill_missing_file_nos(db)
+    db.commit()
     return {"created": created, "skipped": skipped, "errors": errors}
 
 
@@ -405,6 +422,8 @@ async def create_patient(patient: PatientCreate, db = Depends(get_db), _ = Depen
     # كل حقول النموذج تُمرَّر كما هي (كانت تُكتب يدويًا ⇒ تُسقط الحقول الجديدة)
     db_patient = Patient(**patient.model_dump())
     db.add(db_patient)
+    db.flush()  # يمنح المريض معرّفه فيُشتقّ منه رقم الملف (1000 فما فوق)
+    db_patient.file_no = patient_no_for(db_patient.id)
     db.commit()
     db.refresh(db_patient)
     return db_patient

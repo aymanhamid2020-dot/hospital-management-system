@@ -107,9 +107,13 @@ def test_created_backup_lands_in_isolated_dir(bdir, client, admin):
 
 # ================= الحالة =================
 def test_status_reports_real_state(bdir, client, admin):
-    _make(bdir, "hospital_20260101_000000.db")
-    _make(bdir, "hospital_20260102_000000.db")
-    _make(bdir, "auto_20260103_000000.db")
+    # توقيتات مُضبطة صراحةً: تتابع الإقدام قد يقع كله في نفس «دقّة» وقت الملف
+    # على Windows، فيصبح ترتيب «الأقدم/الأحدث» غير محسوم — وهذا الخيط حصل فعلًا.
+    for i, name in enumerate(("hospital_20260101_000000.db",
+                              "hospital_20260102_000000.db",
+                              "auto_20260103_000000.db")):
+        stamp = 1_700_000_000 + i * 3600
+        os.utime(_make(bdir, name), (stamp, stamp))
 
     r = client.get("/backup/status", headers=admin)
     assert r.status_code == 200, r.text

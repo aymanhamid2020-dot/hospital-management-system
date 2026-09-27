@@ -2932,9 +2932,13 @@ function setPatTab(tab) {
 function chartHead() {
   const p = CHART.profile;
   return `<div class="chart-head">
-    <div><h3>${esc(p.full_name)}</h3>
+    <div><h3>${esc(p.full_name)}${
+      p.file_no != null
+        ? ` <span class="pill" title="رقم الملف — يبدأ من 1000">#${p.file_no}</span>`
+        : ''}</h3>
       <p>${esc(p.gender)} · ${fmtDate(p.date_of_birth)} · 🩸 ${esc(p.blood_type || '—')}
-         ${p.national_id ? ' · 🪪 ' + esc(p.national_id) : ''}</p></div>
+         ${p.national_id ? ' · 🪪 ' + esc(p.national_id) : ''}
+         ${p.file_no != null ? ' · 📁 ملف ' + p.file_no : ''}</p></div>
     <div class="actions">
       <button class="btn ghost sm" onclick="download('/patients/${p.id}/pdf','patient_${p.id}_file.pdf')">📄 الملف PDF</button>
       <button class="btn ghost sm" onclick="download('/accounts/statement/${p.id}/pdf','patient_statement_${p.id}.pdf')">🧾 كشف الحساب</button>
@@ -4005,9 +4009,12 @@ function hrField(group, key, label, type='text', options='') {
   return `<div class="field"><label>${label}</label>${input}</div>`;
 }
 function hrDirectoryHTML(filter='') {
-  const list = HR_ROWS.filter(x => (x.full_name+' '+x.position).toLowerCase().includes(filter.toLowerCase()));
+  const f = (filter || '').toLowerCase().trim();
+  const list = HR_ROWS.filter(x => !f ||
+    (x.full_name + ' ' + x.position + ' ' + String(x.employee_no ?? ''))
+      .toLowerCase().includes(f));
   return list.map(x => `<button class="hr-person${x.id===HR_SELECTED?' active':''}" onclick="selectHR(${x.id})">
-    <span class="avatar">${esc((x.full_name||'?').trim().charAt(0))}</span><span><b>${esc(x.full_name)}</b><small>${esc(x.position)}</small></span>
+    <span class="avatar">${esc((x.full_name||'?').trim().charAt(0))}</span><span><b>${esc(x.full_name)}</b><small>${esc(x.position)}${x.employee_no != null ? ' · #' + x.employee_no : ''}</small></span>
     <i>${esc(x.hr_profile?.employment?.status || 'على رأس العمل')}</i></button>`).join('') || '<div class="empty">لا توجد نتائج</div>';
 }
 function hrEditorHTML() {
@@ -4018,7 +4025,11 @@ function hrEditorHTML() {
   /* تبويب «قائمة الموظفين»: الجدول + الإضافة + الحذف — بلا رأس ملف */
   if (HR_TAB === 'roster') return `<div class="card">${tabs}<div id="hr-tab" class="hr-tab">${hrTabHTML()}</div></div>`;
   return `<div class="card hr-card">
-    <div class="hr-profile-head"><div><h3>${esc(s.full_name)}</h3><p>${esc(s.position)} · تعيين ${fmtDate(s.hire_date)}</p></div>
+    <div class="hr-profile-head"><div><h3>${esc(s.full_name)}${
+      s.employee_no != null
+        ? ` <span class="pill" title="رقم الموظف — يبدأ من 1">#${s.employee_no}</span>`
+        : ''}</h3><p>${esc(s.position)} · تعيين ${fmtDate(s.hire_date)}${
+      s.employee_no != null ? ' · رقم وظيفي ' + s.employee_no : ''}</p></div>
       <div class="actions"><button class="btn success" onclick="saveHR()">💾 حفظ ملف الموظف</button><span class="pill active">${esc(p.employment.status || 'على رأس العمل')}</span></div></div>
     ${tabs}
     <div id="hr-tab" class="hr-tab">${hrTabHTML()}</div></div>`;
@@ -6041,7 +6052,7 @@ const VIEWS = {
       <div class="hr-shell">
         <div class="card hr-directory">
           <div class="toolbar"><h3 style="margin:0">دليل الموظفين</h3>
-            <input oninput="filterHR(this.value)" placeholder="🔍 بحث باسم الموظف…"></div>
+            <input oninput="filterHR(this.value)" placeholder="🔍 بحث بالاسم أو رقم الموظف…"></div>
           <div id="hr-list">${hrDirectoryHTML()}</div>
         </div>
         <div class="hr-editor" id="hr-editor">${hrEditorHTML()}</div>
@@ -6070,13 +6081,17 @@ const VIEWS = {
         <h3>الموظفون (${rows.length})</h3>
         ${form}
         <div style="overflow-x:auto"><table>
-          <thead><tr><th>#</th><th>الاسم</th><th>المنصب</th><th>الهاتف</th><th>البريد</th><th>التعيين</th><th>الراتب</th>${isAdmin() ? '<th></th>' : ''}</tr></thead>
+          <thead><tr><th>#</th><th title="رقم الموظف — يتسلسل من 1">الرقم الوظيفي</th>
+            <th>الاسم</th><th>المنصب</th><th>الهاتف</th><th>البريد</th><th>التعيين</th><th>الراتب</th>${isAdmin() ? '<th></th>' : ''}</tr></thead>
           <tbody>${rows.map(s => `<tr>
-            <td>${s.id}</td><td><strong>${esc(s.full_name)}</strong></td><td>${esc(s.position)}</td>
+            <td>${s.id}</td>
+            <td>${s.employee_no != null
+              ? `<span class="pill" title="رقم الموظف">${s.employee_no}</span>` : '—'}</td>
+            <td><strong>${esc(s.full_name)}</strong></td><td>${esc(s.position)}</td>
             <td>${esc(s.phone)}</td><td>${esc(s.email)}</td><td>${fmtDate(s.hire_date)}</td>
             <td>${s.salary ? s.salary.toLocaleString() : '-'}</td>
             ${isAdmin() ? `<td><button class="btn sm danger" onclick="del('staff',${s.id},'hr')">حذف</button></td>` : ''}
-          </tr>`).join('') || '<tr><td colspan="8" class="empty">لا يوجد موظفون</td></tr>'}</tbody>
+          </tr>`).join('') || '<tr><td colspan="9" class="empty">لا يوجد موظفون</td></tr>'}</tbody>
         </table></div>
       </div>`;
   },
@@ -6818,7 +6833,7 @@ const VIEWS = {
       <div class="card">
         <h3>المرضى <span class="count-badge">${total}</span></h3>
         <div class="toolbar">
-          <input id="q" placeholder="🔍 بحث بالاسم/الهاتف/الهوية/البريد…" value="${esc(st.search)}"
+          <input id="q" placeholder="🔍 بحث بالاسم/الهاتف/الهوية/رقم الملف…" value="${esc(st.search)}"
                  oninput="searchPatients(this.value)">
           <select id="flt-blood" onchange="filterPatients()">
             ${opt('', 'كل فصائل الدم', !st.blood)}
@@ -6838,6 +6853,7 @@ const VIEWS = {
         <div style="overflow-x:auto"><table id="tbl">
           <thead><tr>
             <th>#</th>
+            <th title="رقم الملف — يتسلسل من 1000 ويُبحث به">رقم الملف</th>
             ${th('name', 'المريض')}
             <th>العمر</th>
             <th>الهاتف</th>
@@ -6850,6 +6866,8 @@ const VIEWS = {
           </tr></thead>
           <tbody>${rows.map(p => `<tr class="clickable" onclick="openPatientChart(${p.id})">
             <td>${p.id}</td>
+            <td>${p.file_no != null
+              ? `<span class="pill" title="رقم الملف">${p.file_no}</span>` : '—'}</td>
             <td><strong>${esc(p.full_name)}</strong>
               ${p.has_alerts ? '<br><small class="warn-tag" title="حساسية أو تحذير طبي">⚠️ تحذير</small>' : ''}
               ${p.nationality ? `<br><small>${esc(p.nationality)}</small>` : ''}</td>
@@ -6868,7 +6886,7 @@ const VIEWS = {
               <button class="btn sm primary" onclick="openPatientChart(${p.id})">🗂️ الملف</button>
               ${isAdmin() ? `<button class="btn sm danger" onclick="del('patients',${p.id},'patients')">حذف</button>` : ''}
             </td>
-          </tr>`).join('') || `<tr><td colspan="11" class="empty">${
+          </tr>`).join('') || `<tr><td colspan="12" class="empty">${
             (st.search || st.blood || st.alert) ? 'لا نتائج مطابقة للفلاتر' : 'لا يوجد مرضى'}</td></tr>`}</tbody>
         </table></div>
         <div class="pager">
@@ -8180,19 +8198,181 @@ let LAB_RIS_ORDER = 0;       /* الطلب المختار في تبويب الت
 const labPill = o => `<span class="pill ${o.status}">${LAB_ST[o.status] || o.status}</span>`;
 
 /* علامة النتيجة مقابل النطاق الطبيعي: حرجة / خارج النطاق / طبيعية */
+/* — علامة النتيجة: حرجة / خارج النطاق (باتجاهها) / طبيعية — */
 function labFlagPill(o) {
-  if (o.critical) return '<span class="pill cancelled">🔴 حرجة</span>';
-  if (o.abnormal) return '<span class="pill in_progress">🟠 خارج النطاق</span>';
+  if (o.critical) return '<span class="pill cancelled" title="انحراف كبير عن النطاق المرجعي">🔴 حرجة</span>';
+  if (o.abnormal) {
+    const up = o.value != null && o.ref_max != null && o.value > o.ref_max;
+    const dn = o.value != null && o.ref_min != null && o.value < o.ref_min;
+    return `<span class="pill in_progress" title="القيمة خارج النطاق المرجعي">🟠 خارج النطاق${
+      up ? ' ⬆️' : dn ? ' ⬇️' : ''}</span>`;
+  }
   if (o.result) return '<span class="pill reviewed">🟢 طبيعية</span>';
   return '—';
 }
 
-/* النطاق الطبيعي: يعمل للطلب ولأي سجل في دليل الفحوصات */
-function labRange(o) {
-  if (o.ref_min == null && o.ref_max == null) return '—';
-  const lo = o.ref_min == null ? '…' : o.ref_min;
-  const hi = o.ref_max == null ? '…' : o.ref_max;
-  return `${lo} – ${hi}${o.unit ? ' ' + esc(o.unit) : ''}`;
+/* ===== قراءة النتيجة بوصفها تقرير فحص ===== */
+
+/* مرآة دقيقة لدالة `_flags_for` في الخادم: خارج النطاق ⇒ غير طبيعي،
+   وحرجة إن انحرفت أبعد من نصف امتداده، أو نزلت تحت نصف الحد الأدنى،
+   أو تجاوزت 1.5× الحد الأعلى. أي تغيير هنا يستدعي تغييرها هناك. */
+function labFlags(value, refMin, refMax) {
+  const num = v => (v === '' || v == null || Number.isNaN(Number(v)))
+    ? null : Number(v);
+  const v = num(value), lo = num(refMin), hi = num(refMax);
+  const f = { v, lo, hi, ranged: v != null && (lo != null || hi != null),
+              abnormal: false, critical: false, dir: 0 };
+  if (!f.ranged) return f;
+  const LO = lo != null ? lo : v;
+  const HI = hi != null ? hi : v;
+  if (v < LO || v > HI) {
+    f.abnormal = true;
+    f.dir = v < LO ? -1 : 1;
+    const span = Math.max(HI - LO, Math.abs(HI), Math.abs(LO), 1e-9);
+    const dev = v < LO ? LO - v : v - HI;
+    f.critical = dev > 0.5 * span || (LO > 0 && v < 0.5 * LO)
+      || (HI > 0 && v > 1.5 * HI);
+  }
+  return f;
+}
+
+/* [النص، لون الشارة] لكل حالة من حالات النتيجة الست — ألوان مخصّصة
+   لورقة التقرير حتى يلفت «مرتفعة» عين الطبيب ولا يمرّ كشارة رمادية */
+const LAB_FLAG = {
+  critical: ['🔴 قيمة حرجة', 'lab-critical'],
+  high: ['⬆️ مرتفعة', 'lab-high'],
+  low: ['⬇️ منخفضة', 'lab-low'],
+  normal: ['🟢 طبيعية', 'lab-normal'],
+  empty: ['⏳ بانتظار القيمة', 'lab-wait'],
+  plain: ['بلا نطاق مرجعي', 'lab-plain'],
+};
+function labFlagKey(f) {
+  if (f.v == null) return 'empty';
+  if (!f.ranged) return 'plain';
+  if (f.critical) return 'critical';
+  if (f.abnormal) return f.dir > 0 ? 'high' : 'low';
+  return 'normal';
+}
+const labFlagText = f => LAB_FLAG[labFlagKey(f)][0];
+const labFlagCls = f => LAB_FLAG[labFlagKey(f)][1];
+
+/* النطاق المرجعي: من الطلب أولًا ثم ما ورثه من دليل الفحوصات */
+function labRefOf(o) {
+  const c = o.catalog;
+  return {
+    lo: o.ref_min != null ? o.ref_min : (c && c.ref_min != null ? c.ref_min : null),
+    hi: o.ref_max != null ? o.ref_max : (c && c.ref_max != null ? c.ref_max : null),
+    unit: o.unit || (c && c.unit) || '',
+  };
+}
+
+function labRangeLabel(r) {
+  if (r.lo == null && r.hi == null) return 'لا نطاق مرجعي';
+  const lo = r.lo == null ? '…' : r.lo;
+  const hi = r.hi == null ? '…' : r.hi;
+  /* الأرقام تُقرأ تصاعديًّا مهما كان اتجاه الصفحة — وإلا انقلب النطاق
+     المعروض في الخلية العربية إلى «17 – 12» فاقرأ الطبيب رقمان مقلوبين.
+     الاتجاه على <bdi> وحده يكفي ولا يمسّ بقية السطر. */
+  return `<bdi dir="ltr">${lo} – ${hi}${r.unit ? ' ' + esc(r.unit) : ''}</bdi>`;
+}
+
+/* النطاق الطبيعي: للطلب أولًا ثم للسجل في دليل الفحوصات */
+function labRange(o) { return labRangeLabel(labRefOf(o)); }
+
+/* شريط يوضّح موقع القيمة داخل النطاق — محور أحادي الاتجاه (ltr) لأن
+   الأرقام تُقرأ تصاعديًا مهما كان اتجاه الصفحة */
+function labRangeBar(f, lo, hi) {
+  if (f.v == null || lo == null || hi == null || !(Number(hi) - Number(lo))) return '';
+  const span = Number(hi) - Number(lo);
+  let a = Number(lo) - 0.5 * span, b = Number(hi) + 0.5 * span;
+  a = Math.min(a, f.v); b = Math.max(b, f.v);
+  const pad = 0.15 * (b - a);
+  a -= pad; b += pad;
+  const pct = x => Math.max(0, Math.min(100, ((x - a) / (b - a)) * 100));
+  const zl = pct(Number(lo)), zw = Math.max(3, pct(Number(hi)) - zl);
+  return `
+    <div class="lab-bar" title="النطاق المرجعي ${lo} – ${hi}">
+      <div class="lab-bar-zone" style="left:${zl}%;width:${zw}%"></div>
+      <i class="lab-bar-dot ${labFlagCls(f)}" style="left:${pct(f.v)}%"></i>
+    </div>
+    <div class="lab-bar-lbl"><span>${lo}</span><span>النطاق المرجعي</span><span>${hi}</span></div>`;
+}
+
+/* اختصارات التفسير النوعي للفحوصات غير الرقمية */
+const LAB_QUAL = ['إيجابي', 'سلبي', 'طبيعي', 'غير طبيعي', 'حَسَم', 'غير حَسَم'];
+
+/* لوحة التفسير الحيّة — تُعاد كتابتها مع كل ضغطة مفتاح */
+function labInterpHTML(value, ref) {
+  const { lo, hi } = ref;
+  const f = labFlags(value, lo, hi);
+  const key = labFlagKey(f);
+  const note = key === 'empty'
+    ? 'أدخل القيمة الرقمية لتظهر قراءتها مقابل النطاق المرجعي.'
+    : key === 'plain'
+    ? 'لا نطاق مرجعي مسجَّل لهذا الفحص — اكتب التفسير النوعي في الحقل أعلاه.'
+    : key === 'normal' ? 'القيمة داخل النطاق المرجعي.'
+    : key === 'critical' ? 'انحراف كبير عن النطاق — أخطر الطبيب فور الحفظ.'
+    : 'القيمة خارج النطاق المرجعي — راجعها قبل الحفظ.';
+  return `
+  <div class="lab-interp">
+    <div class="lab-interp-top">
+      <span class="pill ${labFlagCls(f)}">${labFlagText(f)}</span>
+      <span class="lab-interp-range">${lo != null || hi != null
+        ? labRangeLabel(ref) : 'بلا نطاق مرجعي'}</span>
+    </div>
+    ${labRangeBar(f, lo, hi)}
+    <p class="muted" style="margin:6px 0 8px">${note}</p>
+    <div class="lab-qual"><span>تفسير نوعي:</span>
+      ${LAB_QUAL.map(q => `<button type="button" class="btn sm ghost"
+          onclick="labQualPick('${q}')">${q}</button>`).join('')}
+    </div>
+  </div>`;
+}
+
+function labQualPick(v) {
+  const el = document.getElementById('m-result');
+  if (el) { el.value = v; el.dispatchEvent(new Event('input')); }
+}
+
+/* بطاقة الفحص: كل ما يقرؤه الطبيب في تقرير الفحص قبل النتيجة */
+function labSheetHTML(o) {
+  const c = o.catalog, p = o.patient || {};
+  const cell = (l, v) => v ? `<div class="lab-cell"><span>${l}</span><b>${v}</b></div>` : '';
+  const r = labRefOf(o);
+  return `
+  <div class="lab-sheet">
+    <div class="lab-sheet-top">
+      <div><b>${esc(p.full_name || '—')}</b>
+        <small>${p.file_no != null ? '📁 ملف ' + p.file_no + ' · ' : ''}طلب #${o.id} · ${fmtDate(o.ordered_at)}</small></div>
+      <span class="pill ${o.priority === 'stat' ? 'cancelled' : 'pending'}">${
+        o.priority === 'stat' ? '⚡ طارئة' : 'روتينية'}</span>
+    </div>
+    <div class="lab-sheet-grid">
+      ${cell('الفحص', esc(o.test_name))}
+      ${cell('الرمز', c ? esc(c.code) : '')}
+      ${cell('المجموعة', c ? esc(c.specimen_group || '') : '')}
+      ${cell('العيّنة', esc(o.specimen_type || (c && c.specimen_type) || ''))}
+      ${cell('الأنبوب', c && c.tube_type ? esc(c.tube_type) : '')}
+      ${cell('الصيام', c && c.fasting_hours ? c.fasting_hours + ' ساعة' : '')}
+      ${cell('الوحدة', esc(r.unit || ''))}
+      ${cell('السعر', Number(o.price || 0) + ' ر.س')}
+      <div class="lab-cell"><span>حالة الاختبار في الدليل</span><b>${
+        c ? (c.active
+          ? '<span class="pill reviewed">✅ مفعّل · active</span>'
+          : '<span class="pill cancelled">⏸️ موقوف · passive</span>')
+          : '<span class="muted">غير مرتبط بالدليل</span>'}</b></div>
+    </div>
+  </div>`;
+}
+
+/* خلية النتيجة في الجداول: القيمة + الوحدة + الوصف دون تكرار */
+function labResultCell(o) {
+  if (!o.result) return '—';
+  const same = o.value != null && String(o.value) === String(o.result);
+  const v = (o.value != null && !same) ? `<b>${o.value}</b> · ` : '';
+  /* الرقم مع وحدته يُعزل باتجاه ltr حتى لا تنقلب الوحدة أمام الرقم */
+  return `<bdi dir="ltr">${v}${esc(o.result)}${
+    o.unit ? ` <small>${esc(o.unit)}</small>` : ''}</bdi>`;
 }
 
 function labSamplePill(s) {
@@ -8323,47 +8503,163 @@ async function rejectSample(id) {
 }
 
 /* ---------- إدخال النتيجة مع حساب النطاق تلقائيًا ---------- */
-function enterLabResult(id) {
+/* ——— إدخال النتيجة على هيئة تقرير فحص ——— */
+let LAB_EDIT_ID = null, LAB_DRAFT = null;
+/* قيم النموذج: الغياب فقط يُعيد للقيمة المحفوظة — والفراغ قرار صريح */
+const _draftPick = (v, fb) => (v === undefined || v === null) ? fb : v;
+const _numPick = (v, fb) =>
+  (v === undefined || v === null || String(v).trim() === '') ? fb : v;
+
+/* مسودة الإدخال: تُقرأ من النموذج إن كان موجودًا، وإلا من آخر معاينة */
+function labDraft(id) {
+  const d = (LAB_DRAFT && LAB_DRAFT.id === id) ? LAB_DRAFT : {};
+  const g = (k, fb) => {
+    const el = document.getElementById(k);
+    return el ? el.value : (fb === undefined ? '' : fb);
+  };
+  return { result: g('m-result', d.result), value: g('m-value', d.value),
+           unit: g('m-unit', d.unit), ref_min: g('m-refmin', d.ref_min),
+           ref_max: g('m-refmax', d.ref_max), critical: g('m-crit', d.critical) };
+}
+
+function enterLabResult(id, keepDraft) {
   const o = LAB_DATA.orders.find(x => x.id === id);
   if (!o) return;
+  LAB_EDIT_ID = id;
+  const d = (keepDraft && LAB_DRAFT && LAB_DRAFT.id === id) ? LAB_DRAFT : {};
+  const r = labRefOf(o);
+  const startVal = _draftPick(d.value,
+    o.value != null ? o.value
+      : (o.result != null && o.result !== '' && !Number.isNaN(Number(o.result))
+        ? o.result : ''));
+  const startRes = _draftPick(d.result, o.result || '');
+  const lo = _numPick(d.ref_min, r.lo);
+  const hi = _numPick(d.ref_max, r.hi);
+  const unit = _draftPick(d.unit, r.unit);
+
   openModal(`📥 إدخال النتيجة — طلب #${id}`, `
-    <div class="kv"><span>المريض</span><b>${esc(o.patient.full_name)}</b></div>
-    <div class="kv"><span>الفحص</span><b>${esc(o.test_name)}</b></div>
-    <div class="kv"><span>نوع العيّنة</span><b>${esc(o.specimen_type || '—')}</b></div>
+    ${labSheetHTML(o)}
+    <div class="field"><label>القيمة الرقمية — تُقارَن بالنطاق المرجعي فورًا</label>
+      <input id="m-value" type="number" step="any"
+             value="${esc(startVal == null ? '' : String(startVal))}"
+             placeholder="اتركها فارغة للفحوصات النوعية"
+             oninput="labInterpLive(${id})"></div>
     <div class="field"><label>القيمة أو وصف النتيجة *</label>
-      <input id="m-result" value="${esc(o.result || '')}" placeholder="مثال: 12.5 أو طبيعي"></div>
-    <div class="field"><label>القيمة الرقمية (للمقارنة بالنطاق الطبيعي)</label>
-      <input id="m-value" type="number" step="any" placeholder="اتركها فارغة لغير الرقمية"></div>
-    <div class="form-grid">
-      <div class="field"><label>الوحدة</label><input id="m-unit" value="${esc(o.unit || '')}"></div>
-      <div class="field"><label>النطاق الأدنى</label>
-        <input id="m-refmin" type="number" step="any" value="${o.ref_min == null ? '' : o.ref_min}"></div>
-      <div class="field"><label>النطاق الأعلى</label>
-        <input id="m-refmax" type="number" step="any" value="${o.ref_max == null ? '' : o.ref_max}"></div>
-      <div class="field"><label>القيمة الحرجة</label><select id="m-crit">
-        <option value="">تُحسب تلقائيًا</option><option value="true">تعليم يدوي كحرجة</option></select></div>
-    </div>
-    <p class="muted">تُحسب علامتا «خارج النطاق» و«حرجة» تلقائيًا من مقارنة القيمة بالنطاق الطبيعي.</p>
-    <div class="actions" style="margin-top:10px">
+      <input id="m-result" value="${esc(startRes)}"
+             placeholder="مثال: 12.5 — أو إيجابي"
+             oninput="labInterpLive(${id})"></div>
+    <div id="m-interp">${labInterpHTML(startVal, { lo, hi, unit })}</div>
+    <details class="addbox"><summary>✏️ تحرير النطاق المرجعي والوحدة</summary>
+      <div class="form-grid">
+        <div class="field"><label>الوحدة</label>
+          <input id="m-unit" value="${esc(unit == null ? '' : String(unit))}"></div>
+        <div class="field"><label>النطاق الأدنى</label>
+          <input id="m-refmin" type="number" step="any" value="${lo == null ? '' : lo}"
+                 oninput="labInterpLive(${id})"></div>
+        <div class="field"><label>النطاق الأعلى</label>
+          <input id="m-refmax" type="number" step="any" value="${hi == null ? '' : hi}"
+                 oninput="labInterpLive(${id})"></div>
+        <div class="field"><label>القيمة الحرجة</label><select id="m-crit">
+          <option value="">تُحسب تلقائيًا</option>
+          <option value="true">تعليم يدوي كحرجة</option></select></div>
+      </div>
+    </details>
+    <p class="muted">تُحسب علامتا «خارج النطاق» و«القيمة الحرجة» تلقائيًا من مقارنة
+      القيمة بالنطاق المرجعي الموروث من دليل الفحوصات، وتظهر في إشعار منفصل عند الحرجة.</p>
+    <div class="actions" style="margin-top:12px">
       <button class="btn success" onclick="saveLabResult(${id})">حفظ النتيجة</button>
-      <button class="btn ghost" onclick="closeModal()">إلغاء</button></div>`, true);
+      <button class="btn ghost" onclick="labReportPreview(${id})">👁️ معاينة تقرير الفحص</button>
+      <button class="btn ghost" onclick="closeModal()">إلغاء</button>
+    </div>`, true);
+}
+
+function labInterpLive(id) {
+  const o = LAB_DATA.orders.find(x => x.id === id);
+  const box = document.getElementById('m-interp');
+  if (!o || !box) return;
+  const r = labRefOf(o);
+  box.innerHTML = labInterpHTML(V('m-value'),
+    { lo: _numPick(V('m-refmin'), r.lo), hi: _numPick(V('m-refmax'), r.hi),
+      unit: _draftPick(V('m-unit'), r.unit) });
+}
+
+/* ورقة النتيجة قبل الحفظ — نفس البيانات التي تحملها PDF بعد الحفظ */
+function labPreviewHTML(o, d) {
+  const r = labRefOf(o);
+  const lo = _numPick(d.ref_min, r.lo);
+  const hi = _numPick(d.ref_max, r.hi);
+  const unit = _draftPick(d.unit, r.unit);
+  const val = _draftPick(d.value, o.value);
+  const res = _draftPick(d.result, o.result) || '—';
+  const f = labFlags(val, lo, hi);
+  const who = (typeof USER !== 'undefined' && USER)
+    ? (USER.full_name || USER.username || '') : '';
+  return `
+  <div class="lab-report">
+    <div class="lab-report-head">
+      <div><b>ورقة نتيجة فحص</b><small>طلب #${o.id} · ${fmtDate(o.ordered_at)}</small></div>
+      <span class="pill ${labFlagCls(f)}">${labFlagText(f)}</span>
+    </div>
+    ${labSheetHTML(o)}
+    <div class="lab-report-rows">
+      <div class="kv"><span>القيمة</span><b><bdi dir="ltr">${
+        val != null && String(val) !== ''
+        ? esc(String(val)) + (unit ? ' ' + esc(unit) : '') : '—'}</bdi></b></div>
+      <div class="kv"><span>النطاق المرجعي</span><b>${
+        lo != null || hi != null ? labRangeLabel({ lo, hi, unit }) : '—'}</b></div>
+      <div class="kv"><span>التفسير</span><b><span class="pill ${labFlagCls(f)}">${
+        labFlagText(f)}</span></b></div>
+      <div class="kv"><span>حالة الطلب</span><b>${labPill(o)}</b></div>
+      <div class="kv"><span>المُدخل</span><b>${esc(who || '—')}</b></div>
+      ${o.verified_by ? `<div class="kv"><span>معتمد من</span><b>${esc(o.verified_by)}</b></div>` : ''}
+    </div>
+    ${labRangeBar(f, lo, hi)}
+    <div class="lab-report-result"><span>النتيجة</span><b>${esc(res)}</b></div>
+    <div class="lab-signs"><div><span>فني المختبر</span><i></i></div>
+      <div><span>مراجعة الطبيب</span><i></i></div></div>
+  </div>`;
+}
+
+function labReportPreview(id) {
+  const o = LAB_DATA.orders.find(x => x.id === id);
+  if (!o) return;
+  const d = Object.assign({ id }, labDraft(id));
+  LAB_DRAFT = d;
+  openModal(`👁️ معاينة تقرير الفحص — طلب #${id}`, `
+    ${labPreviewHTML(o, d)}
+    <div class="actions" style="margin-top:12px">
+      <button class="btn success" onclick="saveLabResult(${id})">حفظ النتيجة</button>
+      <button class="btn ghost" onclick="enterLabResult(${id}, true)">✏️ العودة للتحرير</button>
+      <button class="btn ghost" onclick="download('/lab-orders/${id}/pdf','lab_result_${id}.pdf')">🖨️ PDF</button>
+      <button class="btn ghost" onclick="closeModal()">إغلاق</button>
+    </div>`, true);
 }
 
 async function saveLabResult(id) {
-  if (!V('m-result')) return toast('أدخل قيمة النتيجة', true);
-  const body = { result: V('m-result') };
-  if (V('m-value') !== '' && V('m-value') != null) body.value = Number(V('m-value'));
-  if (V('m-unit')) body.unit = V('m-unit');
-  if (V('m-refmin') !== '' && V('m-refmin') != null) body.ref_min = Number(V('m-refmin'));
-  if (V('m-refmax') !== '' && V('m-refmax') != null) body.ref_max = Number(V('m-refmax'));
-  if (V('m-crit') === 'true') body.critical = true;
+  const d = labDraft(id);
+  if (!d.result) return toast('أدخل قيمة النتيجة', true);
+  const body = { result: d.result };
+  const raw = String(d.value == null ? '' : d.value).trim();
+  if (raw === '') {
+    body.value = null;                      /* مسح القيمة يعيد الحالة «بلا نطاق» */
+  } else {
+    const n = Number(raw);
+    if (Number.isNaN(n)) return toast('القيمة الرقمية يجب أن تكون رقمًا', true);
+    body.value = n;
+  }
+  if (d.unit) body.unit = d.unit;
+  if (String(d.ref_min == null ? '' : d.ref_min).trim() !== '') body.ref_min = Number(d.ref_min);
+  if (String(d.ref_max == null ? '' : d.ref_max).trim() !== '') body.ref_max = Number(d.ref_max);
+  if (d.critical === 'true') body.critical = true;
   try {
     const j = await api('/lab-orders/' + id + '/result', {
       method: 'POST', body: JSON.stringify(body) });
+    LAB_DRAFT = null;
     closeModal();
+    const flag = labFlagText(labFlags(j.value, j.ref_min, j.ref_max));
     const msg = j.critical ? '⚠️ النتيجة قيمة حرجة خارج النطاق'
       : j.abnormal ? '🟠 النتيجة خارج النطاق الطبيعي'
-      : 'تم حفظ النتيجة ✅';
+      : `تم حفظ النتيجة ✅ — ${flag}`;
     toast(msg, !!j.critical);
     await navigate('lab');
   } catch (e) { toast(e.message, true); }
@@ -8569,7 +8865,8 @@ const LAB_VIEWS = {
           <th>الأولوية</th><th>الحالة</th><th>النتيجة</th><th></th></tr></thead>
         <tbody>${rows.map(o => `<tr data-status="${o.status}">
           <td>${o.id}</td><td>${fmtDate(o.ordered_at)}</td>
-          <td>${esc(o.patient.full_name)}</td>
+          <td>${esc(o.patient.full_name)}${
+            o.patient.file_no != null ? `<br><small>📁 ملف ${o.patient.file_no}</small>` : ''}</td>
           <td>${esc(o.doctor ? o.doctor.full_name : '-')}</td>
           <td><strong>${esc(o.test_name)}</strong>${o.price ? `<br><small>${o.price.toLocaleString()} ر.س</small>` : ''}
             ${o.lab_test_id ? `<br><small>📖 من الدليل #${o.lab_test_id}</small>` : ''}</td>
@@ -8577,7 +8874,7 @@ const LAB_VIEWS = {
             ? '<span class="pill cancelled">عاجل STAT</span>'
             : '<span class="pill pending">روتيني</span>'}</td>
           <td>${labPayPill(o)}${labPill(o)}<br>${labSamplePill(o.sample_status)}</td>
-          <td>${o.result ? esc(o.result) : '—'} ${labFlagPill(o)}</td>
+          <td>${labResultCell(o)} ${labFlagPill(o)}</td>
           <td class="actions">
             <button class="btn sm ghost" onclick="download('/lab-orders/${o.id}/pdf','lab_result_${o.id}.pdf')">🖨️ PDF</button>
             ${o.payment_pending
@@ -8644,10 +8941,12 @@ const LAB_VIEWS = {
         <thead><tr><th>#</th><th>المريض</th><th>الفحص</th><th>النطاق الطبيعي</th>
           <th>النتيجة</th><th>العلامات</th><th>الحالة</th><th></th></tr></thead>
         <tbody>${rows.map(o => `<tr data-status="${o.status}">
-          <td>${o.id}</td><td>${esc(o.patient.full_name)}</td>
-          <td>${esc(o.test_name)}</td>
+          <td>${o.id}</td><td>${esc(o.patient.full_name)}${
+            o.patient.file_no != null ? `<br><small>📁 ملف ${o.patient.file_no}</small>` : ''}</td>
+          <td>${esc(o.test_name)}${o.catalog
+            ? `<br><small>${esc(o.catalog.code)} · ${esc(o.catalog.specimen_group || '')}</small>` : ''}</td>
           <td>${labRange(o)}</td>
-          <td>${o.result ? esc(o.result) + (o.unit ? ` <small>${esc(o.unit)}</small>` : '') : '—'}</td>
+          <td>${labResultCell(o)}</td>
           <td>${labFlagPill(o)}</td>
           <td>${labPayPill(o)}${labPill(o)}</td>
           <td class="actions">
@@ -9550,6 +9849,7 @@ const ER_KIND = {
 let ER = {
   cases: [], tests: [], meds: [], pats: [], unpaid: [],
   sel: null, sum: null, rx: [], q: '',
+  days: 30,                       /* نطاق عرض القائمة: آخر 30 يومًا افتراضيًّا */
 };
 
 function erPill(map, key) {
@@ -9580,17 +9880,46 @@ async function renderEr(main) {
   main.innerHTML = erHTML();
 }
 
-function erHTML() {
-  const open = ER.cases.filter(c => !erIsClosed(c.status));
-  const wait = ER.cases.filter(c => c.invoice_id && ER.unpaid.includes(c.invoice_id)).length;
+/* نطاقات عرض قائمة الحالات — 30 يومًا هي الافتراضية حتى لا تغرق القائمة
+   بملفات قديمة مغلقة، والحالات المفتوحة تُرى مهما قدمت فلا يختفي ملف
+   قيد العلاج خلف فلتر زمني. */
+const ER_DAYS = [[30, 'آخر 30 يومًا'], [7, 'آخر 7 أيام'],
+                 [90, 'آخر 90 يومًا'], [0, 'كل الحالات']];
+
+function erVisible() {
+  const days = Number(ER.days) || 0;
+  const cut = days ? Date.now() - days * 86400000 : 0;
+  return ER.cases.filter(c => {
+    if (!cut || !erIsClosed(c.status)) return true;
+    const t = Date.parse(c.arrival_at);
+    return Number.isNaN(t) ? true : t >= cut;
+  });
+}
+
+function erStatsHTML() {
+  const rows = erVisible();
+  const open = rows.filter(c => !erIsClosed(c.status)).length;
+  const wait = rows.filter(c => c.invoice_id && ER.unpaid.includes(c.invoice_id)).length;
   const cur = ER.sum;
   return `
-  <div class="stats">
-    <div class="stat green"><div class="num">${open.length}</div><div class="lbl">حالة مفتوحة</div></div>
+    <div class="stat green"><div class="num">${open}</div><div class="lbl">حالة مفتوحة</div></div>
     <div class="stat amber"><div class="num">${wait}</div><div class="lbl">فاتورة بانتظار التحصيل</div></div>
-    <div class="stat"><div class="num">${ER.cases.length}</div><div class="lbl">إجمالي الحالات</div></div>
-    ${cur ? `<div class="stat"><div class="num">${cur.tests_ready}</div><div class="lbl">نتائج جاهزة لهذه الحالة</div></div>` : ''}
-  </div>
+    <div class="stat"><div class="num">${rows.length}</div><div class="lbl">إجمالي الحالات في النطاق</div></div>
+    ${cur ? `<div class="stat"><div class="num">${cur.tests_ready}</div><div class="lbl">نتائج جاهزة لهذه الحالة</div></div>` : ''}`;
+}
+
+/* تبديل النطاق يعيد رسم الإحصاءات والقائمة دون إعادة جلب الشاشة */
+function erSetDays(v) {
+  ER.days = Number(v) || 0;
+  const stats = document.getElementById('er-stats');
+  if (stats) stats.innerHTML = erStatsHTML();
+  const list = document.querySelector('.er-list');
+  if (list) list.innerHTML = erListHTML();
+}
+
+function erHTML() {
+  return `
+  <div class="stats" id="er-stats">${erStatsHTML()}</div>
 
   <div class="er-shell">
     <div class="card er-side">
@@ -9598,8 +9927,15 @@ function erHTML() {
         <h3 style="margin:0">🚑 الحالات</h3>
         <button class="btn success" onclick="erNewFile()">➕ فتح ملف</button>
       </div>
-      <input class="er-q" placeholder="🔍 ابحث بالمريض أو الشكوى أو رقم الحالة…"
-             value="${esc(ER.q)}" oninput="erSearch(this.value)">
+      <div class="er-filters">
+        <input class="er-q" placeholder="🔍 ابحث بالمريض أو الشكوى أو رقم الحالة…"
+               value="${esc(ER.q)}" oninput="erSearch(this.value)">
+        <select class="er-days" onchange="erSetDays(this.value)"
+                title="نطاق عرض الحالات — الافتراضي آخر 30 يومًا">
+          ${ER_DAYS.map(([v, l]) => `<option value="${v}"${
+            ER.days === v ? ' selected' : ''}>${l}</option>`).join('')}
+        </select>
+      </div>
       <div class="er-list">${erListHTML()}</div>
     </div>
     <div class="card er-work" id="er-work">${erWorkHTML()}</div>
@@ -9608,7 +9944,7 @@ function erHTML() {
 
 function erListHTML() {
   const q = (ER.q || '').trim().toLowerCase();
-  const rows = ER.cases.filter(c => !q ||
+  const rows = erVisible().filter(c => !q ||
     String(c.patient_name || '').toLowerCase().includes(q) ||
     String(c.complaint || '').toLowerCase().includes(q) ||
     String(c.id) === q);

@@ -1361,6 +1361,28 @@ _LAB_STATUS_EN = {"pending": "Registered", "in_progress": "In progress",
                   "cancelled": "Cancelled"}
 
 
+def _lab_flag_ar(order) -> str:
+    """حالة النتيجة على الورقة: حرجة / خارج النطاق / ضمن النطاق."""
+    if getattr(order, "critical", False):
+        return "قيمة حرجة خارج النطاق"
+    if getattr(order, "abnormal", False):
+        return "خارج النطاق الطبيعي"
+    if getattr(order, "result", None):
+        return "ضمن النطاق الطبيعي"
+    return "-"
+
+
+def _lab_flag_en(order) -> str:
+    """Result interpretation printed on the English sheet."""
+    if getattr(order, "critical", False):
+        return "CRITICAL — outside range"
+    if getattr(order, "abnormal", False):
+        return "Abnormal — outside range"
+    if getattr(order, "result", None):
+        return "Within reference range"
+    return "-"
+
+
 def lab_result_pdf(order, lang: str = "ar") -> bytes:
     """ورقة نتيجة تحليل/أشعة للطباعة — البيانات/المريض/الطبيب/النتيجة (ar|en)."""
     if lang == "en":
@@ -1377,13 +1399,30 @@ def lab_result_pdf(order, lang: str = "ar") -> bytes:
                f"{order.ordered_at:%Y-%m-%d %H:%M}" if order.ordered_at else "-")
     pdf.kv_row("النوع", "أشعة" if ttype == "radiology" else "تحليل مختبري")
     pdf.kv_row("اسم الفحص", order.test_name or "-")
+    # بيانات الدليل: الرمز والمجموعة وشرط التحليل — يقرأها الطبيب قبل العلاج
+    cat = getattr(order, "test_catalog", None)
+    if cat is not None:
+        pdf.kv_row("رمز الفحص", cat.code or "-")
+        if cat.specimen_group:
+            pdf.kv_row("المجموعة", cat.specimen_group)
+    if order.specimen_type:
+        pdf.kv_row("نوع العينة", order.specimen_type)
+    if cat is not None and cat.tube_type:
+        pdf.kv_row("الأنبوب المطلوب", cat.tube_type)
+    if cat is not None and (cat.fasting_hours or 0):
+        pdf.kv_row("الصيام المطلوب", f"{cat.fasting_hours} ساعة")
+    if order.priority == "stat":
+        pdf.kv_row("الأولوية", "طارئة")
     pdf.kv_row("الحالة", _LAB_STATUS_AR.get(key, key))
     pdf.kv_row("السعر", f"{(order.price or 0):,.2f} ر.س")
 
     pat = order.patient
     pdf.section("بيانات المريض")
     pdf.kv_row("الاسم", pat.full_name if pat else "-")
-    pdf.kv_row("رقم الملف", f"#{order.patient_id}")
+    # رقم الملف الحقيقي (يبدأ من 1000) مع المعرّف داخليًّا عند نقصه
+    file_no = getattr(pat, "file_no", None) if pat else None
+    pdf.kv_row("رقم الملف", f"#{file_no}" if file_no is not None
+               else f"#{order.patient_id}")
     if pat:
         pdf.kv_row("الجوال", pat.phone or "-")
         if pat.date_of_birth:
@@ -1396,7 +1435,16 @@ def lab_result_pdf(order, lang: str = "ar") -> bytes:
         pdf.kv_row("التخصص / رقم الترخيص",
                    f"{doc.specialty or '-'} — {doc.license_number or '-'}")
 
+    # النطاق والقيمة والحالة: القراءة التي يحدّد بها الطبيب العلاج
     pdf.section("النتيجة")
+    pdf.kv_row("الوحدة", order.unit or "-")
+    lo = "-" if order.ref_min is None else f"{order.ref_min:g}"
+    hi = "-" if order.ref_max is None else f"{order.ref_max:g}"
+    pdf.kv_row("النطاق المرجعي", f"{lo} – {hi}".strip())
+    if order.value is not None:
+        pdf.kv_row("القيمة المُدخلة",
+                   f"{order.value:g} {order.unit or ''}".strip())
+    pdf.kv_row("حالة النتيجة", _lab_flag_ar(order))
     if order.result:
         pdf.set_font("ar", "", 12)
         pdf.set_text_color(*DARK)
@@ -1433,13 +1481,27 @@ def _lab_result_en(order) -> bytes:
                f"{order.ordered_at:%Y-%m-%d %H:%M}" if order.ordered_at else "-")
     pdf.kv_row("Type", "Radiology" if ttype == "radiology" else "Lab test")
     pdf.kv_row("Test", order.test_name or "-")
+    cat = getattr(order, "test_catalog", None)
+    if cat is not None:
+        pdf.kv_row("Test code", cat.code or "-")
+        if cat.specimen_group:
+            pdf.kv_row("Group", cat.specimen_group)
+    if order.specimen_type:
+        pdf.kv_row("Specimen", order.specimen_type)
+    if cat is not None and cat.tube_type:
+        pdf.kv_row("Tube", cat.tube_type)
+    if cat is not None and (cat.fasting_hours or 0):
+        pdf.kv_row("Fasting", f"{cat.fasting_hours} h")
+    if order.priority == "stat":
+        pdf.kv_row("Priority", "STAT")
     pdf.kv_row("Status", _LAB_STATUS_EN.get(key, key))
     pdf.kv_row("Price", f"SAR {(order.price or 0):,.2f}")
 
     pat = order.patient
     pdf.section("Patient")
     pdf.kv_row("Name", pat.full_name if pat else "-")
-    pdf.kv_row("File #", order.patient_id)
+    file_no = getattr(pat, "file_no", None) if pat else None
+    pdf.kv_row("File #", file_no if file_no is not None else order.patient_id)
     if pat:
         pdf.kv_row("Phone", pat.phone or "-")
         if pat.date_of_birth:
@@ -1453,6 +1515,13 @@ def _lab_result_en(order) -> bytes:
                    f"{doc.specialty or '-'} — {doc.license_number or '-'}")
 
     pdf.section("Result")
+    pdf.kv_row("Unit", order.unit or "-")
+    lo = "-" if order.ref_min is None else f"{order.ref_min:g}"
+    hi = "-" if order.ref_max is None else f"{order.ref_max:g}"
+    pdf.kv_row("Reference range", f"{lo} – {hi}".strip())
+    if order.value is not None:
+        pdf.kv_row("Value", f"{order.value:g} {order.unit or ''}".strip())
+    pdf.kv_row("Interpretation", _lab_flag_en(order))
     if order.result:
         pdf.set_font("ar", "", 12)
         pdf.set_text_color(*DARK)

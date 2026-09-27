@@ -317,6 +317,7 @@ class PatientProfileUpdate(PatientUpdate):
 
 class PatientInDB(PatientBase):
     id: int
+    file_no: Optional[int] = Field(None, description="رقم الملف — يتسلسل من 1000")
     created_at: datetime
     updated_at: datetime
 
@@ -766,6 +767,8 @@ class AppointmentUpdate(BaseModel):
 class PatientBrief(ORMModel):
     id: int
     full_name: str
+    file_no: Optional[int] = Field(
+        None, description="رقم الملف — يتسلسل من 1000 (يظهر مع الفحص)")
 
 
 class DoctorBrief(ORMModel):
@@ -822,6 +825,7 @@ class StaffUpdate(BaseModel):
 
 class StaffInDB(StaffBase):
     id: int
+    employee_no: Optional[int] = Field(None, description="رقم الموظف — يتسلسل من 1")
     created_at: datetime
     updated_at: datetime
     documents: List[StaffDocumentInDB] = Field(default_factory=list)
@@ -1188,6 +1192,8 @@ class LabOrderInDB(LabOrderBase):
     received_at: Optional[datetime] = None
     # النتيجة ونطاقها وعلامتها
     unit: Optional[str] = None
+    value: Optional[float] = Field(
+        None, description="القيمة الرقمية المُدخلة ومحلّلّة في النطاق")
     ref_min: Optional[float] = None
     ref_max: Optional[float] = None
     abnormal: bool = False
@@ -1208,6 +1214,9 @@ class LabOrderInDB(LabOrderBase):
     payment_pending: bool = Field(
         False,
         description="طلب طوارئ لم تُدفع كشفيته بعد — معروض للمختبر ويُمنع تنفيذه")
+    # دليل الفحوصات الموروث: الرمز والمجموعة والصيام والأنبوب وحالته في
+    # الدليل (مفعّل/موقوف) — تظهر في ورقة تقرير الفحص قبل الإدخال
+    catalog: Optional[LabTestInDB] = None
     patient: PatientBrief
     doctor: Optional[DoctorBrief] = None
 

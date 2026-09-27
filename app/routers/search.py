@@ -1,12 +1,13 @@
-"""البحث العام السريع (Ctrl+K): مرضى + أدوية + فواتير + مواعيد + وصفات.
+"""البحث العام السريع (Ctrl+K): مرضى + أدوية + فواتير + مواعيد + وصفات + موظفون.
 
 نقطة واحدة تغذي لوحة البحث في الواجهة، بنفس قواعد `/prescriptions`
-للأدوار (الطبيب يرى وصفات مرضاه فقط).
+لأدوار (الطبيب يرى وصفات مرضاه فقط)، وبأرقام النظام: رقم الملف يبدأ
+من 1000 ورقم الموظف من 1 فيُبحث بهما مباشرة.
 """
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_
+from sqlalchemy import String, cast, or_
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, get_user_role
@@ -18,6 +19,7 @@ from app.models import (
     Medication,
     Patient,
     Prescription,
+    Staff,
     User,
 )
 from app.routers.prescriptions import _linked_doctor
@@ -73,16 +75,21 @@ async def global_search(
     num = int(term) if term.isdigit() and len(term) <= 9 else None
     results: List[dict] = []
 
-    # 1) المرضى: الاسم/الهاتف/الهوية/رقم الملف
+    # 1) المرضى: الاسم/الهاتف/الهوية/رقم الملف (1000 فما فوق)
     p_cond = [Patient.full_name.ilike(pat),
               Patient.phone.ilike(pat),
               Patient.national_id.ilike(pat)]
     if num is not None:
+        p_cond.append(Patient.file_no == num)
         p_cond.append(Patient.id == num)
+    # جزئي من رقم الملف أيضًا (كتابة «100» تعثر على 1000…1009)
+    p_cond.append(cast(Patient.file_no, String).ilike(pat))
     for p in (db.query(Patient).filter(or_(*p_cond)).limit(limit).all()):
         parts = [f"هاتف {p.phone}"] if p.phone else []
         if p.national_id:
             parts.append(f"هوية {p.national_id}")
+        if p.file_no is not None:
+            parts.insert(0, f"رقم الملف {p.file_no}")
         results.append(_hit("patient", "🧑‍🤝‍🧑", "مريض", p.id,
                             p.full_name, " · ".join(parts), "patients"))
 
@@ -161,5 +168,23 @@ async def global_search(
             f"وصفة #{rx.id} — {rpat.get(rx.patient_id, '—')}",
             f"{_RX_LABELS.get(rx.status, rx.status)} · {date}",
             "pharmacy"))
+
+    # 6) الموظفون: رقم الموظف (1 فما فوق)/الاسم/المنصب/الهاتف — للمدير فقط
+    #    لأن شاشة شؤون الموظفين نفسها لا تُفتح إلا للمدير
+    if get_user_role(current_user) == "admin":
+        s_cond = [Staff.full_name.ilike(pat),
+                  Staff.position.ilike(pat),
+                  Staff.phone.ilike(pat),
+                  Staff.email.ilike(pat)]
+        if num is not None:
+            s_cond.append(Staff.employee_no == num)
+            s_cond.append(Staff.id == num)
+        s_cond.append(cast(Staff.employee_no, String).ilike(pat))
+        for s in (db.query(Staff).filter(or_(*s_cond)).limit(limit).all()):
+            head = (f"رقم الموظف {s.employee_no} · " if s.employee_no is not None
+                    else "")
+            results.append(_hit(
+                "staff", "🗂️", "موظف", s.id, s.full_name,
+                f"{head}{s.position} · {s.phone}", "hr"))
 
     return {"query": term, "results": results}

@@ -239,10 +239,33 @@ class Bed(Base):
 
 
 # ===== المرضى =====
+# ===== أرقام النظام — للبحث السريع في الاستقبال والموارد البشرية =====
+# رقم المريض يتسلسل من 1000 ورقم الموظف من 1، ويُشتقّان من المعرّف
+# (999 + id وid) فلا يتكرران عند التزامن ولا يُعاد استخدام رقم ممحو.
+PATIENT_NO_BASE = 1000     # أول رقم ملف = 1000
+STAFF_NO_BASE = 1          # أول رقم موظف = 1
+
+
+def patient_no_for(patient_id: int) -> int:
+    """رقم الملف المُمنَح لمريض بالمعرّف `patient_id` — أول مريض = 1000.
+
+    الاشتقاق من المعرّف يجعل الرقم فريدًا بلا استعلام إضافي ودون خطر
+    تزامن، ولا يُعاد استخدام رقم مريض محذوف (الفجوات آمنة).
+    """
+    return PATIENT_NO_BASE - 1 + (patient_id or 0)
+
+
+def staff_no_for(staff_id: int) -> int:
+    """رقم الموظف المُمنَح لموظف بالمعرّف `staff_id` — أول موظف = 1."""
+    return STAFF_NO_BASE - 1 + (staff_id or 0)
+
+
 class Patient(Base):
     __tablename__ = "patients"
 
     id = Column(Integer, primary_key=True, index=True)
+    # رقم الملف الظاهر في الاستقبال — يبدأ من 1000 ويُملأ آليًّا
+    file_no = Column(Integer, nullable=True, index=True)
     full_name = Column(String, nullable=False)
     date_of_birth = Column(DateTime, nullable=False)
     gender = Column(SAEnum(Gender), nullable=False)
@@ -406,6 +429,8 @@ class Staff(Base):
     __tablename__ = "staff"
 
     id = Column(Integer, primary_key=True, index=True)
+    # رقم الموظف الوظيفي — يبدأ من 1 ويُملأ آليًّا (للموارد البشرية والبحث)
+    employee_no = Column(Integer, nullable=True, index=True)
     full_name = Column(String, nullable=False)
     position = Column(String, nullable=False)
     phone = Column(String, nullable=False)
@@ -616,6 +641,9 @@ class LabOrder(Base):
     received_at = Column(DateTime, nullable=True)
     # — إدخال النتيجة ونطاقها المرجعي —
     unit = Column(String, nullable=True)
+    # القيمة الرقمية المُدخلة (محلّلًا في النطاق) — تُحفظ منفصلة عن النص
+    # حتى تبقى مطابقة للتقرير عند إعادة فتح إدخال النتيجة
+    value = Column(Float, nullable=True)
     ref_min = Column(Float, nullable=True)
     ref_max = Column(Float, nullable=True)
     abnormal = Column(Boolean, default=False)           # خارج النطاق الطبيعي

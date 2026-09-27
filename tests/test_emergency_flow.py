@@ -229,3 +229,19 @@ def test_er_ui_markers(client):
         assert marker in css, f"علامة مفقودة في app.css: {marker}"
     html = client.get("/").text
     assert 'data-view="er"' in html, "رابط الطوارئ غير موجود في القائمة الجانبية"
+
+
+def test_er_list_defaults_to_last_30_days(client):
+    """قائمة الحالات تبدأ على آخر 30 يومًا — والملف المفتوح لا يختفي أبدًا."""
+    js = client.get("/app.js").text
+    for marker in ("ER_DAYS", "function erVisible(", "function erStatsHTML(",
+                   "function erSetDays(", "days: 30", 'class="er-filters"',
+                   'class="er-days"', "إجمالي الحالات في النطاق"):
+        assert marker in js, f"علامة مفقودة في app.js: {marker}"
+    # الحالات غير المغلقة تتجاوز النطاق الزمني حتى لا يختفي ملف قيد العلاج
+    assert "!erIsClosed(c.status)" in js
+    # النطاق يُبدَّل دون إعادة جلب الشاشة
+    assert "getElementById('er-stats')" in js
+    css = client.get("/app.css").text
+    for marker in (".er-filters", ".er-filters .er-q", ".er-filters select"):
+        assert marker in css, f"قاعدة مفقودة في app.css: {marker}"

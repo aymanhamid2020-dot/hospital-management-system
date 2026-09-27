@@ -55,6 +55,8 @@ PENDING_COLUMNS = {
         "national_id": "VARCHAR",
         "insurer": "VARCHAR",
         "policy_number": "VARCHAR",
+        # رقم الملف الظاهر في الاستقبال — يبدأ من 1000
+        "file_no": "INTEGER",
         # الملف الشخصي والإداري + التاريخ الطبي (شاشة ملف المريض)
         "nationality": "VARCHAR",
         "smoking_status": "VARCHAR",
@@ -115,6 +117,8 @@ PENDING_COLUMNS = {
     "staff": {
         # ملف الموارد البشرية يُحفظ JSON نصيًا ليعمل SQLite وPostgreSQL معًا
         "hr_profile": "TEXT NOT NULL DEFAULT '{}'",
+        # رقم الموظف الوظيفي — يبدأ من 1
+        "employee_no": "INTEGER",
     },
     "lab_orders": {
         "emergency_case_id": "INTEGER",
@@ -130,6 +134,7 @@ PENDING_COLUMNS = {
         "received_at": "TIMESTAMP",
         # إدخال النتيجة ومقارنتها بالنطاق المرجعي
         "unit": "VARCHAR",
+        "value": "FLOAT",
         "ref_min": "FLOAT",
         "ref_max": "FLOAT",
         "abnormal": "BOOLEAN DEFAULT 0",
@@ -275,6 +280,17 @@ def ensure_columns():
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
                     added.add((table, name))
 
+        # أرقام النظام: تُملأ أرقام المرضى والموظفين الناقصة من المعرّف.
+        # قاعدة واحدة (`1000 - 1 + id` / `1 - 1 + id`) تُطبَّق على كل الصفوف
+        # بلا رقم، فلا يتكرر رقم ولا يُمحى رقم قائم.
+        for table, column, base in (("patients", "file_no", 1000),
+                                    ("staff", "employee_no", 1)):
+            if table not in tables:
+                continue
+            conn.execute(text(
+                f"UPDATE {table} SET {column} = {base} - 1 + id "
+                f"WHERE {column} IS NULL"))
+
     # الفواتير: إعادة بناء إن كان عمود الربط بلا FK (أُضيف عبر ALTER سابقًا)
     if "invoices" in tables:
         fks = insp.get_foreign_keys("invoices")
@@ -317,7 +333,8 @@ INDEXES = {
     "payroll": ["staff_id", "period"],
     "staff_documents": ["staff_id", "uploaded_at"],
     "audit_logs": ["created_at", "username"],
-    "patients": ["national_id"],
+    "patients": ["national_id", "file_no"],
+    "staff": ["employee_no"],
     "service_requests": ["service_type", "patient_id", "status", "created_at"],
     "nursing_tasks": ["patient_id", "department_id", "status", "due_at"],
     "surgeries": ["patient_id", "surgeon_id", "status", "scheduled_at"],

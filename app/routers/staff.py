@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from app.database import get_db
-from app.models import Staff, StaffDocument, User
+from app.models import Staff, StaffDocument, User, staff_no_for
 from app.schemas import StaffCreate, StaffUpdate, StaffInDB, StaffDocumentInDB
 from app.auth import get_current_user, require_admin, get_user_role
 
@@ -31,7 +31,8 @@ def _hr_json(value) -> str:
 def _staff_out(row: Staff) -> dict:
     """يرسل ملف الموارد البشرية ككائن JSON، وليس كسلسلة تخزين."""
     data = StaffInDB(
-        id=row.id, full_name=row.full_name, position=row.position, phone=row.phone,
+        id=row.id, employee_no=row.employee_no,
+        full_name=row.full_name, position=row.position, phone=row.phone,
         email=row.email, hire_date=row.hire_date, salary=row.salary,
         hr_profile=json.loads(_hr_json(row.hr_profile)), documents=row.documents,
         created_at=row.created_at, updated_at=row.updated_at,
@@ -89,6 +90,8 @@ async def create_staff(staff: StaffCreate, db = Depends(get_db), _ = Depends(get
         hr_profile=json.dumps(staff.hr_profile or {}, ensure_ascii=False),
     )
     db.add(db_staff)
+    db.flush()  # يمنح الموظف معرّفه فيُشتقّ منه رقم الموظف (1 فما فوق)
+    db_staff.employee_no = staff_no_for(db_staff.id)
     db.commit()
     db.refresh(db_staff)
     return _staff_out(db_staff)

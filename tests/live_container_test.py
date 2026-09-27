@@ -498,7 +498,9 @@ def main():
     # بعد التجزئة: JS في /app.js — يُفحص مع HTML
     rr_all = rr.content + c.get("/app.js").content
     check("واجهة المبيعات والحسابات على الجذر",
-          b"async sales(main)" in rr_all
+          # الدالة معرَّفة `async function sales(main)` ثم تُسجَّل في VIEWS،
+          # فالعلامة المطابقة للشيفرة «function sales(main)» لا «async sales(main)»
+          b"function sales(main)" in rr_all
           and b"async accounts(main)" in rr_all
           and 'data-view="sales"'.encode() in rr_all
           and 'data-view="accounts"'.encode() in rr_all)

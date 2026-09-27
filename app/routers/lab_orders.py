@@ -97,6 +97,7 @@ def _load(db: Session, current_user: User, order_id: int) -> LabOrder:
     order = db.query(LabOrder).filter(LabOrder.id == order_id).first()
     if not order or not _doctor_can_access(db, current_user, order):
         raise HTTPException(status_code=404, detail="لا يوجد طلب بالمعرف المحدد")
+    _annotate_catalog(db, [order])
     return order
 
 
@@ -147,6 +148,19 @@ def _annotate_payment(db: Session, orders) -> None:
         o.payment_pending = o.emergency_case_id in unsettled
 
 
+def _annotate_catalog(db: Session, orders) -> None:
+    """يربط كل طلب بسجله في دليل الفحوصات باستعلام واحد لا طلبًا طلبًا.
+
+    الشاشة تحتاج رمز الفحص ومجموعته وشرط الصيام ونوع الأنبوب وحالته في
+    الدليل (مفعّل/موقوف) لعرضها كاملاً كورقة تقرير قبل إدخال النتيجة.
+    """
+    ids = {o.lab_test_id for o in orders if o.lab_test_id}
+    cats = ({t.id: t for t in
+             db.query(LabTest).filter(LabTest.id.in_(ids)).all()} if ids else {})
+    for o in orders:
+        o.catalog = cats.get(o.lab_test_id) if o.lab_test_id else None
+
+
 @router.get("/", response_model=List[LabOrderInDB], summary="عرض طلبات المختبر والأشعة")
 async def list_lab_orders(
     patient_id: Optional[int] = Query(None, description="فلترة حسب المريض"),
@@ -190,6 +204,7 @@ async def list_lab_orders(
 
     rows = q.order_by(LabOrder.ordered_at.desc()).all()
     _annotate_payment(db, rows)
+    _annotate_catalog(db, rows)
     return rows
 
 
@@ -229,6 +244,7 @@ async def modality_worklist(
 
     rows = q.order_by(LabOrder.scheduled_at.asc()).all()
     _annotate_payment(db, rows)
+    _annotate_catalog(db, rows)
     return rows
 
 
@@ -326,6 +342,7 @@ async def create_lab_order(
     db.add(db_order)
     db.commit()
     db.refresh(db_order)
+    _annotate_catalog(db, [db_order])
     return db_order
 
 
@@ -413,6 +430,7 @@ async def enter_lab_result(
     critical = critical or payload.critical
 
     order.result = payload.result.strip()
+    order.value = payload.value
     order.unit = unit
     order.ref_min = ref_min
     order.ref_max = ref_max

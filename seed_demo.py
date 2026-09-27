@@ -15,6 +15,8 @@ from app.models import (
     Department, Bed, Doctor, Patient, Staff, Appointment, Invoice,
     MedicalRecord, Attachment, Report, User,
     Gender, UserRole, AppointmentStatus, InvoiceStatus, BedStatus,
+    # أرقام النظام: المرضى من 1000 والموظفون من 1
+    patient_no_for, staff_no_for,
     # الوحدات الجديدة (طلبات الرعاية/خطط الرعاية/الأسنان/الوحدات التشغيلية)
     ServiceRequest, CarePlan, CarePlanItem, CarePlanExecution,
     DentalChart, DentalTreatmentPlan, DentalProcedure,
@@ -308,6 +310,8 @@ def main():
             db.add(p)
             patients.append(p)
         db.flush()
+        for p in patients:          # رقم الملف يبدأ من 1000 (مشتقّ من المعرّف)
+            p.file_no = patient_no_for(p.id)
         print(f"✅ المرضى: {len(patients)}")
 
         # ===== الأسرّة (تُتجاهل الأقسام التي لديها أسرّة) =====
@@ -337,12 +341,18 @@ def main():
             ("سلمان الزامل", "محاسب", "2019-01-10", 11000),
             ("جواهر العتيبي", "مدير تمريض", "2018-05-20", 15000),
         ]
+        staff_rows = []
         for i, (name, pos, hire, sal) in enumerate(staff_data, 1):
-            db.add(Staff(
+            s = Staff(
                 full_name=name, position=pos, phone=f"054300000{i}",
                 email=f"staff{i}{DEMO_DOMAIN}",
                 hire_date=datetime.strptime(hire, "%Y-%m-%d"), salary=sal,
-            ))
+            )
+            db.add(s)
+            staff_rows.append(s)
+        db.flush()
+        for s in staff_rows:        # رقم الموظف يبدأ من 1 (مشتقّ من المعرّف)
+            s.employee_no = staff_no_for(s.id)
         print(f"✅ الموظفون: {len(staff_data)}")
 
         # ===== المواعيد =====
