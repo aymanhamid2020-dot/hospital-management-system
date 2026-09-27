@@ -12,6 +12,7 @@ const TITLES: Record<string, string> = {
   accounting: 'المحاسبة',
   departments: 'الأقسام',
   clinics: 'العيادات',
+  permissions: 'الأدوار والصلاحيات',
   quickops: 'العمليات السريعة',
   sales: 'المبيعات',
   accounts: 'الحسابات',

@@ -371,8 +371,10 @@ def test_user_role_management(client, admin):
     r = client.put(f"/auth/users/{admin_id}/role", headers=admin,
                    json={"role": "doctor"})
     assert r.status_code == 400 and "حسابك" in r.json()["detail"]
-    assert client.put(f"/auth/users/{uid}/role", headers=admin,
-                      json={"role": "superuser"}).status_code == 422
+    unknown = client.put(f"/auth/users/{uid}/role", headers=admin,
+                         json={"role": "superuser"})
+    assert unknown.status_code == 400, "دور مجهول مرفوض بصراحة تعديلية"
+    assert "الأدوار المتاحة" in unknown.json()["detail"]
     assert client.put("/auth/users/999999/role", headers=admin,
                       json={"role": "doctor"}).status_code == 404
 

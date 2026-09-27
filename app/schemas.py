@@ -19,7 +19,8 @@ class UserBase(BaseModel):
     username: str = Field(..., min_length=3, description="اسم المستخدم")
     email: EmailStr = Field(..., description="البريد الإلكتروني")
     full_name: str = Field(..., description="الاسم الكامل")
-    role: UserRole = Field(UserRole.RECEPTIONIST, description="الدور/الصلاحية")
+    role: str = Field("receptionist", max_length=40,
+                  description="مفتاح الدور من جدول الأدوار (RBAC)")
 
 
 class UserCreate(UserBase):
@@ -35,12 +36,15 @@ class UserInDB(UserBase):
     id: int
     is_active: bool
     created_at: datetime
+    # صلاحيات المستخدم الفعلية (محسوبة) — تعيدها /auth/me لتكييف الواجهة
+    permissions: List[str] = Field(default_factory=list)
+    role_name: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class UserRoleChange(BaseModel):
-    role: UserRole = Field(..., description="الدور الجديد للمستخدم")
+    role: str = Field(..., max_length=40, description="مفتاح الدور الجديح")
 
 
 class Token(BaseModel):
@@ -546,7 +550,7 @@ class UserBrief(ORMModel):
     id: int
     username: str
     full_name: str
-    role: UserRole
+    role: str
     is_active: bool
 
 

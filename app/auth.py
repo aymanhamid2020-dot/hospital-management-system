@@ -18,8 +18,16 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def get_user_role(user: User) -> str:
-    """إرجاع قيمة الدور كنص قياسي."""
-    return user.role.value if hasattr(user.role, "value") else str(user.role)
+    """إرجاع مفتاح الدور كنص قياسي."""
+    return str(getattr(user.role, "value", user.role) or "receptionist")
+
+
+def is_admin_user(user: User) -> bool:
+    """هل المستخدم مدير عام (دور is_super)؟ — لا تُغني الصلاحيات الفردية."""
+    role = getattr(user, "role_row", None)
+    if role is not None:
+        return bool(role.is_super)
+    return get_user_role(user) == "admin"
 
 
 def require_role(*roles: str):
@@ -62,7 +70,7 @@ def create_access_token(user: User) -> str:
     payload = {
         "sub": str(user.id),
         "username": user.username,
-        "role": user.role.value if hasattr(user.role, "value") else str(user.role),
+        "role": get_user_role(user),
         "exp": expire,
         "iat": datetime.now(timezone.utc),
     }
@@ -107,12 +115,15 @@ def get_current_user(
 
 
 def require_admin(current_user: User = Depends(get_current_user)) -> User:
-    """Dependency: يسمح فقط للمديرين (admin)."""
-    role = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
-    if role != "admin":
+    """Dependency: يسمح فقط للمدير العام (دور is_super).
+
+    الدور الفائق (is_super) هو ما يبقى محجوزًا لمنطق النظام؛ أما الأعمال
+    التشغيلية فتفحص صلاحيات دقيقة عبر `permissions.require_perm`.
+    """
+    if not is_admin_user(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="هذه العملية تتطلب صلاحية المدير",
+            detail="هذه العملية تتطلب صلاحية المدير العام",
         )
     return current_user
 

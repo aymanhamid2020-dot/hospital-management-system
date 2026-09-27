@@ -123,6 +123,19 @@ def main():
           and all(f in ui_all for f in ("function clListTab()", "function clServicesTab()",
                                        "function clScheduleTab()", "function clSummaryTab()"))
           and "clinics: 'العيادات'" in ui_all)
+    # --- RBAC: شاشة ذرّية، وواجهة تحرس القوائم بنفس الصلاحيات ---
+    check("واجهة الأدوار والصلاحيات بتبويباتها الثلاثة",
+          'data-view="permissions"' in ui_all
+          and "async function permissions(main)" in ui_all
+          and all(f in ui_all for f in ("function rbRolesTab()", "function rbMatrixTab()",
+                                       "function rbUsersTab()"))
+          and "permissions: 'الأدوار والصلاحيات'" in ui_all)
+    check("الواجهة تحرس الشاشات بالصلاحيات (قائمة + فتح مباشر)",
+          "const VIEW_PERMS = {" in ui_all
+          and "function can(...keys)" in ui_all
+          and "function viewAllowed(view)" in ui_all
+          and "function applySidebarPerms()" in ui_all
+          and "if (!viewAllowed(view)) {" in ui_all)
     check("قسم المخزون في القائمة والعرض",
           'data-view="inventory"' in ui_all
           and "async inventory(main)" in ui_all

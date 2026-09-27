@@ -118,6 +118,25 @@ function pill(v) { return `<span class="pill ${esc(v)}">${esc(v)}</span>`; }
 function isAdmin() { return USER && USER.role === 'admin'; }
 function isDoctor() { return USER && USER.role === 'doctor'; }
 
+/* ========== الصلاحيات (RBAC) ==========
+   الصلاحيات تصل مع /auth/me وتُخزَّن في PERMS. الدالة can() هي نقطة
+   القرار الوحيدة في الواجهة: القائمة الجانبية والأزرار تتكفّلان بها.
+   ملاحظة أمنية: إخفاء العنصر في الواجهة راحة للمستخدم فقط — الحماية
+   الحقيقية على الخادم في app/permissions.py عبر require_perm. */
+const PERMS = new Set();
+function setPermissions(list) { PERMS.clear(); (list || []).forEach(p => PERMS.add(p)); }
+/** هل يملك المستخدم صلاحية (أو أي واحدة منها)؟ */
+function can(...keys) { return keys.some(k => PERMS.has(k)); }
+/** يعطّل زرًا/حقلًا ويشرح سبب المنع بدل إخفائه بصمت */
+function guard(el, ok, why) {
+  if (el && !ok) { el.disabled = true; el.title = why || 'لا تملك صلاحية لهذه العملية'; }
+  return el;
+}
+/** إخفاء عنصر حسب صلاحية (للروابط والأقسام) */
+function toggleByPerm(sel, ok) {
+  document.querySelectorAll(sel).forEach(el => { el.style.display = ok ? '' : 'none'; });
+}
+
 /* ========== اللغة: عربي / English (i18n) ========== */
 let LANG = localStorage.getItem('hms_lang') || 'ar';
 
@@ -3425,12 +3444,14 @@ async function login() {
     store.setItem('hms_token', TOKEN);
     store.setItem('hms_user', JSON.stringify(USER));
     localStorage.setItem('hms_remember', remember ? '1' : '0');
+    setPermissions(USER.permissions);
     enterApp();
   } catch (e) { errBox.textContent = tr(e.message); errBox.style.display = 'block'; }
 }
 
 function logout() {
   TOKEN = ''; USER = null;
+  PERMS.clear();
   localStorage.removeItem('hms_token');
   localStorage.removeItem('hms_user');
   localStorage.removeItem('hms_remember');
@@ -3444,9 +3465,38 @@ function enterApp() {
   document.getElementById('login-view').style.display = 'none';
   document.getElementById('app-view').style.display = 'block';
   document.getElementById('ub-name').textContent = USER.full_name;
-  document.getElementById('ub-role').textContent = tr(isDoctor() ? 'طبيب' : (isAdmin() ? 'مدير' : 'موظف'));
+  document.getElementById('ub-role').textContent = tr(USER.role_name || (isDoctor() ? 'طبيب' : (isAdmin() ? 'مدير' : 'موظف')));
+  setPermissions(USER.permissions);   // حراسة القائمة الجانبية بالصلاحيات
+  applySidebarPerms();
   navigate('dashboard');
   setInterval(refreshBell, 30000); // تحديث الجرس كل 30 ثانية
+}
+
+/* ===== خريطة الشاشات ← الصلاحيات المطلوبة =====
+   مصدر واحد يحكم القائمة: أي شاشة لا تملك صلاحيتها تُخفى تمامًا،
+   ويُحظر فتحها حتى بتغيير العنوان (دالة navigate تتحقق أيضًا). */
+const VIEW_PERMS = {
+  patients: ['patients.view'], appointments: ['appointments.view'],
+  clinical: ['records.view'], doctors: ['records.view'],
+  pharmacy: ['pharmacy.view'], lab: ['lab.view'],
+  sales: ['sales.view'], quickops: ['sales.view'],
+  invoices: ['sales.view'], accounts: ['accounting.view'],
+  accounting: ['accounting.view'], governance: ['reports.view'],
+  reports: ['reports.view'], audit: ['audit.view'],
+  inventory: ['stock.view'], beds: ['clinics.view'],
+  clinics: ['clinics.view'], departments: ['clinics.view'],
+  hr: ['staff.view'], users: ['users.view'], permissions: ['users.view'],
+  backup: ['settings.manage'], support: ['settings.manage'],
+  notifications: [], attachments: ['records.view'],
+};
+function viewAllowed(view) {
+  const need = VIEW_PERMS[view];
+  return !need || can(...need);
+}
+function applySidebarPerms() {
+  document.querySelectorAll('.sidebar a[data-view]').forEach(a => {
+    a.style.display = viewAllowed(a.dataset.view) ? '' : 'none';
+  });
 }
 
 /* ========== التنقل ========== */
@@ -3512,7 +3562,7 @@ const TITLES = {
   staff: 'الموظفون', hr: 'شؤون الموظفين', users: 'المستخدمون', backup: 'النسخ الاحتياطي', notifications: 'الإشعارات',
   lab: 'المختبر والأشعة', pharmacy: 'الصيدلية', inventory: 'المخزون', payroll: 'الرواتب',
   clinical: 'الرعاية والتشغيل', support: 'الصيانة والتعقيم', governance: 'الجودة والموارد',
-  audit: 'سجل التدقيق', clinics: 'العيادات', quickops: 'العمليات السريعة', sales: 'المبيعات', accounts: 'الحسابات', accounting: 'المحاسبة'
+  audit: 'سجل التدقيق', clinics: 'العيادات', permissions: 'الأدوار والصلاحيات', quickops: 'العمليات السريعة', sales: 'المبيعات', accounts: 'الحسابات', accounting: 'المحاسبة'
 };
 
 async function refreshBell() {
@@ -3531,6 +3581,12 @@ async function refreshBell() {
 let NAV_CHAIN = Promise.resolve();
 
 function navigate(view) {
+  /* حراسة الصلاحيات: القائمة تُخفي ما لا يُسمح، وهنا يمنع الفتح المباشر.
+     الحماية الحقيقية على الخادم (require_perm) — هذا طبقة راحة إضافية. */
+  if (!viewAllowed(view)) {
+    toast('لا تملك صلاحية الوصول لهذه الشاشة', true);
+    return Promise.resolve();
+  }
   if (view === 'patients') PAT_TAB = 'list';   /* القائمة هي نقطة الدخول للشاشة */
   const step = () => renderView(view);
   const run = NAV_CHAIN.then(step, step);
@@ -5668,7 +5724,300 @@ async function clDeleteSlot(clinicId, slotId) {
   } catch (e) { toast(e.message, true); }
 }
 
+/* ============================================================
+   🔐 الأدوار والصلاحيات — مصفوفة قابلة للتخصيص + استثناءات
+   ============================================================ */
+const RB = { tab: 'roles', matrix: null, users: [], selected: null, access: null, dirty: {} };
+const RB_TABS = [['roles', '🎭 الأدوار'], ['matrix', '🧮 مصفوفة الصلاحيات'],
+                 ['users', '👤 صلاحيات المستخدمين']];
+
+async function permissions(main) {
+  main.innerHTML = `
+    <div class="tabbar" id="rb-tabs" role="tablist">
+      ${RB_TABS.map(([k, l]) => `<button type="button" role="tab"
+        class="tab${k === RB.tab ? ' active' : ''}" data-tab="${k}"
+        aria-selected="${k === RB.tab}" onclick="rbTab('${k}')">${l}</button>`).join('')}
+    </div>
+    <div id="rb-body"><div class="empty">جارٍ التحميل…</div></div>`;
+  await rbLoad();
+  rbRender();
+  applyI18n(main);
+}
+
+async function rbLoad() {
+  const [mx, users] = await Promise.all([
+    api('/permissions/matrix').catch(() => null),
+    can('users.manage', 'users.view') ? api('/auth/users').catch(() => []) : Promise.resolve([]),
+  ]);
+  RB.matrix = mx;
+  RB.users = users || [];
+  RB.ready = true;
+}
+
+function rbTab(tab) {
+  RB.tab = tab;
+  document.querySelectorAll('#rb-tabs .tab').forEach(b =>
+    b.classList.toggle('active', b.dataset.tab === tab));
+  rbRender();
+}
+
+function rbRender() {
+  const body = document.getElementById('rb-body');
+  if (!body) return;
+  if (!RB.ready) {
+    body.innerHTML = '<div class="empty">جارٍ تحميل الصلاحيات…</div>';
+    return;
+  }
+  const map = { roles: rbRolesTab, matrix: rbMatrixTab, users: rbUsersTab };
+  body.innerHTML = (map[RB.tab] || rbMatrixTab)();
+  applyI18n(body);
+}
+
+const rbRoles = () => (RB.matrix && RB.matrix.roles) || [];
+const rbPerms = () => (RB.matrix && RB.matrix.permissions) || [];
+
+function rbRolesTab() {
+  const canEdit = can('roles.manage');
+  return `
+  <div class="card">
+    <h3>🎭 الأدوار (${rbRoles().length})</h3>
+    <p style="margin:0 0 10px;color:#64748b">أدوار النظام جاهزة، ويمكن إنشاء أدوار مخصّصة
+      تُنشأ فورًا وتظهر في قائمة أدوار المستخدمين بلا إعادة تشغيل.</p>
+    <div class="toolbar">
+      <input id="rb-name" placeholder="اسم الدور الجديد…"
+        style="min-width:180px" ${canEdit ? '' : 'disabled'}>
+      <select id="rb-copy" ${canEdit ? '' : 'disabled'}>
+        <option value="">— ابدأ فارغًا —</option>
+        ${rbRoles().map(r => `<option value="${esc(r.key)}">نسخ صلاحيات: ${esc(r.name_ar)}</option>`).join('')}
+      </select>
+      <button class="btn" onclick="rbCreateRole()" ${canEdit ? '' : 'disabled'}>➕ إنشاء دور</button>
+    </div>
+    <table><thead><tr><th>الدور</th><th>المفتاح</th><th>النوع</th><th>الصلاحيات</th>
+      <th>المستخدمون</th><th>الوصف</th><th></th></tr></thead>
+    <tbody>${rbRoles().map(r => `<tr>
+      <td><b>${esc(r.name_ar)}</b></td>
+      <td><code>${esc(r.key)}</code></td>
+      <td>${r.is_super ? '<span class="pill paid">مدير عام</span>'
+        : (r.is_system ? '<span class="pill partial">نظام</span>'
+        : '<span class="pill pending">مخصّص</span>')}</td>
+      <td>${r.is_super ? 'كل الصلاحيات' : r.permissions.length + ' صلاحية'}</td>
+      <td>${r.users_count}</td>
+      <td><small>${esc(r.description || '—')}</small></td>
+      <td>
+        <button class="btn sm ghost" onclick="rbGoMatrix(${r.id})">🧮 صلاحياته</button>
+        <button class="btn sm ghost" onclick="rbCopyRole(${r.id},'${esc(r.name_ar)}')"
+          ${canEdit ? '' : 'disabled'}>📄 نسخ</button>
+        ${r.can_delete ? `<button class="btn sm danger" onclick="rbDeleteRole(${r.id},'${esc(r.name_ar)}')">حذف</button>` : ''}
+      </td></tr>`).join('')}</tbody></table>
+  </div>`;
+}
+
+async function rbCreateRole() {
+  const name = document.getElementById('rb-name').value.trim();
+  if (!name) { toast('اكتب اسم الدور', true); return; }
+  const copy = document.getElementById('rb-copy').value;
+  try {
+    await api('/permissions/roles', { method: 'POST', body: JSON.stringify(
+      { name_ar: name, copy_from: copy || null }) });
+    toast('تم إنشاء الدور ✅');
+    await rbLoad(); rbRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function rbCopyRole(id, name) {
+  const newName = prompt('اسم النسخة الجديدة من «' + name + '»', name + ' (نسخة)');
+  if (!newName) return;
+  try {
+    await api(`/permissions/roles/${id}/copy`, { method: 'POST',
+      body: JSON.stringify({ name_ar: newName }) });
+    toast('تم نسخ الدور ✅');
+    await rbLoad(); rbRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function rbDeleteRole(id, name) {
+  if (!confirm('حذف الدور «' + name + '»؟')) return;
+  try {
+    await api('/permissions/roles/' + id, { method: 'DELETE' });
+    toast('تم حذف الدور ✅');
+    await rbLoad(); rbRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+function rbGoMatrix(roleId) {
+  RB.selected = roleId;
+  RB.tab = 'matrix';
+  document.querySelectorAll('#rb-tabs .tab').forEach(b =>
+    b.classList.toggle('active', b.dataset.tab === 'matrix'));
+  rbRender();
+  const first = document.querySelector('#rb-body [data-role-tab]');
+  if (first) first.click();
+}
+
+function rbMatrixTab() {
+  const canEdit = can('roles.manage');
+  const roles = rbRoles();
+  const perms = rbPerms();
+  if (!RB.selected || !roles.some(r => r.id === RB.selected)) {
+    const first = roles.find(r => !r.is_super) || roles[0];
+    RB.selected = first && first.id;
+  }
+  const cur = roles.find(r => r.id === RB.selected) || roles[0];
+  const granted = new Set(cur ? cur.permissions : []);
+  return `
+  <div class="card">
+    <h3>🧮 مصفوفة الصلاحيات</h3>
+    <div class="toolbar">
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${roles.map(r => `<button class="btn sm ${r.id === RB.selected ? 'success' : 'ghost'}"
+          onclick="RB.selected=${r.id};rbRender()"
+          ${r.is_super ? 'disabled title="الدور العام يتجاوز كل الصلاحيات"' : ''}>
+          ${esc(r.name_ar)} <small>${r.is_super ? '∞' : r.permissions.length}</small></button>`).join('')}
+      </div>
+    </div>
+    ${cur && cur.is_super ? `<div class="empty">دور <b>${esc(cur.name_ar)}</b> يتجاوز كل
+      الصلاحيات (is_super) — لا يحتاج ربطًا. اختر دورًا غير خارق للتخصيص.</div>` : `
+    <table><thead><tr><th>الصلاحية</th><th>الوحدة</th><th>حسّاسة</th><th>مفعّلة</th></tr></thead>
+    <tbody>${perms.map(p => `<tr>
+      <td>${esc(p.name_ar)}<br><small class="muted">${esc(p.key)}</small></td>
+      <td><small>${esc(p.module)}</small></td>
+      <td>${p.is_sensitive ? '<span class="pill cancelled">حسّاسة</span>' : ''}</td>
+      <td><input type="checkbox" ${granted.has(p.key) ? 'checked' : ''}
+        onchange="rbTogglePerm('${esc(p.key)}', this.checked)"
+        ${canEdit ? '' : 'disabled'}></td></tr>`).join('')}</tbody></table>
+    <div class="row2" style="margin-top:12px">
+      <button class="btn success" onclick="rbSaveRole()" ${canEdit ? '' : 'disabled'}>💾 حفظ صلاحيات «${esc(cur ? cur.name_ar : '')}»</button>
+      <button class="btn ghost" onclick="rbSelectAll(true)">تحديد الكل</button>
+      <button class="btn ghost" onclick="rbSelectAll(false)">إلغاء الكل</button>
+    </div>`}
+  </div>`;
+}
+
+function rbTogglePerm(key, on) {
+  const role = rbRoles().find(r => r.id === RB.selected);
+  if (!role) return;
+  const set = new Set(role.permissions);
+  if (on) set.add(key); else set.delete(key);
+  role.permissions = Array.from(set);
+  RB.dirty[role.id] = true;
+}
+
+function rbSelectAll(on) {
+  const role = rbRoles().find(r => r.id === RB.selected);
+  if (!role) return;
+  role.permissions = on ? rbPerms().map(p => p.key) : [];
+  RB.dirty[role.id] = true;
+  rbRender();
+}
+
+async function rbSaveRole() {
+  const role = rbRoles().find(r => r.id === RB.selected);
+  if (!role) return;
+  try {
+    await api(`/permissions/roles/${role.id}/permissions`, { method: 'PUT',
+      body: JSON.stringify({ permissions: role.permissions }) });
+    toast('تم حفظ صلاحيات «' + role.name_ar + '» ✅');
+    delete RB.dirty[role.id];
+    await rbLoad(); rbRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+function rbUsersTab() {
+  if (!can('users.view')) {
+    return '<div class="card"><div class="empty">لا تملك صلاحية عرض المستخدمين</div></div>';
+  }
+  const base = RB.selected && RB.users.find(x => x.id === RB.selected);
+  const u = base ? Object.assign({}, base, RB.access || {}) : null;
+  return `
+  <div class="card">
+    <h3>👤 صلاحيات المستخدمين</h3>
+    <p style="margin:0 0 10px;color:#64748b">الاستثناء الفردي يغلب على الدور:
+      <b>منع</b> يسحب صلاحية يمنحها الدور، و<b>السماح</b> يعطي صلاحية لا يمنحها.</p>
+    <div class="toolbar">
+      <select id="rb-user" onchange="rbSelectUser(Number(this.value))" style="min-width:240px">
+        <option value="">— اختر مستخدمًا —</option>
+        ${RB.users.map(x => `<option value="${x.id}"${u && u.id === x.id ? ' selected' : ''}>
+          ${esc(x.full_name)} (${esc(x.username)}) — ${esc(x.role_name || x.role)}</option>`).join('')}
+      </select>
+    </div>
+    <div id="rb-user-box">${!u ? '<div class="empty">اختر مستخدمًا لعرض صلاحياته</div>'
+      : (!RB.access ? '<div class="empty">جارِ تحميل الصلاحيات…</div>' : rbUserBox(u))}</div>
+  </div>`;
+}
+
+/** يختار مستخدمًا ويجلب صلاحياته الفعلية (الدور + الاستثناءات) من الخادم */
+async function rbSelectUser(userId) {
+  RB.selected = userId;
+  RB.access = null;
+  rbRender();
+  if (!userId) return;
+  try {
+    RB.access = await api(`/permissions/users/${userId}/access`);
+  } catch (e) {
+    RB.access = null;
+    if (!/403/.test(String(e.message))) toast(e.message, true);
+  }
+  rbRender();
+}
+
+function rbUserBox(u) {
+  const over = new Map((u.overrides || []).filter(o => o.permission)
+    .map(o => [o.permission, o.effect]));
+  const canEdit = can('roles.manage');
+  const rolePerms = u.role_permissions || [];
+  return `
+    <div class="stats">
+      <div class="stat"><div class="num">${esc(u.role_name || u.role)}</div><div class="lbl">الدور</div></div>
+      <div class="stat green"><div class="num">${rolePerms.length}</div><div class="lbl">صلاحية الدور</div></div>
+      <div class="stat amber"><div class="num">${over.size}</div><div class="lbl">استثناءات فردية</div></div>
+      <div class="stat blue"><div class="num">${u.is_active ? 'نشط' : 'معطّل'}</div><div class="lbl">الحالة</div></div>
+    </div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>الصلاحية</th><th>الوحدة</th><th>من الدور</th><th>الفعلي</th><th>استثناء</th></tr></thead>
+      <tbody>${rbPerms().map(p => {
+        const eff = over.get(p.key) === 'deny' ? false
+          : over.get(p.key) === 'allow' ? true : rolePerms.includes(p.key);
+        return `<tr>
+          <td>${esc(p.name_ar)}<br><small class="muted">${esc(p.key)}</small></td>
+          <td><small>${esc(p.module)}</small></td>
+          <td>${rolePerms.includes(p.key) ? '<span class="pill paid">نعم</span>' : '—'}</td>
+          <td>${eff ? '<span class="pill confirmed">مفعّلة</span>' : '<span class="pill cancelled">ممنوعة</span>'}</td>
+          <td><select onchange="rbSetOverride(${u.id},'${esc(p.key)}',this.value)"
+              ${canEdit ? '' : 'disabled'} style="font-size:12px">
+              <option value="">—</option>
+              <option value="allow"${over.get(p.key) === 'allow' ? ' selected' : ''}>سماح ↑</option>
+              <option value="deny"${over.get(p.key) === 'deny' ? ' selected' : ''}>منع ↓</option>
+            </select></td></tr>`;
+      }).join('')}</tbody></table></div>
+    <button class="btn ghost" style="margin-top:10px" onclick="rbClearOverrides(${u.id})"
+      ${canEdit ? '' : 'disabled'}>🧹 مسح كل الاستثناءات</button>`;
+}
+
+async function rbSetOverride(userId, permKey, effect) {
+  const u = RB.access || RB.users.find(x => x.id === userId);
+  if (!u) return;
+  const list = (u.overrides || []).filter(o => o.permission && o.permission !== permKey)
+    .map(o => ({ permission: o.permission, effect: o.effect }));
+  if (effect) list.push({ permission: permKey, effect });
+  try {
+    await api(`/permissions/users/${userId}/access`, { method: 'PUT', body: JSON.stringify(list) });
+    toast(effect ? 'تم حفظ الاستثناء ✅' : 'أُلغي الاستثناء');
+    await rbLoad(); rbRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function rbClearOverrides(userId) {
+  if (!confirm('مسح كل الاستثناءات الفردية لهذا المستخدم؟')) return;
+  try {
+    await api(`/permissions/users/${userId}/access`, { method: 'PUT', body: JSON.stringify([]) });
+    toast('تم مسح الاستثناءات ✅');
+    await rbLoad(); rbRender();
+  } catch (e) { toast(e.message, true); }
+}
+
 const VIEWS = {
+  /* 🔐 الأدوار والصلاحيات (RBAC) */
+  permissions,
   /* 🏥 العيادات (دالة معرّفة أعلها) */
   clinics,
   /* 🧾 المبيعات + دورة الإيراد (screen معرَّف أعلاه) */

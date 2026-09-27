@@ -10,17 +10,99 @@ from app import models  # noqa: F401 - لتسجيل الجداول
 from app.auth import hash_password
 
 
-def seed_admin():
-    """إنشاء حساب مدير افتراضي عند أول تشغيل."""
-    from app.models import User, UserRole
+def migrate_user_roles() -> int:
+    """ترحيل عمود users.role من تعداد مغلق إلى مفتاح نصي (RBAC).
+
+    كشف الحاجة يعتمد على **البيانات** لا على النوع: أي قيمة دور لا تنتمي
+    لمفاتيح الأدوار المعروفة تعني عمودًا قديمًا. عندها:
+      - SQLite: نبني الجدول وننسخ الصفوف (لا يغيّر SQLite نوع العمود).
+      - PostgreSQL: نُسقط قيد CHECK ثم نوسّع العمود إلى varchar(40).
+    الترجمة: admin→admin · doctor→doctor · «موظف استقبال»→receptionist،
+    وأي قيمة غير معروفة→receptionist (سلامة البيانات، لا فقدانها).
+    """
+    from sqlalchemy import inspect, text
+    from app.permissions import DEFAULT_ROLES, normalize_role_key
+    insp = inspect(engine)
+    if "users" not in set(insp.get_table_names()):
+        return 0
+    cols = {c["name"] for c in insp.get_columns("users")}
+    if "role" not in cols:
+        return 0
+    known = {r[0] for r in DEFAULT_ROLES}
+    with engine.connect() as conn:
+        stored = {str(r[0]) for r in conn.execute(text("SELECT DISTINCT role FROM users"))}
+    if stored and stored.issubset(known):
+        return 0                      # عمود نصي سليم، لا ترحيل
+
+    is_pg = engine.dialect.name == "postgresql"
+    if is_pg:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role"))
+            conn.execute(text("ALTER TABLE users ALTER COLUMN role TYPE VARCHAR(40) "
+                              "USING role::VARCHAR(40)"))
+            conn.execute(text("ALTER TABLE users ALTER COLUMN role "
+                              "SET DEFAULT 'receptionist'"))
+    else:
+        _rebuild_users_for_roles()
+
+    # توحيد القيم القديمة على مفاتيح الأدوار
+    with engine.begin() as conn:
+        for value in sorted(stored - known):
+            conn.execute(text("UPDATE users SET role = :new WHERE role = :old"),
+                         {"new": normalize_role_key(value), "old": value})
+    return len(stored)
+
+
+def _rebuild_users_for_roles() -> None:
+    """إعادة بناء جدول users في SQLite ليصبح عمود role نصيًا بلا قيد تعداد."""
+    from sqlalchemy import text
+    with engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS _users_rbac"))
+        conn.execute(text("""CREATE TABLE _users_rbac (
+            id INTEGER PRIMARY KEY,
+            username VARCHAR NOT NULL,
+            email VARCHAR NOT NULL,
+            hashed_password VARCHAR NOT NULL,
+            full_name VARCHAR NOT NULL,
+            role VARCHAR(40) NOT NULL DEFAULT 'receptionist',
+            is_active BOOLEAN DEFAULT 1,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP)"""))
+        conn.execute(text("""INSERT INTO _users_rbac
+                            (id, username, email, hashed_password, full_name,
+                             role, is_active, created_at)
+                            SELECT id, username, email, hashed_password, full_name,
+                                   role, is_active, created_at FROM users"""))
+        conn.execute(text("DROP TABLE users"))
+        conn.execute(text("ALTER TABLE _users_rbac RENAME TO users"))
+        conn.execute(text("CREATE UNIQUE INDEX ix_users_username ON users (username)"))
+        conn.execute(text("CREATE UNIQUE INDEX ix_users_email ON users (email)"))
+        conn.execute(text("CREATE INDEX ix_users_id ON users (id)"))
+
+
+def seed_rbac_data():
+    """زرع كتالوج الصلاحيات والأدوار الافتراضية بعد إنشاء الجداول."""
+    from app.permissions import seed_rbac
     db = SessionLocal()
     try:
-        if not db.query(User).filter(User.role == UserRole.ADMIN).first():
+        added, created = seed_rbac(db)
+        db.commit()
+        return added, created
+    finally:
+        db.close()
+
+
+def seed_admin():
+    """إنشاء حساب مدير افتراضي عند أول تشغيل."""
+    from app.models import User
+    db = SessionLocal()
+    try:
+        # الأدوار المزروعة مسبقًا ⇒ نفحص بالمفتاح النصي
+        if not db.query(User).filter(User.role == "admin").first():
             admin = User(
                 username="admin",
                 email="admin@hospital.com",
                 full_name="مدير النظام",
-                role=UserRole.ADMIN,
+                role="admin",
                 hashed_password=hash_password("admin123"),
             )
             db.add(admin)
@@ -38,8 +120,10 @@ async def lifespan(app: FastAPI):
                               acquire_leader_lease)
     with migrations_lock():
         Base.metadata.create_all(bind=engine)
+        migrate_user_roles()
         ensure_columns()
         ensure_indexes()
+        seed_rbac_data()
         seed_admin()
 
     # مهمة التذكير والنسخ التلقائي — لعامل واحد فقط (قفل قيادة)
@@ -267,6 +351,7 @@ from app.routers.department_hub import router as department_hub_router
 from app.routers.quick_ops import router as quick_ops_router
 from app.routers.revenue_cycle import router as revenue_cycle_router
 from app.routers.clinics import router as clinics_router
+from app.routers.permissions import router as permissions_router
 
 app.include_router(auth_router)
 app.include_router(patients_router)
@@ -310,6 +395,7 @@ app.include_router(department_hub_router)
 app.include_router(quick_ops_router)
 app.include_router(revenue_cycle_router)
 app.include_router(clinics_router)
+app.include_router(permissions_router)
 
 
 # ===== سجل التدقيق (يُسجّل كل عملية تعديلية) =====

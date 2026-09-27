@@ -73,9 +73,17 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     full_name = Column(String, nullable=False)
-    role = Column(SAEnum(UserRole), default=UserRole.RECEPTIONIST, nullable=False)
+    # الدور صار **مفتاحًا نصيًا** يشير إلى جدول roles بدل تعداد مغلق، حتى يعمل
+    # أي دور مخصّص يضيفه المدير بلا تغيير كود ولا إعادة نشر.
+    role = Column(String, ForeignKey("roles.key"), nullable=False, default="receptionist")
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
+
+    # علاقات
+    role_row = relationship("Role", back_populates="users",
+                            foreign_keys=[role], lazy="joined")
+    permission_overrides = relationship("UserPermission", back_populates="user",
+                                        cascade="all, delete-orphan")
 
 
 # ===== الأقسام =====
@@ -1913,3 +1921,83 @@ class Clinic(Base):
 
     doctor = relationship("Doctor")
     department = relationship("Department")
+# ================================================================
+# الصلاحيات والأدوار (RBAC) — بديل الدور الثنائيّ admin/غير admin
+# ================================================================
+# ملاحظة تصميم: catalog الصلاحيات **مُعرَّف في الكود** (PERMISSION_CATALOG في
+# app/permissions.py) ويُزرع في جدول permissions عند الإقلاع. الجداول هنا تخزّن
+# أي تخصيص: أدوار مخصّصة، وربط الأدوار بالصلاحيات، واستثناءات على مستوى المستخدم.
+# لذلك لا توجد قائمة أدوار في الكود تُ hard-code: أي دور يضافه المدير من الواجهة
+# يعمل فورًا بلا إعادة نشر.
+
+
+class Permission(Base):
+    """صلاحية واحدة قابلة للتجزئة مثل `patients.edit` (كتالوج مزروع)."""
+    __tablename__ = "permissions"
+    __table_args__ = (UniqueConstraint("key", name="uq_permission_key"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String, nullable=False)          # patients.edit
+    name_ar = Column(String, nullable=False)     # تعديل بيانات المرضى
+    module = Column(String, nullable=False, index=True)   # وحدة الواجهة
+    description = Column(String, nullable=True)
+    is_sensitive = Column(Boolean, nullable=False, default=False)  # حسّاسة (حذف/سعر/صلاحيات)
+    created_at = Column(DateTime, server_default=func.now())
+
+    roles = relationship("RolePermission", back_populates="permission",
+                         cascade="all, delete-orphan")
+
+
+class Role(Base):
+    """دور قابل للإنشاء والتخصيص من الواجهة (لا صندوق مغلق)."""
+    __tablename__ = "roles"
+    __table_args__ = (UniqueConstraint("key", name="uq_role_key"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String, nullable=False)          # admin | doctor | ... | مخصّص
+    name_ar = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    # أدوار النظام: لا تُحذف ولا يتغيّر مفتاحها (الربط المنطقي في الكود يعتمد عليها)
+    is_system = Column(Boolean, nullable=False, default=False)
+    # دور المدير العام: يتجاوز كل الصلاحيات حتى لو لم تُربط به صلاحية
+    is_super = Column(Boolean, nullable=False, default=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    permissions = relationship("RolePermission", back_populates="role",
+                               cascade="all, delete-orphan")
+    users = relationship("User", back_populates="role_row")
+
+
+class RolePermission(Base):
+    """ربط دور بصلاحية."""
+    __tablename__ = "role_permissions"
+    __table_args__ = (UniqueConstraint("role_id", "permission_id", name="uq_role_perm"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    role_id = Column(Integer, ForeignKey("roles.id", ondelete="CASCADE"),
+                     nullable=False, index=True)
+    permission_id = Column(Integer, ForeignKey("permissions.id", ondelete="CASCADE"),
+                           nullable=False, index=True)
+    granted_at = Column(DateTime, server_default=func.now())
+
+    role = relationship("Role", back_populates="permissions")
+    permission = relationship("Permission", back_populates="roles")
+
+
+class UserPermission(Base):
+    """استثناء فردي على مستوى المستخدم: `deny` يغلب على `allow`."""
+    __tablename__ = "user_permissions"
+    __table_args__ = (UniqueConstraint("user_id", "permission_id", name="uq_user_perm"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"),
+                     nullable=False, index=True)
+    permission_id = Column(Integer, ForeignKey("permissions.id", ondelete="CASCADE"),
+                           nullable=False, index=True)
+    effect = Column(String, nullable=False, default="allow")  # allow | deny
+    note = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    user = relationship("User", back_populates="permission_overrides")
+    permission = relationship("Permission")

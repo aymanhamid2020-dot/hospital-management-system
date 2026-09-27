@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import User, UserRole
+from app.models import Role, User
 from app.schemas import (
     UserCreate, UserLogin, UserInDB, Token, PasswordChange, UserRoleChange,
 )
@@ -13,6 +13,7 @@ from app.auth import (
     hash_password, verify_password, create_access_token,
     get_current_user, get_user_role, require_admin,
 )
+from app.permissions import _LEGACY_ROLE_MAP, user_permissions
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -97,6 +98,42 @@ def record_ip_login_failure(ip: str) -> None:
     _ip_failed_logins.setdefault(ip, []).append(_time.time())
 
 
+def _user_out(db, user: User) -> UserInDB:
+    """يحوّل المستخدم إلى مخطط الاستجابة مع صلاحياته الفعلية."""
+    data = UserInDB.model_validate(user)
+    data.role = get_user_role(user)
+    data.permissions = user_permissions(db, user)
+    data.role_name = (user.role_row.name_ar if user.role_row else user.role)
+    return data
+
+
+def _resolve_role(db, raw) -> str:
+    """يترجم قيمة الدور إلى مفتاح موجود فعلًا — **بصرامة**.
+
+    طلب قيمة صريح يجب أن يقابل دورًا وإلا خطأ صريح: الصمت هنا خطر،
+    لأن منظّم النظام قد يظن أنه أسند دور «محاسب» بينما سجّل «موظف استقبال».
+    المرونة (افتراضي أقل صلاحية) محجوزة لمسار الهجرة فقط في
+    `permissions.normalize_role_key`، لا لطلبات المستخدم.
+    """
+    value = str(getattr(raw, "value", raw) or "").strip()
+    if not value:
+        value = "receptionist"
+    row = (db.query(Role)
+           .filter((Role.key == value) | (Role.name_ar == value)).first())
+    if row:
+        return row.key
+    # قيم نظام التعداد القديم (ADMIN…) تُقبل صراحةً ولا تُconsidered صامتة
+    legacy = _LEGACY_ROLE_MAP.get(value) or _LEGACY_ROLE_MAP.get(value.lower())
+    if legacy:
+        row = db.query(Role).filter(Role.key == legacy).first()
+        if row:
+            return row.key
+    available = [r.key for r in db.query(Role).order_by(Role.id).all()]
+    raise HTTPException(
+        status_code=400,
+        detail=f"الدور غير موجود: «{value}». الأدوار المتاحة: " + "، ".join(available))
+
+
 @router.post("/register", response_model=UserInDB, summary="تسجيل مستخدم جديد")
 async def register(user: UserCreate, db = Depends(get_db)):
     """تسجيل مستخدم جديد (الدور الافتراضي: موظف استقبال)"""
@@ -105,18 +142,22 @@ async def register(user: UserCreate, db = Depends(get_db)):
     if db.query(User).filter(User.email == user.email).first():
         raise HTTPException(status_code=400, detail="البريد الإلكتروني مسجل بالفعل")
     validate_password_strength(user.password)
+    role_key = _resolve_role(db, user.role)
+    if role_key == "admin":
+        # لا يُمنح دور المدير بالتسجيل العام — حماية من تصعيد الصلاحيات
+        role_key = "receptionist"
 
     db_user = User(
         username=user.username,
         email=user.email,
         full_name=user.full_name,
-        role=user.role,
+        role=role_key,
         hashed_password=hash_password(user.password),
     )
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
-    return db_user
+    return _user_out(db, db_user)
 
 
 @router.post("/login", response_model=Token, summary="تسجيل الدخول")
@@ -140,38 +181,55 @@ async def login(credentials: UserLogin, request: Request, db = Depends(get_db)):
     _failed_logins.pop(lock_key, None)
 
     token = create_access_token(user)
-    return Token(access_token=token, user=UserInDB.model_validate(user))
+    # الصلاحيات تُعيد مع الدخول مباشرةً: لا نداء إضافي بعد تسجيل الدخول
+    return Token(access_token=token, user=_user_out(db, user))
 
 
-@router.get("/me", response_model=UserInDB, summary="المستخدم الحالي")
-async def get_me(current_user: User = Depends(get_current_user)):
-    """إرجاع بيانات المستخدم المسجّل دخوله"""
-    return current_user
+@router.get("/me", response_model=UserInDB, summary="المستخدم الحالي وصلاحياته")
+async def get_me(current_user: User = Depends(get_current_user),
+                 db: Session = Depends(get_db)):
+    """بيانات المستخدم المسجّل دخوله + صلاحياته الفعلية (تحكم الواجهة بها)."""
+    return _user_out(db, current_user)
 
 
-# ===== إدارة المستخدمين (للمدير فقط) =====
+# ===== إدارة المستخدمين =====
 @router.get("/users", response_model=list[UserInDB], summary="قائمة المستخدمين")
 async def list_users(
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    current: User = Depends(require_admin),
 ):
-    return db.query(User).all()
+    rows = db.query(User).order_by(User.id).all()
+    return [_user_out(db, u) for u in rows]
 
 
-@router.put("/users/{user_id}/toggle", response_model=UserInDB, summary="تفعيل/تعطيل مستخدم")
+@router.put("/users/{user_id}/toggle", response_model=UserInDB,
+            summary="تفعيل/تعطيل مستخدم")
 async def toggle_user(
     user_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    current: User = Depends(require_admin),
 ):
     """تفعيل أو تعطيل حساب مستخدم"""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="المستخدم غير موجود")
+    if user.id == current.id:
+        raise HTTPException(status_code=400, detail="لا يمكنك تعطيل حسابك")
+    if user.is_active and get_user_role(user) == "admin":
+        _guard_last_admin(db, user, "تعطيل")
     user.is_active = not user.is_active
     db.commit()
     db.refresh(user)
-    return user
+    return _user_out(db, user)
+
+
+def _guard_last_admin(db, target: User, action: str) -> None:
+    """يمنع إزالة آخر مدير نشط (إبطال دوره أو تعطيله) حتى لا يُقفل النظام."""
+    others = (db.query(User)
+              .filter(User.id != target.id, User.is_active.is_(True)).all())
+    if not any(get_user_role(u) == "admin" for u in others):
+        raise HTTPException(status_code=400,
+                            detail=f"لا يمكن {action} آخر مدير نشط في النظام")
 
 
 @router.put("/users/{user_id}/role", response_model=UserInDB, summary="تغيير دور مستخدم")
@@ -181,25 +239,20 @@ async def change_user_role(
     db: Session = Depends(get_db),
     current: User = Depends(require_admin),
 ):
-    """تغيير دور/صلاحية مستخدم (للمدير فقط) — بحماية آخر مدير نشط"""
+    """تغيير دور مستخدم — بحماية آخر مدير نشط ومنع التصعيد الذاتي."""
     target = db.query(User).filter(User.id == user_id).first()
     if not target:
         raise HTTPException(status_code=404, detail="المستخدم غير موجود")
     if target.id == current.id:
         raise HTTPException(status_code=400, detail="لا يمكنك تغيير دور حسابك")
     old_role = get_user_role(target)
-    new_role = payload.role.value
+    new_role = _resolve_role(db, payload.role)
     if old_role == "admin" and new_role != "admin":
-        others = (db.query(User)
-                  .filter(User.id != target.id, User.is_active.is_(True))
-                  .all())
-        if not any(get_user_role(u) == "admin" for u in others):
-            raise HTTPException(status_code=400,
-                                detail="لا يمكن سحب صلاحية آخر مدير نشط")
-    target.role = payload.role
+        _guard_last_admin(db, target, "سحب صلاحية")
+    target.role = new_role
     db.commit()
     db.refresh(target)
-    return target
+    return _user_out(db, target)
 
 
 # ===== تغيير كلمة المرور الذاتي =====

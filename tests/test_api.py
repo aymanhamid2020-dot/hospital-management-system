@@ -111,7 +111,9 @@ def test_register_and_login(client):
         "password": "secret123",
     })
     assert r.status_code == 200
-    assert r.json()["role"] == "موظف استقبال"
+    # الدور عبر مفتاحًا ثابتًا (مع العرض العربي في role_name)
+    assert r.json()["role"] == "receptionist"
+    assert r.json()["role_name"] == "موظف استقبال"
 
     h = login(client, u, "secret123")
     r = client.get("/auth/me", headers=h)
