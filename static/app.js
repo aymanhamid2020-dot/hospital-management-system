@@ -72,6 +72,22 @@ async function openPrint(path) {
     w.document.write(await res.text());
     w.document.close();
     w.focus();
+    /* الطباعة التلقائية (مفتاح 🖨️ في الشريط العلوي): نفتح حوار الطباعة
+       على الطابعة الافتراضية بعد استقرار تحميل المحتوى — إلا إن تكفّل
+       الخادم بالطباعة بنفسه (`autoprint=1` على وصل العمليات السريعة)
+       حتى لا يُفتح الحوار مرّتين. المسارات بلا معامل (الفواتير ·
+       كشفات الحساب · إيصالات المبيعات) تُطبع من هنا. */
+    if (AUTOPRINT && !/[?&]autoprint=1\b/.test(path)) {
+      let done = false;
+      const go = () => {
+        if (done) return;
+        done = true;
+        try { w.focus(); w.print(); } catch (e) { /* حجب المتصفح للطباعة */ }
+      };
+      w.addEventListener('load', () => setTimeout(go, 250));
+      if (w.document.readyState === 'complete') setTimeout(go, 250);
+      setTimeout(go, 2500);   /* احتياط إن لم يصل حدث التحميل */
+    }
   } catch (e) { w.close(); throw e; }
 }
 
@@ -218,6 +234,34 @@ function toggleTheme() {
   toast(THEME === 'dark' ? '🌙 الوضع الداكن مفعّل' : '☀️ الوضع الفاتح مفعّل');
 }
 applyTheme();
+
+/* ===== 🖨️ مفتاح الطباعة التلقائية =====
+   تفضيل عام يُحفظ في `localStorage` ويحكم كل ما يُفتح للطباعة:
+   الوصل عبر معامل `autoprint=1|0` في الخادم، والفواتير والكشفات
+   والإيصالات عبر `w.print()` داخل `openPrint`. الافتراض مفعّلة —
+   وهو سلوك الوصل كما سُلِّم، والمفتاح ليس إلا إمكانية الإيقاف. */
+let AUTOPRINT = localStorage.getItem('hms_autoprint') !== '0';
+
+function paintAutoPrint() {
+  const b = document.getElementById('ap-btn');
+  if (!b) return;
+  b.classList.toggle('success', AUTOPRINT);
+  b.classList.toggle('ghost', !AUTOPRINT);
+  b.setAttribute('aria-pressed', String(AUTOPRINT));
+  b.title = AUTOPRINT
+    ? 'الطباعة التلقائية: مفعّلة — يُفتح حوار الطباعة فور فتح أي وصل أو فاتورة أو كشف (اضغط للإيقاف)'
+    : 'الطباعة التلقائية: متوقفة — تُفتح الصفحة فقط وتطبعها متى شئت (اضغط للتفعيل)';
+}
+
+function toggleAutoPrint() {
+  AUTOPRINT = !AUTOPRINT;
+  localStorage.setItem('hms_autoprint', AUTOPRINT ? '1' : '0');
+  paintAutoPrint();
+  toast(AUTOPRINT ? '🖨️ الطباعة التلقائية مفعّلة — تُفتح نافذة الطباعة فور فتح أي وصل أو فاتورة أو كشف'
+                  : '🖨️ أُوقفت الطباعة التلقائية — تُفتح الصفحة فقط وتطبعها متى شئت');
+}
+paintAutoPrint();
+
 const AR2EN = {
   /* الشاشة العامة */
   'نظام إدارة المستشفيات — لوحة التحكم': 'Hospital Management — Dashboard',
@@ -4780,11 +4824,13 @@ function qoPrintReceipt() {
   const d = box && box.kind === 'sale' ? box.data : null;
   if (!d || !(d.dispense_ids || []).length) { toast('لا توجد أدوية في هذه العملية', true); return; }
   /* autoprint=1 ⇒ الخادم يُدرج نصًا يفتح نافذة الطباعة على الطابعة
-     الافتراضية فور تحميل الوصل بدل إرضاظ الصفحة فقط */
+     الافتراضية فور تحميل الوصل؛ والقيمة تتبع مفتاح 🖨️ في الشريط
+     العلوي: مُطفأ ⇒ وصل يُفتح فقط ويطبعه المستخدم متى شاء */
   openPrint('/quick-ops/sales/receipt?' +
     d.dispense_ids.map(i => 'dispense_ids=' + i).join('&') + '&lang=' + LANG +
-    '&autoprint=1')
-    .then(() => toast('تم فتح الوصل على الطابعة ✅'))
+    '&autoprint=' + (AUTOPRINT ? '1' : '0'))
+    .then(() => toast(AUTOPRINT ? 'تم فتح الوصل على الطابعة ✅'
+                                : 'تم فتح الوصل — اطبعه متى شئت ✅'))
     .catch(e => toast(e.message, true));
 }
 

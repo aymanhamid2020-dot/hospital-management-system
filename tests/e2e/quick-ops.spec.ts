@@ -329,4 +329,71 @@ test.describe('مركز العمليات السريعة ⚡', () => {
     expect(await qty(), 'لم يعود رصيد الدواء بعد الإرجاع').toBe(q0);
     expect(await nonReturned(), 'لم يُعلَّم الصرف كمرتجع').toBe(d0);
   });
+
+  test('مفتاح 🖨️ الطباعة التلقائية: إيقاف ⇒ وصل بلا حوار · تشغيل ⇒ طباعة من المتصفح', async ({ page, request }) => {
+    const s = await seed(request);
+    await login(page);
+    await openView(page, 'quickops');
+
+    // بيع أدوية فقط (بلا فاتورة أصناف) ⇒ زر الوصل يظهر
+    const patients = await (await request.get('/patients/?limit=1', { headers: s.headers })).json();
+    await page.fill('#qo-patient-input', (patients[0].full_name || '').slice(0, 4));
+    await page.waitForTimeout(900);
+    await page.locator('#qo-patients .qo-hit').first().click();
+    await pick(page, '#qo-q', `دواء سريع ${TAG}`);
+    await page.fill('#qo-paid', '9999');
+    await page.click('#qo-submit');
+    await expect(page.locator('#qo-body h3', { hasText: 'تم البيع' })).toBeVisible();
+
+    // نعوّض window.print في كل نافذة جديدة حتى لا يحجب محرّك الطباعة الاختبار
+    await page.context().addInitScript(() => {
+      (window as any).__printed = false;
+      window.print = () => { (window as any).__printed = true; };
+    });
+
+    const apBtn = page.locator('#ap-btn');
+    const receiptBtn = page.locator('button:has-text("وصل صرف الأدوية")');
+    await expect(receiptBtn).toHaveCount(1);
+
+    // 1) الافتراض مفعّلة (سلوك الوصل كما سُلِّم)
+    await expect(apBtn).toHaveAttribute('aria-pressed', 'true');
+
+    // 2) الإيقاف يُحفظ في localStorage وينعكس على الزر
+    await apBtn.click();
+    await expect(apBtn).toHaveAttribute('aria-pressed', 'false');
+    expect(await page.evaluate(() => localStorage.getItem('hms_autoprint'))).toBe('0');
+
+    // 3) الوصل يُفتح بلا حوار طباعة: الخادم يستقبل autoprint=0
+    //    والصفحة الأم لا تطبع من المتصفح أيضًا
+    let popupPromise = page.waitForEvent('popup');
+    await receiptBtn.click();
+    let popup = await popupPromise;
+    await expect(popup.locator('body')).toContainText('وصل صرف أدوية');
+    await popup.waitForTimeout(1500);
+    expect(await popup.evaluate(() => (window as any).__printed),
+      'طُبِع الوصل رغم إيقاف المفتاح').toBe(false);
+    await popup.close();
+
+    // 4) إعادة التشغيل ⇐ يعود للطباعة التلقائية
+    await apBtn.click();
+    await expect(apBtn).toHaveAttribute('aria-pressed', 'true');
+    expect(await page.evaluate(() => localStorage.getItem('hms_autoprint'))).toBe('1');
+
+    // 5) مسار بلا معامل autoprint (كالفواتير وكشفات الحساب): الطباعة
+    //    من جهة المتصفح داخل openPrint بعد اكتمال التحميل
+    const dispenses = await (await request.get('/dispenses/', { headers: s.headers })).json();
+    const one = dispenses.find((d: any) => d.medication_id === s.med);
+    expect(one, 'لا يوجد صرف للاختبار').toBeTruthy();
+    const path = `/quick-ops/sales/receipt?dispense_ids=${one.id}&lang=ar&autoprint=0`;
+    popupPromise = page.waitForEvent('popup');
+    await page.evaluate((p) => (window as any).openPrint(p).catch(() => {}), path);
+    popup = await popupPromise;
+    await expect(popup.locator('body')).toContainText('وصل صرف أدوية');
+    await expect.poll(() => popup.evaluate(() => (window as any).__printed),
+      { timeout: 10_000, message: 'الطباعة التلقائية من جهة المتصفح لم تُستدعَ' })
+      .toBe(true);
+    await popup.close();
+
+    await expectNoUiError(page);
+  });
 });
