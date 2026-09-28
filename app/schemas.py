@@ -2073,6 +2073,40 @@ class QuickSaleOut(BaseModel):
     lines: List[QuickSaleLineOut] = []
 
 
+class QuickSaleReturnIn(BaseModel):
+    """إرجاع بيع سريع: الأصناف (فاتورة + مستند) والأدوية (سجلات صرف) معًا."""
+    invoice_id: Optional[int] = Field(None, gt=0,
+                                      description="فاتورة الأصناف — تُترك فارغة عند بيع أدوية فقط")
+    dispense_ids: List[int] = Field([], description="سجلات صرف الأدوية المراد إرجاعها")
+    reason: str = Field(..., min_length=1, description="سبب الإرجاع")
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_not_blank(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("سبب الإرجاع إلزامي")
+        return v
+
+
+class QuickSaleReturnOut(BaseModel):
+    """نتيجة إرجاع بيع سريع — مرتجع مخزون + فاتورة ملغاة + قيد عكسي."""
+    invoice_id: Optional[int] = Field(None, description="الفاتورة المرتجعة — تصبح cancelled")
+    invoice_status: Optional[str] = Field(None, description="حالة الفاتورة بعد الإرجاع — unpaid بمحصّل صفَر")
+    returned_dispenses: int = Field(0, description="عدد سجلات الصرف المرتجعة")
+    returned_units: int = Field(0, description="إجمالي وحدات الأدوية المرتجعة")
+    restocked_items: int = Field(0, description="عدد أصناف المستلزمات التي عادت للمستودع")
+    restocked_units: int = Field(0, description="إجمالي وحدات المستلزمات المرتجعة")
+    doc_id: Optional[int] = Field(None, description="مستند المرتجع الذي أعاد الأصناف")
+    doc_no: Optional[str] = None
+    warehouse: Optional[str] = None
+    refunded: float = Field(0.0, description="إجمالي ما حصَّل من الفاتورة والأدوية ورُدَّ للمريض")
+    journal_entry_id: Optional[int] = None
+    journal_entry_no: Optional[str] = Field(None, description="رقم القيد العكسي")
+    reason: str
+    returned_at: datetime
+
+
 class QuickPurchaseOut(BaseModel):
     """نتيجة الشراء السريع — إذن الاستلام + فاتورة المورد + القيد."""
     doc_id: int

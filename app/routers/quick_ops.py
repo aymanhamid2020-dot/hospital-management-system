@@ -19,6 +19,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import HTMLResponse
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
@@ -30,7 +31,7 @@ from app.models import (
     StockDocLine, StockMovement, User, Vendor, VendorBill, Warehouse,
 )
 from app.routers.accounting import _account, _ensure_chart, _money, _new_entry
-from app.routers.pharmacy import _ensure_not_expired, _low_stock_crossed
+from app.routers.pharmacy import _ensure_not_expired, _low_stock_crossed, apply_dispense_return
 from app.routers.stock_ops import (
     _default_warehouse, _item, _next_doc_no, _post_doc, _seed_legacy_balance,
     _warehouse,
@@ -39,7 +40,7 @@ from app.currency import base_expr
 from app.schemas import (
     QuickCatalogItem, QuickOpLine, QuickOpsOverview, QuickPurchaseCreate,
     QuickPurchaseOut, QuickRecentOp, QuickSaleCreate, QuickSaleLineOut, QuickSaleOut,
-    QuickTransferCreate, QuickTransferOut,
+    QuickSaleReturnIn, QuickSaleReturnOut, QuickTransferCreate, QuickTransferOut,
 )
 
 router = APIRouter(prefix="/quick-ops", tags=["Quick Operations"])
@@ -495,6 +496,227 @@ def quick_sale(payload: QuickSaleCreate, db: Session = Depends(get_db),
         status=("PAID" if remaining <= .01 else "PARTIAL" if paid > 0 else "UNPAID"),
         payment_method=method, journal_entry_id=entry.id,
         journal_entry_no=entry.entry_no, lines=out_lines)
+
+
+# ===== ↩ إرجاع بيع سريع =====
+@router.post("/sales/return", response_model=QuickSaleReturnOut, status_code=201,
+             summary="إرجاع بيع سريع: أدوية + أصناف في طلب واحد مع قيد عكسي")
+def quick_sale_return(payload: QuickSaleReturnIn, db: Session = Depends(get_db),
+                      user: User = Depends(require_admin)):
+    """عكس عملية بيع سريع بأقل خطوة:
+
+    - الأدوية ⇒ إرجاع سجلات `الصرف` (يعود رصيد الدواء وتُستثنى من المبيعات).
+    - الأصناف ⇒ مستند `return` مرحّل يعيد الكمية إلى **نفس** المستودع بنفس التشغيلة.
+    - الفاتورة تعود **غير مدفوعة** بمحصّل صفَر ووصف يحمل سبب الإرجاع، وقيد
+      عكسي يطبّق صيغة البيع على المُرجَع فقط ⇒ يوازن مع الإرجاع الكامل
+      **والجزئي** من سلة أدوية متعددة.
+    """
+    _ensure_chart(db)
+    reason = (payload.reason or "").strip()
+    if not reason:
+        raise HTTPException(400, "سبب الإرجاع إلزامي")
+
+    # ===== 1) فحص كل الأهداف قبل أي كتابة — أي رفض يُلغي العملية كاملة =====
+    invoice = None
+    if payload.invoice_id:
+        invoice = db.query(Invoice).filter(Invoice.id == payload.invoice_id).first()
+        if not invoice:
+            raise HTTPException(404, "الفاتورة غير موجودة")
+        if db.query(StockDoc).filter(StockDoc.doc_type == "return",
+                                     StockDoc.reference == f"فاتورة #{invoice.id}").first():
+            raise HTTPException(409, "هذه الفاتورة مُرجَعة مسبقًا")
+    dispenses: List[Dispense] = []
+    for did in payload.dispense_ids:
+        d = db.query(Dispense).filter(Dispense.id == did).first()
+        if not d:
+            raise HTTPException(404, f"سجل الصرف #{did} غير موجود")
+        if d.returned_at is not None:
+            raise HTTPException(409, f"سجل الصرف #{did} مُرجَع مسبقًا")
+        dispenses.append(d)
+    if invoice is None and not dispenses:
+        raise HTTPException(400, "حدد فاتورة أو سجل صرف واحدًا على الأقل")
+
+    # مستند الصرف الأصلي للأصناف: بدونه لا يُعرف كيف خرجت ولا إلى أي مستودع تعود
+    src_doc = None
+    if invoice is not None:
+        src_doc = (db.query(StockDoc)
+                   .filter(StockDoc.doc_type == "issue",
+                           StockDoc.reference == f"فاتورة #{invoice.id}")
+                   .order_by(StockDoc.id.desc()).first())
+        if src_doc is None or not src_doc.lines:
+            raise HTTPException(400,
+                                "لم يُعثر على مستند الصرف المرتبط بهذه الفاتورة — لا يمكن إرجاع أصنافها")
+
+    # مرجع القيد العكسي: الفاتورة إن وُجدت، وإلا أول سجل صرف في العملية
+    ref_type = "patient_invoice" if invoice is not None else "quick_sale_medicines"
+    ref_id = invoice.id if invoice is not None else dispenses[0].id
+
+    now = datetime.now()
+
+    # ===== 2) التنفيذ =====
+    units = sum(apply_dispense_return(db, d, reason, user.username) for d in dispenses)
+
+    doc = None
+    restocked = restocked_units = 0
+    if src_doc is not None:
+        doc = StockDoc(doc_type="return", doc_no=_next_doc_no(db, "return"),
+                       status="completed", to_warehouse_id=src_doc.from_warehouse_id,
+                       patient_id=invoice.patient_id, department_id=src_doc.department_id,
+                       reference=f"فاتورة #{invoice.id}", notes=reason,
+                       created_by=user.username, completed_at=now)
+        db.add(doc)
+        db.flush()
+        restocked = len(src_doc.lines)
+        for ln in src_doc.lines:
+            restocked_units += int(ln.quantity or 0)
+            db.add(StockDocLine(doc_id=doc.id, item_id=ln.item_id, quantity=ln.quantity,
+                                unit_cost=ln.unit_cost, batch_no=ln.batch_no,
+                                expiry_date=ln.expiry_date,
+                                note=f"مرتجع فاتورة #{invoice.id}"))
+        db.flush()
+        _post_doc(db, doc, user)
+
+    paid_return = 0.0
+    if invoice is not None:
+        paid_return += float(invoice.paid_amount or 0)
+        # معنى الاسترداد القائم في النظام (كالإشعار الدائن): محصّل صفَر
+        # وحالة غير مدفوعة + وسم سبب الإرجاع في وصف الفاتورة
+        invoice.status = InvoiceStatus.UNPAID
+        invoice.paid_amount = 0.0
+        invoice.paid_at = None
+        invoice.description = ((invoice.description or "") + f" — مُرجَع: {reason}")[:200]
+    paid_return += sum(float(d.paid_amount or 0) for d in dispenses)
+
+    # ===== 3) القيد العكسي: نفس صيغة البيع مطبَّقة على المُرجَع فقط =====
+    # فيعمل مع الإرجاع الكامل والإرجاع الجزئي من سلة أدوية متعددة، ويوازن دائمًا.
+    items_net = _money(invoice.total) if invoice is not None else 0.0
+    meds_net = _money(sum(float(d.total_price or 0) for d in dispenses))
+    total_return = _money(items_net + meds_net)
+    refunded = _money(paid_return)
+    entry = None
+    if total_return > 0:
+        head_pat = invoice.patient if invoice is not None else dispenses[0].patient
+        method = ((invoice.payment_method if invoice is not None
+                   else dispenses[0].payment_method) or "cash").strip().lower()
+        if _money(total_return - refunded) <= .01:
+            head = {"code": "1000" if method == "cash" else "1010",
+                    "credit": total_return, "description": "ردّ تحصيل بيع سريع"}
+        else:
+            insured = method == "insurance" or bool(head_pat and head_pat.insurer)
+            head = {"code": "1110" if insured else "1100",
+                    "credit": total_return, "description": "إلغاء ذمم من بيع سريع"}
+        je = []
+        if items_net > 0:
+            je.append({"code": "4000", "debit": items_net,
+                       "description": "عكس إيراد مستلزمات"})
+        if meds_net > 0:
+            je.append({"code": "4000", "debit": meds_net, "description": "عكس إيراد صيدلية"})
+        je.append(head)
+        entry = _new_entry(db, now,
+                           "مرتجع بيع سريع — " + (f"فاتورة #{invoice.id}"
+                                                  if invoice is not None else "أدوية"),
+                           "quick_sale_return", ref_id, je, user.username)
+    db.commit()
+    if invoice is not None:
+        db.refresh(invoice)
+
+    return QuickSaleReturnOut(
+        invoice_id=invoice.id if invoice is not None else None,
+        invoice_status=invoice.status.value if invoice is not None else None,
+        returned_dispenses=len(dispenses), returned_units=units,
+        restocked_items=restocked, restocked_units=restocked_units,
+        doc_id=doc.id if doc is not None else None,
+        doc_no=doc.doc_no if doc is not None else None,
+        warehouse=(_warehouse(db, src_doc.to_warehouse_id, "مستودع المرتجع").name
+                   if src_doc is not None else None),
+        refunded=refunded,
+        journal_entry_id=entry.id if entry is not None else None,
+        journal_entry_no=entry.entry_no if entry is not None else None,
+        reason=reason, returned_at=now)
+
+
+# ===== 🧾 وصل صرف الأدوية (بيع بلا فاتورة أصناف) =====
+def _quick_receipt_html(dsps: List[Dispense], lang: str) -> str:
+    """وصل صرف أدوية لعدة أدوية في مسح واحد — نظام التصميم الموحّد `print_kit`."""
+    from app.currency import base_currency
+    from app.print_kit import (foot_html, grid_html, head_html, ltr_html,
+                               page_html, sign_html, tiles_html)
+    from app.receipt_template import _e, _rows_table, _sec
+
+    en = lang == "en"
+    sar = base_currency().symbol("en" if en else "ar")
+    first = dsps[0]
+    patient = first.patient.full_name if first.patient else f"#{first.patient_id}"
+    title = "Dispensing receipt" if en else "وصل صرف أدوية"
+    kind = "Quick sale" if en else "بيع سريع"
+    date = first.created_at.strftime("%Y-%m-%d %H:%M") if first.created_at else "-"
+    pm_tbl = ({"cash": "Cash", "card": "Card", "insurance": "Insurance"} if en else
+              {"cash": "نقدًا", "card": "بطاقة", "insurance": "تأمين"})
+
+    fields = [
+        (("المريض", "Patient")[en], patient),
+        (("عدد الأدوية", "Medicines")[en], str(len(dsps))),
+        (("طريقة الدفع", "Payment method")[en],
+         pm_tbl.get(first.payment_method, first.payment_method or "-")),
+        (("صرفه", "Dispensed by")[en], first.dispensed_by or "-"),
+    ]
+    rows, total, paid = [], 0.0, 0.0
+    for d in dsps:
+        med = d.medication.name if d.medication else f"#{d.medication_id}"
+        total += float(d.total_price or 0)
+        paid += float(d.paid_amount or 0)
+        rows.append(f"<tr><td>{_e(med)}</td><td>{d.quantity}</td>"
+                    f"<td>{_e(_money(d.unit_price))}</td>"
+                    f"<td style='text-align:end'>{_e(_money(d.total_price))} "
+                    f"{_e(sar)}</td></tr>")
+    rest = round(total - paid, 2)
+    l_total, l_paid, l_rest = ("الإجمالي", "Total")[en], ("المدفوع", "Paid")[en], \
+        ("المتبقي", "Outstanding")[en]
+    body = f"""
+{head_html(title, lang, kind=kind, number=f"#{first.id}",
+           subtitle_html=f'{ltr_html(date)} &nbsp;·&nbsp; '
+                         f'{len(dsps)} {"دواء" if not en else "medicine(s)"}')}
+<div class="pk-body">
+  {_sec("بيانات العملية" if not en else "Transaction")}
+  {grid_html(fields, cols=2)}
+  {_sec("الأدوية" if not en else "Medicines")}
+  {_rows_table([("الدواء", "Medicine")[en], ("الكمية", "Qty")[en],
+                ("سعر الوحدة", "Unit price")[en], l_total], rows,
+               "لا أدوية" if not en else "No medicines")}
+  {_sec("الملخص المالي" if not en else "Financial summary")}
+  {tiles_html([(l_total, f"{_money(total)} {sar}"),
+               (l_paid, f"{_money(paid)} {sar}", "ok" if rest <= 0 else ""),
+               (l_rest, f"{_money(rest)} {sar}", "" if rest <= 0 else "warn")])}
+</div>
+{sign_html("توقيع المستلم" if not en else "Received by",
+           "توقيع الصيدلي" if not en else "Pharmacist")}
+{foot_html(("وصل صرف أدوية — " + patient) if not en
+           else ("Dispensing receipt — " + patient), lang)}
+"""
+    return page_html(f"{title} #{first.id}", body, lang)
+
+
+@router.get("/sales/receipt", summary="وصل صرف أدوية (HTML للطباعة)")
+def quick_sale_receipt(dispense_ids: List[int] = Query(..., description="أرقام عمليات الصرف"),
+                       lang: str = Query("ar", description="ar أو en"),
+                       db: Session = Depends(get_db),
+                       _user: User = Depends(get_current_user)):
+    """وصل قصير لعملية بيع أدوية بلا فاتورة أصناف: المريض والأدوية والأسعار والإجمالي.
+
+    يُفتح من زر «🧾 وصل صرف الأدوية» في بطاقة نتيجة البيع السريع، ويلتزم بنظام
+    التصميم الموحّد نفسه (شعار الجهة + جدول + ملخص + توقيعات + تذييل).
+    """
+    if lang not in ("ar", "en"):
+        raise HTTPException(400, "lang يجب أن يكون ar أو en")
+    if not dispense_ids:
+        raise HTTPException(400, "حدد رقم صرف واحدًا على الأقل")
+    wanted = list(dict.fromkeys(dispense_ids))
+    found = {d.id: d for d in db.query(Dispense).filter(Dispense.id.in_(wanted)).all()}
+    missing = [i for i in wanted if i not in found]
+    if missing:
+        raise HTTPException(404, "عمليات الصرف غير موجودة: "
+                             + "، ".join(f"#{i}" for i in missing))
+    return HTMLResponse(_quick_receipt_html([found[i] for i in wanted], lang))
 
 
 # ===== 📥 شراء سريع =====

@@ -4219,8 +4219,7 @@ function qoGo(tab) {
   if (tab) QO.tab = tab;
   return navigate('quickops');
 }
-// الأليام الثلاثة كانت نسخ مثبّتًاً لعملة مختلفة
-// — الإنماع أصلاه تعليماً على ¥money ولا يُقثّل التكرار.
+// qoMoney = money مباشرة: نفس منسوب العملة في كل الشاشات بلا نسخة ثانية
 const qoMoney = money;
 function qoNum(n) { return Number(n || 0).toLocaleString('en-US'); }
 
@@ -4234,6 +4233,10 @@ async function quickops(main) {
   if (!QO.from) QO.from = (QO.warehouses.find(w => w.is_default) || QO.warehouses[0] || {}).id || null;
   if (!QO.to) QO.to = (QO.warehouses.find(w => w.id !== QO.from) || QO.warehouses[0] || {}).id || null;
   if (!QO.wh) QO.wh = QO.from;
+  if (!QO.basket.length) {          // عودة مسودة لم تُنفَّذ بعد (تحديث الصفحة/إعادة الدخول)
+    const back = qoLoadDraft();
+    if (back) toast('↩ عادت مسودة سابقة: ' + back + ' أصناف في السلة — لم تُنفَّذ بعد');
+  }
   if (QO.tab === 'purchase' && !QO.vendors.length) {
     QO.vendors = await api('/accounts/ledger/vendors').catch(() => []);
   }
@@ -4328,7 +4331,7 @@ function qoRenderHits() {
 }
 
 /* ===== السلة ===== */
-function qoAdd(i) {
+function qoAdd(i, clear) {
   const r = QO.results[i];
   if (!r) return;
   /* في الشراء يُقبل الصنف حتى برصيد صفر (توريد أول)، والبيع/الترحيل يتقيّان بالمتاح */
@@ -4346,9 +4349,15 @@ function qoAdd(i) {
       cost: r.unit_cost || 0, batch: '', expiry: '',
     });
   }
+  /* clear: إضافة بمسح الباركود ⇒ يُفرَّغ الحقل لمسحٍ تالٍ فورًا */
+  if (clear) { QO.q = ''; QO.results = []; }
   qoRender();
   const q = document.getElementById('qo-q');
   if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
+  if (clear) {
+    const res = document.getElementById('qo-results');
+    if (res) res.innerHTML = '';
+  }
 }
 function qoQty(i, delta) {
   const b = QO.basket[i]; if (!b) return;
@@ -4379,6 +4388,83 @@ function qoSet(i, field, value) {
 }
 function qoRemove(i) { QO.basket.splice(i, 1); qoRender(); }
 function qoNew() { QO.basket = []; QO.last = null; QO.patient = null; QO.pay = { method: 'cash', discount: 0, tax: 0, paid: 0 }; qoRender(); }
+
+/* ===== مسودة محفوظة + تكرار آخر عملية (localStorage) ===== */
+const QO_DRAFT = 'hms_qo_draft', QO_LASTOP = 'hms_qo_lastop';
+function qoSnapshot() {
+  return { v: 1, kind: QO.tab, basket: QO.basket, pay: QO.pay, wh: QO.wh,
+           patient: QO.patient ? { id: QO.patient.id, full_name: QO.patient.full_name } : null,
+           vendor: QO.vendor, from: QO.from, to: QO.to, billNo: QO.billNo };
+}
+function qoSaveDraft() {
+  try {
+    if (!QO.basket.length) { localStorage.removeItem(QO_DRAFT); return; }
+    localStorage.setItem(QO_DRAFT, JSON.stringify(qoSnapshot()));
+  } catch (e) { /* تخزين ممتلئ أو محجوب — لا نقف السلة بسببه */ }
+}
+function qoLoadDraft() {
+  try {
+    const d = JSON.parse(localStorage.getItem(QO_DRAFT) || 'null');
+    if (!d || !Array.isArray(d.basket) || !d.basket.length) return 0;
+    QO.tab = d.kind || QO.tab; QO.basket = d.basket; QO.pay = d.pay || QO.pay;
+    QO.wh = d.wh || QO.wh; QO.patient = d.patient || null;
+    QO.vendor = d.vendor || null; QO.from = d.from || null; QO.to = d.to || null;
+    QO.billNo = d.billNo || '';
+    return QO.basket.length;
+  } catch (e) { return 0; }
+}
+function qoClearDraft() { try { localStorage.removeItem(QO_DRAFT); } catch (e) {} }
+function qoSaveLastOp() {
+  try { localStorage.setItem(QO_LASTOP, JSON.stringify({ ...qoSnapshot(), at: Date.now() })); }
+  catch (e) {}
+}
+function qoLastOp(kind) {
+  try {
+    const s = JSON.parse(localStorage.getItem(QO_LASTOP) || 'null');
+    return (s && s.kind === kind && Array.isArray(s.basket) && s.basket.length) ? s : null;
+  } catch (e) { return null; }
+}
+function qoLastBtn() {
+  return qoLastOp(QO.tab)
+    ? `<button class="btn sm ghost" onclick="qoRepeatLast()">🔁 تكرار آخر عملية</button>` : '';
+}
+function qoRepeatLast() {
+  const s = qoLastOp(QO.tab);
+  if (!s) { toast('لا توجد عملية سابقة على هذا التبويب', true); return; }
+  QO.last = null; QO.basket = s.basket; QO.pay = s.pay || QO.pay;
+  QO.wh = s.wh || QO.wh; QO.patient = s.patient || null;
+  QO.vendor = s.vendor || null; QO.from = s.from || null; QO.to = s.to || null;
+  QO.billNo = s.billNo || ''; QO.q = ''; QO.results = [];
+  qoRender();
+  toast('🔁 عادت العملية السابقة — راجع الكميات والأسعار قبل التنفيذ');
+}
+
+/* ===== مسار الباركود السريع: Enter يضيف فورًا (نمط مسح الكاشير) ===== */
+function qoKey(e) {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  if (e.ctrlKey || e.metaKey) qoSubmit(); else qoEnterAdd();
+}
+async function qoEnterAdd() {
+  const el = document.getElementById('qo-q');
+  QO.q = ((el && el.value) || '').trim();
+  if (!QO.q) { toast('امسح الباركود أو اكتب اسم الصنف أولًا', true); return; }
+  clearTimeout(QO.timer);
+  const exact = r => String(r.barcode || r.code || '').toLowerCase() === QO.q.toLowerCase();
+  let hit = (QO.results || []).find(exact);
+  if (!hit) { await qoRunSearch(); hit = (QO.results || []).find(exact); }
+  if (!hit) hit = (QO.results || [])[0];          // أول نتيجة إن لم يطابق الباركود
+  if (!hit) { toast('لا نتائج لـ «' + QO.q + '»', true); return; }
+  qoAdd((QO.results || []).indexOf(hit), true);
+}
+async function qoPatientKey(e) {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  clearTimeout(QO.ptTimer);
+  await qoRunPatient();
+  if (QO.patientResults && QO.patientResults.length) qoPickPatient(0);
+  else toast('لا يوجد مريض بهذا البحث', true);
+}
 
 function qoTotals() {
   let items = 0, meds = 0, cost = 0;
@@ -4426,7 +4512,7 @@ function qoPickPatient(i) {
   if (el) el.value = p.full_name;
   const box = document.getElementById('qo-patients');
   if (box) box.innerHTML = '';
-  qoRenderTotals();
+  qoRender();               // رسم كامل: يظهر وسم «✔ المريض» فورًا ويُحفظ في المسودة
 }
 
 /* ===== رسم التبويب الحالي ===== */
@@ -4453,6 +4539,7 @@ function qoRender() {
   applyI18n(body);
   const focus = body.querySelector('[data-autofocus]');
   if (focus) focus.focus();
+  qoSaveDraft();          // حفظ المسودة بعد كل تعديل على النموذج (لا تحفظ عند بطاقة النتيجة)
 }
 
 function qoForm() {
@@ -4537,7 +4624,8 @@ function qoSaleForm() {
     <div class="qo-money">
       <div class="field" style="min-width:260px"><label>المريض *</label>
         <input id="qo-patient-input" data-autofocus autocomplete="off" value="${QO.patient ? esc(QO.patient.full_name) : ''}"
-          placeholder="ابحث بالاسم أو الهوية…" oninput="qoPatientSearch(this.value)"></div>
+          placeholder="ابحث بالاسم أو الهوية…" oninput="qoPatientSearch(this.value)"
+          onkeydown="qoPatientKey(event)"></div>
       <div class="field"><label>مستودع الصرف</label>
         <select id="qo-wh" onchange="QO.wh=Number(this.value); qoRunSearch();">${QO_WH()}</select></div>
     </div>
@@ -4545,13 +4633,14 @@ function qoSaleForm() {
     ${QO.patient ? `<div class="pill paid">✔ ${esc(QO.patient.full_name)}</div>` : ''}
     <div class="field" style="margin-top:10px"><label>ابحث صنف أو دواء (اسم/كود/باركود)</label>
       <input id="qo-q" autocomplete="off" value="${esc(QO.q || '')}" oninput="qoSearch(this.value)"
-        placeholder="مثال: قفازات · بارانول…"></div>
+        onkeydown="qoKey(event)" placeholder="مثال: قفازات · بارانول…"></div>
     <div id="qo-results"></div>
     <div id="qo-basket">${qoBasketTable('sale')}</div>
     <div class="qo-money" id="qo-totals">${qoTotalsBar('sale')}</div>
     <div class="toolbar" style="margin-top:10px">
       <button class="btn" onclick="qoSubmit()" id="qo-submit">✅ إتمام البيع</button>
       <button class="btn ghost" onclick="qoNew()">🗑️ تفريغ السلة</button>
+      ${qoLastBtn()}
       <span class="qo-kbd">الأدوية تظهر في «🛒 المبيعات» تلقائيًا، والمستلزمات في الفواتير + المخزون</span>
     </div>
   </div>`;
@@ -4575,13 +4664,14 @@ function qoPurchaseForm() {
     </div>
     <div class="field" style="margin-top:10px"><label>ابحث الصنف (اسم/كود/باركود)</label>
       <input id="qo-q" autocomplete="off" value="${esc(QO.q || '')}" oninput="qoSearch(this.value)"
-        placeholder="مثال: قفازات · شاش…"></div>
+        onkeydown="qoKey(event)" placeholder="مثال: قفازات · شاش…"></div>
     <div id="qo-results"></div>
     <div id="qo-basket">${qoBasketTable('purchase')}</div>
     <div class="qo-money" id="qo-totals">${qoTotalsBar('purchase')}</div>
     <div class="toolbar" style="margin-top:10px">
       <button class="btn" onclick="qoSubmit()" id="qo-submit">✅ تسجيل الشراء</button>
       <button class="btn ghost" onclick="qoNew()">🗑️ تفريغ</button>
+      ${qoLastBtn()}
       <span class="qo-kbd">يولّد إذن استلام مرحّلًا + فاتورة مورد + قيد ذمم في خطوة واحدة</span>
     </div>
   </div>`;
@@ -4603,13 +4693,14 @@ function qoTransferForm() {
     </div>
     <div class="field" style="margin-top:10px"><label>ابحث الصنف المراد ترحيله</label>
       <input id="qo-q" autocomplete="off" value="${esc(QO.q || '')}" oninput="qoSearch(this.value)"
-        placeholder="مثال: قفازات…"></div>
+        onkeydown="qoKey(event)" placeholder="مثال: قفازات…"></div>
     <div id="qo-results"></div>
     <div id="qo-basket">${qoBasketTable('transfer')}</div>
     <div class="qo-money" id="qo-totals">${qoTotalsBar('transfer')}</div>
     <div class="toolbar" style="margin-top:10px">
       <button class="btn" onclick="qoSubmit()" id="qo-submit">✅ تنفيذ الترحيل</button>
       <button class="btn ghost" onclick="qoNew()">🗑️ تفريغ</button>
+      ${qoLastBtn()}
       <span class="qo-kbd">يحرّك حركتين: خروج من المصدر ودخول في الوجهة (FEFO)</span>
     </div>
   </div>`;
@@ -4673,6 +4764,8 @@ async function qoSubmit() {
   try {
     const res = await api(path, { method: 'POST', body: JSON.stringify(body) });
     QO.last = { kind: QO.tab, data: res };
+    qoSaveLastOp();     // لزر «🔁 تكرار آخر عملية»
+    qoClearDraft();     // نُنفَّذت العملية ⇒ لا مسودة بعدها
     toast('تم التنفيذ ✅ ' + (res.doc_no || res.bill_no || ''));
     qoRender();
   } catch (e) {
@@ -4681,12 +4774,49 @@ async function qoSubmit() {
   } finally { QO.busy = false; }
 }
 
+/* ===== 🧾 وصل صرف الأدوية (بيع بلا فاتورة أصناف) ===== */
+function qoPrintReceipt() {
+  const box = QO.last;
+  const d = box && box.kind === 'sale' ? box.data : null;
+  if (!d || !(d.dispense_ids || []).length) { toast('لا توجد أدوية في هذه العملية', true); return; }
+  openPrint('/quick-ops/sales/receipt?' +
+    d.dispense_ids.map(i => 'dispense_ids=' + i).join('&') + '&lang=' + LANG)
+    .then(() => toast('تم فتح الوصل للطباعة ✅'))
+    .catch(e => toast(e.message, true));
+}
+
+/* ===== ↩ إرجاع بيع سريع: سبب إلزامي ثم تأكيد ===== */
+async function qoReturnSale() {
+  const box = QO.last;
+  const d = box && box.kind === 'sale' ? box.data : null;
+  if (!d || !box || box.returned) return;
+  const reason = (window.prompt('سبب الإرجاع (إلزامي):', '') || '').trim();
+  if (!reason) { toast('تعذّر الإرجاع بدون سبب', true); return; }
+  if (!window.confirm('إرجاع العملية كاملة: إعادة المخزون + فاتورة بمحصّل صفَر + قيد عكسي؟')) return;
+  try {
+    const res = await api('/quick-ops/sales/return', {
+      method: 'POST',
+      body: JSON.stringify({
+        invoice_id: d.invoice_id || null,
+        dispense_ids: d.dispense_ids || [],
+        reason: reason,
+      }),
+    });
+    QO.last = { kind: 'sale', data: d, returned: true, ret: res };
+    toast('↩ تمت عملية الإرجاع — رُدّ ' + qoMoney(res.refunded || 0) +
+      (res.journal_entry_no ? ' · قيد ' + res.journal_entry_no : ''));
+    qoRender();
+  } catch (e) { toast(e.message, true); }
+}
+
 /* ===== بطاقة النتيجة ===== */
 function qoResultCard(box) {
   const d = box.data;
   if (box.kind === 'sale') {
+    const hasDisp = (d.dispense_ids || []).length > 0;
+    const ret = box.returned ? box.ret : null;
     return `<div class="card qo-ok">
-      <h3>✅ تم البيع — فاتورة #${d.invoice_id || '—'} ${d.doc_no ? '· إذن صرف ' + esc(d.doc_no) : ''}</h3>
+      <h3>${ret ? '↩ تم إرجاع البيع' : '✅ تم البيع'} — فاتورة #${d.invoice_id || '—'} ${d.doc_no ? '· إذن صرف ' + esc(d.doc_no) : ''}</h3>
       <div class="kv"><span>المريض</span><b>${esc(d.patient_name || '')}</b></div>
       <div class="kv"><span>المستلزمات</span><b>${qoMoney(d.items_total)}</b></div>
       ${d.medicines_total ? `<div class="kv"><span>الأدوية (${d.dispense_count} صرف)</span><b>${qoMoney(d.medicines_total)}</b></div>` : ''}
@@ -4696,8 +4826,11 @@ function qoResultCard(box) {
       <div class="kv"><span>المتبقي</span><b style="color:${d.remaining > 0 ? '#dc3545' : '#28a745'}">${qoMoney(d.remaining)}</b></div>
       <div class="kv"><span>الحالة</span><b>${{ PAID: 'مدفوعة', PARTIAL: 'مدفوعة جزئيًا', UNPAID: 'غير مدفوعة' }[d.status] || d.status}</b></div>
       <div class="kv"><span>القيد المحاسبي</span><b>${esc(d.journal_entry_no || '—')}</b></div>
+      ${ret ? `<div class="pill paid" style="margin-top:8px">↩ رُدّ كل شيء: مخزون + ${esc(ret.doc_no || 'صرف')} · قيد ${esc(ret.journal_entry_no || '—')} · رُدّ ${qoMoney(ret.refunded || 0)} — سبب: ${esc(ret.reason || '')}</div>` : ''}
       <div class="toolbar" style="margin-top:10px">
         ${d.invoice_id ? `<button class="btn sm" onclick="openPrint('/invoices/${d.invoice_id}/print?lang=ar')">🧾 طباعة الفاتورة</button>` : ''}
+        ${!d.invoice_id && hasDisp ? `<button class="btn sm" onclick="qoPrintReceipt()">🧾 وصل صرف الأدوية</button>` : ''}
+        ${ret ? '' : `<button class="btn sm ghost" onclick="qoReturnSale()">↩ إرجاع البيع</button>`}
         <button class="btn sm" onclick="qoGo('sale')">📋 كل عمليات البيع</button>
         <button class="btn ghost sm" onclick="qoNew()">🔁 عملية جديدة</button>
       </div>
@@ -4735,17 +4868,17 @@ function qoResultCard(box) {
 
 function qoRecentCard() {
   const rows = QO.overview.recent || [];
-  if (!rows.length) return '<div class="card"><div class="empty">لا عمليات اليوم بعد — ابدأ بعملية بيع أو شراء</div></div>';
   return `<div class="card">
     <h3>🕘 آخر عمليات اليوم</h3>
-    <table><thead><tr><th>النوع</th><th>التفاصيل</th><th>المبلغ</th><th>المرجع</th><th>الوقت</th></tr></thead>
+    ${rows.length ? `<table><thead><tr><th>النوع</th><th>التفاصيل</th><th>المبلغ</th><th>المرجع</th><th>الوقت</th></tr></thead>
     <tbody>${rows.map(r => `<tr>
       <td>${r.icon} ${{ sale: 'بيع', purchase: 'شراء' }[r.kind] || r.kind}</td>
       <td><b>${esc(r.title)}</b><div style="font-size:11px;opacity:.7">${esc(r.subtitle || '')}</div></td>
       <td>${r.amount ? qoMoney(r.amount) : '—'}</td>
       <td>${esc(r.reference || '—')}</td>
       <td>${new Date(r.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</td>
-    </tr>`).join('')}</tbody></table>
+    </tr>`).join('')}</tbody></table>`
+      : '<div class="empty">لا عمليات اليوم بعد — ابدأ بعملية بيع أو شراء</div>'}
   </div>`;
 }
 

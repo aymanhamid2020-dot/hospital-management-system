@@ -216,6 +216,164 @@ def test_quick_sale_validations(client, admin):
     assert _balance(client, admin, item["id"], wh["id"]) == 2
 
 
+# ===== إرجاع البيع السريع =====
+def test_return_quick_sale_items_and_medicines(client, admin):
+    """إرجاع سلة مختلطة ⇒ عودة المخزون والدواء + فاتورة ملغاة + قيد عكسي متوازن."""
+    wh = _main_wh(client, admin)
+    item = _item(client, admin, cost=10)
+    client.post("/stock/docs", headers=admin, json={
+        "doc_type": "grn", "lines": [{"item_id": item["id"], "quantity": 6,
+                                      "unit_cost": 10}]})
+    med = _med(client, admin, qty=10, price=4)
+    patient = _patient(client, admin)
+    sale = client.post("/quick-ops/sales", headers=admin, json={
+        "patient_id": patient["id"], "warehouse_id": wh["id"], "paid_amount": 32,
+        "lines": [{"item_id": item["id"], "quantity": 2, "unit_price": 10},
+                  {"kind": "med", "medication_id": med["id"], "quantity": 3}]}).json()
+    assert sale["invoice_id"] and sale["dispense_ids"]
+    assert _balance(client, admin, item["id"], wh["id"]) == 4
+    assert _med_qty(client, admin, med["id"]) == 7
+
+    r = client.post("/quick-ops/sales/return", headers=admin, json={
+        "invoice_id": sale["invoice_id"], "dispense_ids": sale["dispense_ids"],
+        "reason": "خطأ في الفاتورة"})
+    assert r.status_code == 201, r.text
+    d = r.json()
+    # المخزون عاد كما كان (مستند return مرحّل من نفس المستودع)
+    assert _balance(client, admin, item["id"], wh["id"]) == 6
+    assert _med_qty(client, admin, med["id"]) == 10
+    assert d["returned_dispenses"] == 1 and d["returned_units"] == 3
+    assert d["restocked_items"] == 1 and d["restocked_units"] == 2
+    assert d["doc_no"].startswith("RETURN-") and d["warehouse"]
+    assert d["reason"] == "خطأ في الفاتورة"
+    # الفاتورة عادت غير مدفوعة بمحصّل صفَر ووصف يحمل سبب الإرجاع
+    inv = client.get(f"/invoices/{sale['invoice_id']}", headers=admin).json()
+    assert inv["status"] == "unpaid" and inv["paid_amount"] == 0
+    assert "مُرجَع" in (inv["description"] or "")
+    assert d["invoice_status"] == "unpaid" and d["refunded"] == 32.0
+    # الصرف مرتجع ⇒ اختفى من شاشة المبيعات
+    sales = client.get("/accounts/sales", headers=admin).json()
+    assert not any(s["id"] == sale["dispense_ids"][0] for s in sales)
+    # حركة مرتجع في دفتر المخزون
+    moves = client.get("/stock/movements", headers=admin,
+                       params={"item_id": item["id"]}).json()
+    assert any(m["type"] == "return_in" for m in moves)
+    # القيد العكسي: مجموعات مقلوبة تمامًا عن قيد البيع
+    entries = client.get("/accounts/ledger/entries", headers=admin).json()
+    orig = next(e for e in entries if e["id"] == sale["journal_entry_id"])
+    rev = next(e for e in entries if e["id"] == d["journal_entry_id"])
+    o_deb = round(sum(ln["debit"] for ln in orig["lines"]), 2)
+    o_cre = round(sum(ln["credit"] for ln in orig["lines"]), 2)
+    r_deb = round(sum(ln["debit"] for ln in rev["lines"]), 2)
+    r_cre = round(sum(ln["credit"] for ln in rev["lines"]), 2)
+    assert r_cre == o_deb and r_deb == o_cre and r_deb == r_cre
+    assert any(ln["account_code"] == "1000" and ln["credit"] for ln in rev["lines"])
+    # إرجاع ثانٍ مرفوض
+    again = client.post("/quick-ops/sales/return", headers=admin, json={
+        "invoice_id": sale["invoice_id"], "dispense_ids": sale["dispense_ids"],
+        "reason": "تكرار"})
+    assert again.status_code == 409
+
+
+def test_return_quick_sale_medicines_only(client, admin):
+    """بيع أدوية فقط ثم إرجاعه: الرصيد يعود بلا فاتورة ولا مستند أصناف، وجزئيًا يوازن."""
+    med = _med(client, admin, qty=15, price=8)
+    patient = _patient(client, admin)
+    sale = client.post("/quick-ops/sales", headers=admin, json={
+        "patient_id": patient["id"], "paid_amount": 10,
+        "lines": [{"kind": "med", "medication_id": med["id"], "quantity": 2}]}).json()
+    assert sale["invoice_id"] is None and sale["dispense_count"] == 1
+    assert _med_qty(client, admin, med["id"]) == 13
+
+    r = client.post("/quick-ops/sales/return", headers=admin, json={
+        "dispense_ids": sale["dispense_ids"], "reason": "دواء خاطئ"})
+    assert r.status_code == 201, r.text
+    d = r.json()
+    assert d["invoice_id"] is None and d["invoice_status"] is None
+    assert d["doc_id"] is None and d["doc_no"] is None and d["warehouse"] is None
+    assert d["returned_dispenses"] == 1 and d["returned_units"] == 2
+    assert d["refunded"] == 10.0      # دفع جزئي ⇒ الباقي كان ذمّة فقُطع قيدها
+    assert d["journal_entry_no"]
+    assert _med_qty(client, admin, med["id"]) == 15
+    assert client.post("/quick-ops/sales/return", headers=admin,
+                       json={"dispense_ids": sale["dispense_ids"],
+                             "reason": "تكرار"}).status_code == 409
+
+
+def test_return_quick_sale_validations(client, admin):
+    """كل خطأ متوقّع برسالة واضحة، وبلا تغيّر واحد في المخزون أو الفاتورة."""
+    wh = _main_wh(client, admin)
+    item = _item(client, admin, cost=10)
+    client.post("/stock/docs", headers=admin, json={
+        "doc_type": "grn", "lines": [{"item_id": item["id"], "quantity": 3,
+                                      "unit_cost": 10}]})
+    med = _med(client, admin, qty=8, price=5)
+    patient = _patient(client, admin)
+    sale = client.post("/quick-ops/sales", headers=admin, json={
+        "patient_id": patient["id"], "warehouse_id": wh["id"], "paid_amount": 6,
+        "lines": [{"item_id": item["id"], "quantity": 1, "unit_price": 10},
+                  {"kind": "med", "medication_id": med["id"], "quantity": 1}]}).json()
+    base = {"invoice_id": sale["invoice_id"], "dispense_ids": sale["dispense_ids"],
+            "reason": "سبب الإرجاع"}
+
+    assert client.post("/quick-ops/sales/return", headers=admin,
+                       json={}).status_code == 422              # السبب إلزامي
+    assert client.post("/quick-ops/sales/return", headers=admin,
+                       json={"reason": "   "}).status_code == 422
+    assert client.post("/quick-ops/sales/return", headers=admin,
+                       json={"reason": "لا هدف"}).status_code == 400
+    assert client.post("/quick-ops/sales/return", headers=admin,
+                       json={**base, "invoice_id": 999999}).status_code == 404
+    assert client.post("/quick-ops/sales/return", headers=admin,
+                       json={"dispense_ids": [999999], "reason": "x"}).status_code == 404
+    # فاتورة من الشاشة العادية بلا مستند صرف ⇒ تُرفض ولا يُلمس مخزون
+    plain = client.post("/invoices/", headers=admin, json={
+        "patient_id": patient["id"], "amount": 50, "description": "كشفية"}).json()
+    no_doc = client.post("/quick-ops/sales/return", headers=admin,
+                         json={"invoice_id": plain["id"], "reason": "تجربة"})
+    assert no_doc.status_code == 400 and "مستند الصرف" in no_doc.json()["detail"]
+
+    # ولم يتغيّر شيء بعد كل الأخطاء
+    assert _balance(client, admin, item["id"], wh["id"]) == 2
+    assert _med_qty(client, admin, med["id"]) == 7
+    inv = client.get(f"/invoices/{sale['invoice_id']}", headers=admin).json()
+    # المدفوع (6) وزّع بالتناسب: 10 من 15 للفاتورة ⇒ 4.0 بقيت كما هي
+    assert inv["status"] == "partial" and inv["paid_amount"] == 4.0
+    assert "مُرجَع" not in (inv["description"] or "")
+    assert client.get(f"/invoices/{plain['id']}", headers=admin).json()["status"] == "unpaid"
+
+
+# ===== وصل صرف الأدوية =====
+def test_quick_sale_receipt_renders(client, admin):
+    """الوصل يجمع عدة أدوية في صفحة واحدة بنظام التصميم الموحّد، ولغة/رقم خاطئ مرفوض."""
+    med1 = _med(client, admin, qty=10, price=6)
+    med2 = _med(client, admin, qty=10, price=4)
+    patient = _patient(client, admin)
+    sale = client.post("/quick-ops/sales", headers=admin, json={
+        "patient_id": patient["id"], "paid_amount": 16,
+        "lines": [{"kind": "med", "medication_id": med1["id"], "quantity": 2},
+                  {"kind": "med", "medication_id": med2["id"], "quantity": 1}]}).json()
+    ids = sale["dispense_ids"]
+    assert len(ids) == 2
+
+    ar = client.get("/quick-ops/sales/receipt", headers=admin,
+                    params=[("dispense_ids", i) for i in ids])
+    assert ar.status_code == 200, ar.text
+    assert "وصل صرف أدوية" in ar.text and med1["name"] in ar.text
+    assert med2["name"] in ar.text and patient["full_name"] in ar.text
+    assert "pk-" in ar.text and "window.print()" in ar.text
+
+    en = client.get("/quick-ops/sales/receipt", headers=admin,
+                    params=[("dispense_ids", i) for i in ids] + [("lang", "en")])
+    assert en.status_code == 200 and "Dispensing receipt" in en.text
+
+    assert client.get("/quick-ops/sales/receipt", headers=admin,
+                      params={"dispense_ids": 1, "lang": "fr"}).status_code == 400
+    assert client.get("/quick-ops/sales/receipt", headers=admin,
+                      params={"dispense_ids": 999999}).status_code == 404
+    assert client.get("/quick-ops/sales/receipt").status_code == 401
+
+
 # ===== شراء سريع =====
 def test_quick_purchase_posts_grn_bill_and_entry(client, admin):
     """شراء سريع ⇒ إذن استلام مرحّل + فاتورة مورد + قيد ذمم دائنة."""
@@ -307,7 +465,7 @@ def test_quick_transfer_rules(client, admin):
 
 # ===== الصلاحيات =====
 def test_quick_ops_require_auth_and_admin(client, admin):
-    """اللوحة والبحث لأي مستخدم مسجّل، والعمليات الثلاث للمدير فقط."""
+    """اللوحة والبحث والوصفة لأي مستخدم مسجّل، والعمليات الأربع للمدير فقط."""
     tag = uid()
     reg = client.post("/auth/register", json={
         "username": f"qo{tag}", "email": f"qo{tag}@qo.example.com",
@@ -325,6 +483,12 @@ def test_quick_ops_require_auth_and_admin(client, admin):
         ("/quick-ops/transfers", {"from_warehouse_id": wh["id"],
                                   "to_warehouse_id": wh["id"],
                                   "lines": [{"item_id": 1, "quantity": 1}]}),
+        ("/quick-ops/sales/return", {"dispense_ids": [1], "reason": "تجربة"}),
     ):
         assert client.post(path, headers=nurse, json=body).status_code == 403
+    # الوصل يقرأه أي مستخدم مسجّل (كرقم مجهول ⇒ 404 لا 403)، وبدون دخول ⇒ 401
+    assert client.get("/quick-ops/sales/receipt", headers=nurse,
+                      params={"dispense_ids": 999999}).status_code == 404
+    assert client.get("/quick-ops/sales/receipt",
+                      params={"dispense_ids": 999999}).status_code == 401
     assert client.get("/quick-ops/overview").status_code == 401

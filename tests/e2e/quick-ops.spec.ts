@@ -40,7 +40,8 @@ async function seed(request: import('@playwright/test').APIRequestContext) {
     const iRes = await request.post('/general-stock/', {
       headers: h, data: {
         code: iCode, name: `مستلزم سريع ${TAG}`, category: 'medical_supplies',
-        unit: 'قطعة', unit_cost: 10, reorder_point: 1, max_quantity: 500, is_active: true } });
+        unit: 'قطعة', unit_cost: 10, reorder_point: 1, max_quantity: 500,
+        is_active: true, barcode: `BAR${TAG}` } });
     expect(iRes.ok(), 'تعذّر إنشاء الصنف').toBeTruthy();
     item = (await iRes.json()).id;
   }
@@ -207,5 +208,115 @@ test.describe('مركز العمليات السريعة ⚡', () => {
     await page.click('#qo-tabs .tab[data-tab="recent"]');
     await expect(page.locator('#qo-body h3', { hasText: 'آخر عمليات اليوم' })).toBeVisible();
     await expectNoUiError(page);
+  });
+
+  test('مسار الباركود: Enter يضيف ويفرّغ الحقل + مسودة تعود بعد تحديث + تكرار آخر عملية', async ({ page, request }) => {
+    const s = await seed(request);
+    const grn = await request.post('/quick-ops/purchases', {
+      headers: s.headers, data: {
+        vendor_id: s.vendor, warehouse_id: s.main.id,
+        lines: [{ item_id: s.item, quantity: 10, unit_cost: 10 }] } });
+    expect(grn.ok(), 'فشل توريد الصنف').toBeTruthy();
+    const items = (await (await request.get('/general-stock/', { headers: s.headers })).json());
+    const mine = items.find((x: any) => x.code === `QI${TAG}`);
+    expect(mine && mine.barcode, 'الصنف بلا باركود لاختبار المسح').toBeTruthy();
+
+    await login(page);
+    await openView(page, 'quickops');
+
+    // 1) مسح الباركود + Enter ⇒ إضافة فورية وتفريغ الحقل لمسحٍ تالٍ
+    await page.fill('#qo-q', mine.barcode);
+    await page.press('#qo-q', 'Enter');
+    await expect(page.locator('#qo-basket tbody tr')).toHaveCount(1);
+    await expect(page.locator('#qo-q')).toHaveValue('');
+    // Enter على حقل فارغ ⇒ تلميح بلا إضافة ولا خطأ
+    await page.press('#qo-q', 'Enter');
+    await expect(page.locator('#qo-basket tbody tr')).toHaveCount(1);
+    await expectNoUiError(page);
+
+    // 2) المسودة محفوظة، وتعود بعد تحديث الصفحة
+    const draft = await page.evaluate(() => localStorage.getItem('hms_qo_draft'));
+    expect(draft, 'السلة غير محفوظة كمسودة').toBeTruthy();
+    expect(JSON.parse(draft as string).basket.length).toBe(1);
+    await page.reload();
+    if (await page.locator('#login-view').isVisible().catch(() => false)) await login(page);
+    await openView(page, 'quickops');
+    await expect(page.locator('#qo-basket tbody tr')).toHaveCount(1);
+    await expect(page.locator('#toast')).toContainText('مسودة سابقة');
+    await expectNoUiError(page);
+
+    // 3) المريض ثم الإتمام بـ Ctrl+Enter (المسار المختصر)
+    const patients = await (await request.get('/patients/?limit=1', { headers: s.headers })).json();
+    expect(patients.length, 'لا يوجد مريض للاختبار').toBeGreaterThan(0);
+    await page.fill('#qo-patient-input', (patients[0].full_name || '').slice(0, 4));
+    await page.waitForTimeout(900);
+    await page.locator('#qo-patients .qo-hit').first().click();
+    await page.press('#qo-q', 'Control+Enter');
+    await expect(page.locator('#qo-body .qo-ok')).toBeVisible();
+    await expect(page.locator('#qo-body h3', { hasText: 'تم البيع' })).toBeVisible();
+
+    // 4) بعد الإتمام: مسودة ممحوحة + لقطة عملية سابقة جاهزة للتكرار
+    expect(await page.evaluate(() => localStorage.getItem('hms_qo_draft')),
+      'المسودة بقيت بعد الإتمام').toBeNull();
+    expect(await page.evaluate(() => localStorage.getItem('hms_qo_lastop')),
+      'لا لقطة عملية سابقة للتكرار').toBeTruthy();
+
+    await page.click('#qo-body button:has-text("عملية جديدة")');
+    const repeat = page.locator('button:has-text("تكرار آخر عملية")');
+    await expect(repeat).toHaveCount(1);
+    await repeat.click();
+    await expect(page.locator('#qo-basket tbody tr')).toHaveCount(1);
+    await expect(page.locator('#qo-basket tbody tr').first()).toContainText(`مستلزم سريع ${TAG}`);
+    await expectNoUiError(page);
+  });
+
+  test('وصل صرف الأدوية ثم إرجاع البيع السريع من البطاقة', async ({ page, request }) => {
+    const s = await seed(request);
+    await login(page);
+    await openView(page, 'quickops');
+
+    const qty = async () => (await (await request.get('/medications/', { headers: s.headers })).json())
+      .find((m: any) => m.id === s.med).quantity;
+    const nonReturned = async () =>
+      (await (await request.get('/dispenses/', { headers: s.headers })).json())
+        .filter((d: any) => d.medication_id === s.med && !d.returned_at).length;
+    const q0 = await qty();
+    const d0 = await nonReturned();
+
+    // بيع أدوية فقط (بلا فاتورة أصناف) ⇒ زر الوصل يظهر
+    const patients = await (await request.get('/patients/?limit=1', { headers: s.headers })).json();
+    await page.fill('#qo-patient-input', (patients[0].full_name || '').slice(0, 4));
+    await page.waitForTimeout(900);
+    await page.locator('#qo-patients .qo-hit').first().click();
+    await pick(page, '#qo-q', `دواء سريع ${TAG}`);
+    await page.fill('#qo-paid', '9999');
+    await page.click('#qo-submit');
+    await expect(page.locator('#qo-body h3', { hasText: 'تم البيع' })).toBeVisible();
+    await expect(page.locator('button:has-text("طباعة الفاتورة")')).toHaveCount(0);
+
+    // الوصل: نافذة طباعة بنفس نظام التصميم الموحّد تحمل الدواء والمريض
+    const receiptBtn = page.locator('button:has-text("وصل صرف الأدوية")');
+    await expect(receiptBtn).toHaveCount(1);
+    const popupPromise = page.waitForEvent('popup');
+    await receiptBtn.click();
+    const popup = await popupPromise;
+    await expect(popup.locator('body')).toContainText('وصل صرف أدوية');
+    await expect(popup.locator('body')).toContainText(`دواء سريع ${TAG}`);
+    await popup.close();
+
+    // الإرجاع: سبب إلزامي عبر prompt ثم تأكيد confirm
+    page.on('dialog', async (d) => {
+      if (d.type() === 'prompt') await d.accept('خطأ في الطلب');
+      else await d.accept();
+    });
+    await page.click('#qo-body button:has-text("إرجاع البيع")');
+    await expect(page.locator('#qo-body h3', { hasText: 'تم إرجاع البيع' })).toBeVisible();
+    await expect(page.locator('#qo-body .pill.paid')).toContainText('رُدّ');
+    await expect(page.locator('#qo-body button:has-text("إرجاع البيع")')).toHaveCount(0);
+    await expectNoUiError(page);
+
+    // الأثر على الخادم: الدواء عاد، والصرف عُلِّم مرتجعًا
+    expect(await qty(), 'لم يعود رصيد الدواء بعد الإرجاع').toBe(q0);
+    expect(await nonReturned(), 'لم يُعلَّم الصرف كمرتجع').toBe(d0);
   });
 });

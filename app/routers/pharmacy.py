@@ -329,6 +329,40 @@ def _recompute_prescription_status(db: Session, prescription_id: int) -> None:
         rx.status = "PARTIAL"
 
 
+def apply_dispense_return(db: Session, d: Dispense, reason: str, username: str) -> int:
+    """يُرجع صرفًا واحدًا **بلا commit** — لتستعمله عملية أكبر معًا.
+
+    يزيد رصيد الدواء بحركة `return`، يُسقط أثر الصرف من حسابات المبيعات
+    ويوافق الوصفة إن وُجدت، ويعيده بحالة مرتجعة. يُعيد عدد الوحدات المرتجعة.
+    """
+    med = db.query(Medication).filter(Medication.id == d.medication_id).first()
+    if med:
+        med.quantity += d.quantity
+        db.add(StockMovement(
+            medication_id=med.id,
+            type="return",
+            change=d.quantity,
+            quantity_after=med.quantity,
+            note=f"إرجاع صرف #{d.id}: {reason}",
+            made_by=username,
+        ))
+
+    # إن كان الصرف مرتبطًا بوصفة — تراجع الكمية المنصَّفة وتُعدَّل الحالة
+    if d.prescription_id:
+        item = (db.query(PrescriptionItem)
+                .filter(PrescriptionItem.prescription_id == d.prescription_id,
+                        PrescriptionItem.medication_id == d.medication_id)
+                .first())
+        if item:
+            item.dispensed_quantity = max(0, (item.dispensed_quantity or 0) - d.quantity)
+        _recompute_prescription_status(db, d.prescription_id)
+
+    d.returned_at = datetime.now()
+    d.return_reason = reason
+    d.returned_by = username
+    return d.quantity
+
+
 @dispenses_router.post("/{dispense_id}/return", response_model=DispenseInDB,
                        summary="إرجاع صرف سابق")
 async def return_dispense(
@@ -345,31 +379,7 @@ async def return_dispense(
     if d.returned_at is not None:
         raise HTTPException(status_code=409, detail="عملية الصرف مُرجَعة بالفعل")
 
-    med = db.query(Medication).filter(Medication.id == d.medication_id).first()
-    if med:
-        med.quantity += d.quantity
-        db.add(StockMovement(
-            medication_id=med.id,
-            type="return",
-            change=d.quantity,
-            quantity_after=med.quantity,
-            note=f"إرجاع صرف #{d.id}: {payload.reason}",
-            made_by=current_user.username,
-        ))
-
-    # إن كان الصرف مرتبطًا بوصفة — تراجع الكمية المنصَّفة وتُعدَّل الحالة
-    if d.prescription_id:
-        item = (db.query(PrescriptionItem)
-                .filter(PrescriptionItem.prescription_id == d.prescription_id,
-                        PrescriptionItem.medication_id == d.medication_id)
-                .first())
-        if item:
-            item.dispensed_quantity = max(0, (item.dispensed_quantity or 0) - d.quantity)
-        _recompute_prescription_status(db, d.prescription_id)
-
-    d.returned_at = datetime.now()
-    d.return_reason = payload.reason
-    d.returned_by = current_user.username
+    apply_dispense_return(db, d, payload.reason, current_user.username)
     db.commit()
     db.refresh(d)
     return d
