@@ -296,24 +296,29 @@ def test_financials_admin_only(client, admin):
 def test_visit_stats_new_returning_emergency(client, admin):
     d = _mk_doctor(client, admin)
     now = datetime.now()
+    # إحصاءات /chart مقيّدة بحدود الشهر الحالي ([1 الشهر، 1 التالي)) ⇒ تُثبَّت
+    # مواعيد الاختبار داخله مهما كان تاريخ التشغيل، وإلّا فشل الاختبار آخر
+    # أيام الشهر (مثلًا في اليوم 28 يقع now+3 في الشهر التالي).
+    month_start = datetime(now.year, now.month, 1)
+    in_month = month_start + timedelta(days=1)     # اليوم الثاني من الشهر
     p_new = _mk_patient(client, admin)
     p_back = _mk_patient(client, admin)
 
-    # موعد قديم (لوقت مختلف) ⇒ المريض يصبح «عائدًا»؛ لا يمكن حجز موعدين
+    # موعد قديم (في شهر سابق) ⇒ المريض يصبح «عائدًا»؛ لا يمكن حجز موعدين
     # للطبيب في نفس اللحظة (قاعدة منع التعارض في appointments).
     client.post("/appointments/", headers=admin, json={
         "patient_id": p_back, "doctor_id": d["id"],
-        "appointment_date": (now - timedelta(days=40)).isoformat()})
+        "appointment_date": (month_start - timedelta(days=40)).isoformat()})
     client.post("/appointments/", headers=admin, json={
         "patient_id": p_back, "doctor_id": d["id"],
-        "appointment_date": (now + timedelta(days=1)).isoformat()})
+        "appointment_date": (in_month + timedelta(days=1)).isoformat()})
     client.post("/appointments/", headers=admin, json={
         "patient_id": p_new, "doctor_id": d["id"],
-        "appointment_date": (now + timedelta(days=2)).isoformat(),
+        "appointment_date": (in_month + timedelta(days=2)).isoformat(),
         "reason": "طوارئ ليلي"})
     r = client.post("/appointments/", headers=admin, json={
         "patient_id": _mk_patient(client, admin), "doctor_id": d["id"],
-        "appointment_date": (now + timedelta(days=3)).isoformat()})
+        "appointment_date": (in_month + timedelta(days=3)).isoformat()})
     assert r.status_code == 200, r.text
     client.put(f"/appointments/{r.json()['id']}", headers=admin,
                json={"status": "cancelled"})

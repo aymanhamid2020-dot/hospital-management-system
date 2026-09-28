@@ -749,7 +749,7 @@ python seed_demo.py      # 5 أقسام، 6 أطباء (demo_doc1..6/demo12345)�
 
 ### الاختبارات
 ```bash
-python -m pytest                        # 468 اختبارًا آليًا
+python -m pytest                        # 487 اختبارًا آليًا
 python tests/stack_check.py             # 93 فحصًا — BASE_URL / WAIT
 python tests/live_container_test.py     # الفحص الحي داخل الحاوية (137 فحصًا — LIVE_BASE)
 python tests/er_flow_check.py           # 🚑 تدفق الطوارئ حيًا (20 فحصًا — يحتاج خادمًا على 8001)

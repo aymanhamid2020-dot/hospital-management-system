@@ -71,9 +71,18 @@ def test_list_search_is_field_scoped_and_case_insensitive(client, admin):
 
 
 def test_list_search_ignores_dates_and_other_columns(client, admin):
-    """تاريخ الإنشاء لم يكن هدف البحث — كان يُطابق في الواجهة (نص الصف)."""
+    """تاريخ الإنشاء لم يكن هدف البحث — كان يُطابق في الواجهة (نص الصف).
+
+    التحقّق مروِن لئلا يُفشل تصادم عشوائي في معرّفات (uuid) مرضى أنشأتهم
+    اختبارات أخرى: أي نتيجة يجب أن يفسّرها حقل نصي يُبحث فيه فعلًا
+    (اسم/هاتف/هوية/بريد/رقم ملف) لا عمود زمني.
+    """
     _mk(client, admin)
-    assert client.get("/patients/", headers=admin, params={"search": "2006"}).json() == []
+    rows = client.get("/patients/", headers=admin,
+                      params={"search": "2006"}).json()
+    text_cols = ("full_name", "phone", "national_id", "email", "file_no")
+    for p in rows:
+        assert "2006" in " ".join(str(p.get(c) or "") for c in text_cols), p
 
 
 def test_list_requires_auth(client):
