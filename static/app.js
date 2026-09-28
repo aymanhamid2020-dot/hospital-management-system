@@ -4779,9 +4779,12 @@ function qoPrintReceipt() {
   const box = QO.last;
   const d = box && box.kind === 'sale' ? box.data : null;
   if (!d || !(d.dispense_ids || []).length) { toast('لا توجد أدوية في هذه العملية', true); return; }
+  /* autoprint=1 ⇒ الخادم يُدرج نصًا يفتح نافذة الطباعة على الطابعة
+     الافتراضية فور تحميل الوصل بدل إرضاظ الصفحة فقط */
   openPrint('/quick-ops/sales/receipt?' +
-    d.dispense_ids.map(i => 'dispense_ids=' + i).join('&') + '&lang=' + LANG)
-    .then(() => toast('تم فتح الوصل للطباعة ✅'))
+    d.dispense_ids.map(i => 'dispense_ids=' + i).join('&') + '&lang=' + LANG +
+    '&autoprint=1')
+    .then(() => toast('تم فتح الوصل على الطابعة ✅'))
     .catch(e => toast(e.message, true));
 }
 

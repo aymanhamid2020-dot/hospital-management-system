@@ -294,7 +294,14 @@ test.describe('مركز العمليات السريعة ⚡', () => {
     await expect(page.locator('#qo-body h3', { hasText: 'تم البيع' })).toBeVisible();
     await expect(page.locator('button:has-text("طباعة الفاتورة")')).toHaveCount(0);
 
-    // الوصل: نافذة طباعة بنفس نظام التصميم الموحّد تحمل الدواء والمريض
+    // الوصل: نافذة طباعة بنفس نظام التصميم الموحّد تحمل الدواء والمريض —
+    // ويفتح نافذة الطباعة تلقائيًّا (autoprint=1). نعوّض window.print في
+    // السياق قبل الفتح حتى لا يحجب محرّك الطباعة الاختبار، ثم نتحقّق
+    // أنّ الطباعة التلقائية استُدعيت فعلًا بعد تحميل الوصل.
+    await page.context().addInitScript(() => {
+      (window as any).__printed = false;
+      window.print = () => { (window as any).__printed = true; };
+    });
     const receiptBtn = page.locator('button:has-text("وصل صرف الأدوية")');
     await expect(receiptBtn).toHaveCount(1);
     const popupPromise = page.waitForEvent('popup');
@@ -302,6 +309,9 @@ test.describe('مركز العمليات السريعة ⚡', () => {
     const popup = await popupPromise;
     await expect(popup.locator('body')).toContainText('وصل صرف أدوية');
     await expect(popup.locator('body')).toContainText(`دواء سريع ${TAG}`);
+    await expect.poll(() => popup.evaluate(() => (window as any).__printed),
+      { timeout: 10_000, message: 'الطباعة التلقائية على الطابعة الافتراضية لم تُستدعَ' })
+      .toBe(true);
     await popup.close();
 
     // الإرجاع: سبب إلزامي عبر prompt ثم تأكيد confirm

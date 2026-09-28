@@ -636,8 +636,13 @@ def quick_sale_return(payload: QuickSaleReturnIn, db: Session = Depends(get_db),
 
 
 # ===== 🧾 وصل صرف الأدوية (بيع بلا فاتورة أصناف) =====
-def _quick_receipt_html(dsps: List[Dispense], lang: str) -> str:
-    """وصل صرف أدوية لعدة أدوية في مسح واحد — نظام التصميم الموحّد `print_kit`."""
+def _quick_receipt_html(dsps: List[Dispense], lang: str,
+                        autoprint: bool = False) -> str:
+    """وصل صرف أدوية لعدة أدوية في مسح واحد — نظام التصميم الموحّد `print_kit`.
+
+    `autoprint` ⇒ يُلحق نصًّا صغيرًا يفتح نافذة الطباعة على الطابعة الافتراضية
+    فور اكتمال تحميل الوصل (زر «وصل صرف الأدوية» في البيع السريع).
+    """
     from app.currency import base_currency
     from app.print_kit import (foot_html, grid_html, head_html, ltr_html,
                                page_html, sign_html, tiles_html)
@@ -693,18 +698,29 @@ def _quick_receipt_html(dsps: List[Dispense], lang: str) -> str:
 {foot_html(("وصل صرف أدوية — " + patient) if not en
            else ("Dispensing receipt — " + patient), lang)}
 """
-    return page_html(f"{title} #{first.id}", body, lang)
+    print_js = "" if not autoprint else """
+<script>/* 🖨 فتح نافذة الطباعة على الطابعة الافتراضية بعد تحميل الوصل */
+(function () {
+  function go() { try { window.focus(); window.print(); } catch (e) {} }
+  if (document.readyState === 'complete') { setTimeout(go, 250); }
+  else { window.addEventListener('load', function () { setTimeout(go, 250); }); }
+})();
+</script>
+"""
+    return page_html(f"{title} #{first.id}", body + print_js, lang)
 
 
 @router.get("/sales/receipt", summary="وصل صرف أدوية (HTML للطباعة)")
 def quick_sale_receipt(dispense_ids: List[int] = Query(..., description="أرقام عمليات الصرف"),
                        lang: str = Query("ar", description="ar أو en"),
+                       autoprint: bool = Query(False, description="فتح نافذة الطباعة على الطابعة الافتراضية فور التحميل"),
                        db: Session = Depends(get_db),
                        _user: User = Depends(get_current_user)):
     """وصل قصير لعملية بيع أدوية بلا فاتورة أصناف: المريض والأدوية والأسعار والإجمالي.
 
     يُفتح من زر «🧾 وصل صرف الأدوية» في بطاقة نتيجة البيع السريع، ويلتزم بنظام
     التصميم الموحّد نفسه (شعار الجهة + جدول + ملخص + توقيعات + تذييل).
+    `autoprint=1` يجعل الوصل يطبع نفسه على الطابعة الافتراضية فور فتحه.
     """
     if lang not in ("ar", "en"):
         raise HTTPException(400, "lang يجب أن يكون ar أو en")
@@ -716,7 +732,8 @@ def quick_sale_receipt(dispense_ids: List[int] = Query(..., description="أرق�
     if missing:
         raise HTTPException(404, "عمليات الصرف غير موجودة: "
                              + "، ".join(f"#{i}" for i in missing))
-    return HTMLResponse(_quick_receipt_html([found[i] for i in wanted], lang))
+    return HTMLResponse(_quick_receipt_html([found[i] for i in wanted], lang,
+                                            autoprint=autoprint))
 
 
 # ===== 📥 شراء سريع =====

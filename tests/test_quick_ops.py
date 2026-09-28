@@ -374,6 +374,32 @@ def test_quick_sale_receipt_renders(client, admin):
     assert client.get("/quick-ops/sales/receipt").status_code == 401
 
 
+def test_quick_sale_receipt_autoprint(client, admin):
+    """`autoprint=1` ⇒ الوصل يفتح نافذة الطباعة تلقائيًّا على الطابعة الافتراضية."""
+    med = _med(client, admin, qty=10, price=5)
+    patient = _patient(client, admin)
+    sale = client.post("/quick-ops/sales", headers=admin, json={
+        "patient_id": patient["id"], "paid_amount": 10,
+        "lines": [{"kind": "med", "medication_id": med["id"], "quantity": 2}]}).json()
+    ids = [("dispense_ids", i) for i in sale["dispense_ids"]]
+
+    auto = client.get("/quick-ops/sales/receipt", headers=admin,
+                      params=ids + [("autoprint", 1)])
+    assert auto.status_code == 200, auto.text
+    assert "الطابعة الافتراضية" in auto.text       # نص الطباعة التلقائية المُلحق
+    assert auto.text.count("window.print()") >= 2   # زر الطباعة + الطباعة التلقائية
+    assert "setTimeout" in auto.text                # تُؤجَّل قليلًا حتى اكتمال التحميل
+
+    plain = client.get("/quick-ops/sales/receipt", headers=admin, params=ids)
+    assert plain.status_code == 200
+    assert "الطابعة الافتراضية" not in plain.text   # بلا تفعيل ⇒ بلا نص تلقائي
+
+    # قيمة غير صالحة ⇒ رفض التحقق السريع 422
+    bad = client.get("/quick-ops/sales/receipt", headers=admin,
+                     params=ids + [("autoprint", "maybe")])
+    assert bad.status_code == 422, bad.text
+
+
 # ===== شراء سريع =====
 def test_quick_purchase_posts_grn_bill_and_entry(client, admin):
     """شراء سريع ⇒ إذن استلام مرحّل + فاتورة مورد + قيد ذمم دائنة."""
